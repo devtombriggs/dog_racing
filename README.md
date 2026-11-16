@@ -1,16 +1,25 @@
-# React + Vite
+# Dog Racing
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Choose **Wendover Woods** or **Frostpeak Alpine Circuit** from the main menu, then start Single Player or Host Game. Multiplayer guests use the host's map. The host can change maps in the lobby; changing the course clears everyone's ready status.
 
-Currently, two official plugins are available:
+Pablo (Alaskan Klee Kai) is available in dog selection alongside Pippa, Meela, Poppy and Ralph. His editable source, renders and animation viewer are in `../pablo_klee_kai/`.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Meela now uses the updated detailed model and the same seven-clip motion-capture workflow as the newer dogs, with stride playback matched to movement speed. Her editable source, previews and export validator are in `../meela_greyhound/`; her previous model is preserved in its `v1/` folder.
 
-## React Compiler
+Controls: **W / Up Arrow** accelerates through the gaits to sprint speed automatically; **S / Down Arrow** brakes, then reverses. **A / D** or **Left / Right Arrow** steer. Press **Space** or scroll the **mouse wheel down** over the race view to jump. Shift is no longer needed.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Run locally with Node 24 in two terminals:
 
-## Expanding the ESLint configuration
+```sh
+node server/server.js
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```sh
+npm run dev
+```
+
+Restart the backend after updating: both client and server need the map selection support. For Docker, rebuild both services with `docker compose up --build -d`.
+
+Checks: `npm test`, `npm run lint`, and `npm run build`. Tests exercise the socket handlers in memory, map-specific laps and start positions, and the Frostpeak GLB geometry/heightmap. They do not replace a browser playtest.
+
+Map definitions live in `shared/maps.js`. `shared/frostpeak.json` is copied from `../frostpeak_alpine_circuit/frostpeak_track_config.json`; the GLB and heightmap are copied into `public/models/`. Refresh all three copies if the source map is regenerated.

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { io } from 'socket.io-client';
+import { MAPS, DEFAULT_MAP, sampleGroundHeight } from '../shared/maps.js';
+import { prepareHeadLook, applyHeadLook } from './headLook.js';
 
 // ---------------------------------
 // DOG CONFIGURATION
@@ -27,7 +29,14 @@ const DOGS = {
   second_dog: {
     name: 'Meela (Greyhound)',
     model: '/models/meela_greyhound.glb',
-    scale: 3
+    scale: 3,
+    // meela_greyhound/clip_info.json
+    gaitSpeed: {
+      Walk: 1.52,
+      Trot: 2.587,
+      Run: 4.536,
+      Sprint: 7.06
+    }
   },
   black_lab: {
     name: 'Poppy (Black Labrador)',
@@ -39,6 +48,23 @@ const DOGS = {
       Trot: 2.05,
       Run: 3.6,
       Sprint: 5.6
+    }
+  },
+  pablo: {
+    name: 'Pablo (Alaskan Klee Kai)',
+    model: '/models/pablo.glb',
+    scale: 3,
+    size: 0.7,
+    strideBands: 0.7,
+    maxStrideRate: 1.6,
+    cameraOffset: [0, 3.1, -6.4],
+    cameraLookHeight: 1.3,
+    // pablo_klee_kai/clip_info.json (exported at 70% of the build frame)
+    gaitSpeed: {
+      Walk: 0.844,
+      Trot: 1.436,
+      Run: 2.518,
+      Sprint: 3.919
     }
   },
   ralph: {
@@ -203,6 +229,7 @@ function collectBones(root) {
     }
   });
 
+  prepareHeadLook(root, bones);
   return bones;
 }
 
@@ -225,6 +252,7 @@ function applyTurnPose(model, bones, steer, effort) {
       bone.rotateZ(BEND_SIGN * bend * weight);
     }
   }
+  applyHeadLook(model, steer);
 }
 
 function formatTime(seconds) {
@@ -255,13 +283,13 @@ function App() {
   const surfaceDisplayRef = useRef(null);
 
   const [screen, setScreen] = useState('menu');
+  const [selectedMap, setSelectedMap] = useState(DEFAULT_MAP);
   const [room, setRoom] = useState(null);
 
   const [roomCodeInput, setRoomCodeInput] =
     useState('');
 
-  const [selectedDog, setSelectedDog] =
-    useState(null);
+  const [socketId, setSocketId] = useState(null);
 
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
@@ -288,10 +316,12 @@ function App() {
     function handleConnect() {
       console.log('Connected:', socket.id);
       setConnected(true);
+      setSocketId(socket.id);
     }
 
     function handleDisconnect() {
       setConnected(false);
+      setSocketId(null);
     }
 
     function handleLobbyUpdated(updatedRoom) {
@@ -307,6 +337,7 @@ function App() {
       raceStartRef.current = null;
 
       setRacePhase('Loading...');
+      setTotalCheckpoints(data.totalCheckpoints ?? MAPS[data.mapId ?? DEFAULT_MAP].checkpoints.length);
       setLap(1);
       setCheckpoint(0);
       setFinishTime(null);
@@ -314,6 +345,7 @@ function App() {
       const updatedRoom = {
         ...roomRef.current,
         status: 'loading',
+        mapId: data.mapId ?? DEFAULT_MAP,
         players: data.players
       };
 
@@ -423,6 +455,7 @@ function App() {
 
     socketRef.current.emit(
       'hostGame',
+      { mapId: selectedMap },
       (response) => {
         if (!response?.success) {
           setError(
@@ -433,7 +466,6 @@ function App() {
 
         roomRef.current = response.room;
         setRoom(response.room);
-        setSelectedDog(null);
         setScreen('selection');
       }
     );
@@ -455,6 +487,7 @@ function App() {
 
     socketRef.current.emit(
       'hostGame',
+      { mapId: selectedMap },
       (response) => {
         if (!response?.success) {
           singlePlayerRef.current = false;
@@ -469,7 +502,6 @@ function App() {
 
         roomRef.current = response.room;
         setRoom(response.room);
-        setSelectedDog(null);
         setScreen('selection');
       }
     );
@@ -496,15 +528,21 @@ function App() {
 
         roomRef.current = response.room;
         setRoom(response.room);
-        setSelectedDog(null);
         setScreen('selection');
       }
     );
   }
 
   // ---------------------------------
-  // SELECT DOG
+  // MAP AND DOG SELECTION
   // ---------------------------------
+
+  function selectMap(mapId) {
+    setError('');
+    socketRef.current?.emit('selectMap', { mapId }, (response) => {
+      if (!response?.success) setError(response?.error || 'Failed to select map');
+    });
+  }
 
   function selectDog(dogId) {
     setError('');
@@ -527,8 +565,6 @@ function App() {
           );
           return;
         }
-
-        setSelectedDog(dogId);
 
         // Normal multiplayer lobby
         if (!singlePlayerRef.current) {
@@ -622,7 +658,6 @@ function App() {
     socketRef.current?.emit('leaveGame');
 
     setRoom(null);
-    setSelectedDog(null);
     setError('');
     setRacePhase('');
     setFinishTime(null);
@@ -643,6 +678,8 @@ function App() {
     if (!container || !socket || !currentRoom) {
       return;
     }
+
+    const map = MAPS[currentRoom.mapId ?? DEFAULT_MAP];
 
     // ---------------------------------
     // SCENE
@@ -685,6 +722,21 @@ function App() {
     sunlight.position.set(5, 10, 5);
     scene.add(sunlight);
 
+    if (map.lighting) {
+      const light = map.lighting;
+      scene.background = new THREE.Color(light.background);
+      scene.fog = new THREE.Fog(light.fogColor, light.fogNear, light.fogFar);
+      camera.far = 2200;
+      camera.updateProjectionMatrix();
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = light.exposure;
+      scene.remove(ambientLight);
+      scene.add(new THREE.HemisphereLight(light.hemisphereSky, light.hemisphereGround, light.hemisphereIntensity));
+      sunlight.color.set(light.sunColor);
+      sunlight.intensity = light.sunIntensity;
+      sunlight.position.fromArray(light.sunDirection).multiplyScalar(250);
+    }
+
     const loader = new GLTFLoader();
     let isMounted = true;
 
@@ -697,8 +749,7 @@ function App() {
     let remoteModelsPending = 0;
     let readySent = false;
 
-    // Collision geometry comes from the existing Wendover Woods GLB.
-    // Only matching meshes are collidable; terrain and track remain passable.
+    // Frostpeak supplies simplified hidden colliders; Wendover uses visual meshes.
     const trackMeshes = [];
     const groundMeshes = [];   // track + terrain tiles: what the dogs stand on
     const waterMeshes = [];
@@ -711,6 +762,7 @@ function App() {
     const OFF_TRACK_ACCELERATION_MULTIPLIER = 0.6;
     const DOG_COLLISION_RADIUS = 0.65;
     let offTrack = false;
+    let heightmap = null;
 
     function isTrackSurface(position) {
       // Fail open if the GLB has no identifiable track surface.
@@ -728,6 +780,16 @@ function App() {
     // dog, so inside a tunnel or on the bridge it finds the surface the dog
     // is on, not the roof above or the stream below.
     function groundHeightAt(position, fallback = 0) {
+      if (heightmap) {
+        // The track ray takes precedence on the bridge; snow uses O(1) sampling.
+        groundRaycaster.set(new THREE.Vector3(position.x, position.y + 60, position.z), down);
+        groundRaycaster.near = 0;
+        groundRaycaster.far = 200;
+        const hit = groundRaycaster.intersectObjects(groundMeshes, false)[0];
+        if (hit?.object.name === 'Collision_Track_Surface') return hit.point.y;
+        const snow = sampleGroundHeight(heightmap, map.heightmap, position.x, position.z);
+        return Math.max(snow, hit?.point.y ?? snow);
+      }
       if (groundMeshes.length === 0) return fallback;
 
       for (const lift of [3, 60]) {
@@ -849,16 +911,30 @@ function App() {
     }
 
     // ---------------------------------
-    // LOAD WENDOVER WOODS
+    // LOAD SELECTED MAP
     // ---------------------------------
 
-    loader.load(
-      '/models/wendover_woods.glb',
-      (gltf) => {
+    const mapAbort = new AbortController();
+    const heightmapRequest = map.heightmap
+      ? fetch(map.heightmap.file, { signal: mapAbort.signal }).then(async response => {
+          if (!response.ok) throw new Error(`Heightmap request failed: ${response.status}`);
+          const buffer = await response.arrayBuffer();
+          if (buffer.byteLength !== map.heightmap.width * map.heightmap.height * 4) {
+            throw new Error('Invalid heightmap size');
+          }
+          return new Float32Array(buffer);
+        })
+      : Promise.resolve(null);
+
+    Promise.all([loader.loadAsync(map.model), heightmapRequest]).then(
+      ([gltf, heights]) => {
         if (!isMounted) return;
 
+        heightmap = heights;
         scene.add(gltf.scene);
         gltf.scene.updateMatrixWorld(true);
+        const collisionRoot = gltf.scene.getObjectByName('Frostpeak_Collision');
+        if (collisionRoot) collisionRoot.visible = false;
 
         gltf.scene.traverse((object) => {
           if (!object.isMesh) return;
@@ -867,17 +943,22 @@ function App() {
             name += ` ${node.name}`;
           }
           name = name.toLowerCase();
-          if (/track[_\s-]*surface/.test(name)) {
+          const isCollision = /collision_/.test(object.name.toLowerCase());
+          const track = collisionRoot
+            ? object.name === 'Collision_Track_Surface'
+            : /track[_\s-]*surface/.test(name);
+          if (track) {
             trackMeshes.push(object);
             groundMeshes.push(object);
           }
-          if (/terrain[_\s-]*ground/.test(name)) {
-            groundMeshes.push(object);
-          }
-          if (/water/.test(name)) {
-            waterMeshes.push(object);
-          }
-          if (/(scenery[_\s-]*(trees|rocks|fences)|obstacle[_\s-]*log)/.test(name)) {
+          if (!collisionRoot && /terrain[_\s-]*ground/.test(name)) groundMeshes.push(object);
+          // Stand on the frozen surface above the lake/stream bed.
+          if (collisionRoot && /^Water_Frozen_/.test(object.name)) groundMeshes.push(object);
+          if (!collisionRoot && /water/.test(name)) waterMeshes.push(object);
+          const obstacle = collisionRoot
+            ? isCollision && !['Collision_Track_Surface', 'Collision_Terrain'].includes(object.name)
+            : /(scenery[_\s-]*(trees|rocks|fences)|obstacle[_\s-]*log)/.test(name);
+          if (obstacle) {
             obstacleMeshes.push(object);
             obstacleBoxes.push(new THREE.Box3().setFromObject(object));
             // Raycasts must hit either side of thin fence and log geometry.
@@ -908,15 +989,8 @@ function App() {
 
         trackLoaded = true;
         notifyRaceLoaded();
-      },
-      undefined,
-      (error) => {
-        handleLoadError(
-          'Wendover Woods',
-          error
-        );
       }
-    );
+    ).catch(error => handleLoadError(map.name, error));
 
     // ---------------------------------
     // LOCAL PLAYER
@@ -1294,54 +1368,66 @@ function App() {
     const gravity = 16;
 
     // ---------------------------------
-    // KEYBOARD CONTROLS
+    // KEYBOARD AND MOUSE CONTROLS
     // ---------------------------------
 
     const keys = {};
+    const controlKeys = new Set([
+      'KeyW', 'KeyA', 'KeyS', 'KeyD',
+      'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space'
+    ]);
 
-    function handleKeyDown(event) {
+    function tryJump() {
       if (
         !raceGoRef.current ||
-        raceFinishedRef.current
+        raceFinishedRef.current ||
+        isJumping ||
+        !dogMixer
       ) {
-        if (event.code === 'Space') {
-          event.preventDefault();
-        }
-
         return;
       }
 
-      keys[event.code] = true;
+      isJumping = true;
+      isLanding = false;
+      verticalVelocity = jumpForce;
+      playAnimation('Jump');
 
-      if (event.code === 'Space') {
-        event.preventDefault();
-
-        if (
-          !event.repeat &&
-          !isJumping &&
-          dogMixer
-        ) {
-          isJumping = true;
-          isLanding = false;
-          verticalVelocity =
-            jumpForce;
-
-          playAnimation('Jump');
-
-          // A running dog takes off in stride: skip the standing crouch
-          if (
-            currentAction === actions.Jump &&
-            Math.abs(currentSpeed) > RUNNING_JUMP_SPEED
-          ) {
-            currentAction.time = 0.2;
-          }
-        }
+      // A running dog takes off in stride: skip the standing crouch.
+      if (
+        currentAction === actions.Jump &&
+        Math.abs(currentSpeed) > RUNNING_JUMP_SPEED
+      ) {
+        currentAction.time = 0.2;
       }
     }
 
+    function handleKeyDown(event) {
+      if (!controlKeys.has(event.code)) return;
+      event.preventDefault();
+      if (!raceGoRef.current || raceFinishedRef.current) return;
+
+      keys[event.code] = true;
+      if (event.code === 'Space' && !event.repeat) tryJump();
+    }
+
+    function handleWheel(event) {
+      if (event.deltaY <= 0 || event.ctrlKey) return;
+      event.preventDefault();
+      tryJump();
+    }
+
     function handleKeyUp(event) {
+      if (!controlKeys.has(event.code)) return;
+      event.preventDefault();
       keys[event.code] = false;
     }
+
+    function clearKeys() {
+      Object.keys(keys).forEach(key => { keys[key] = false; });
+    }
+
+    renderer.domElement.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('blur', clearKeys);
 
     window.addEventListener(
       'keydown',
@@ -1485,10 +1571,6 @@ function App() {
       // ACCELERATION AND BRAKING
       // ---------------------------------
 
-      const isSprinting =
-        keys.ShiftLeft ||
-        keys.ShiftRight;
-
       // In the air the dog is off nothing: that is how the stream is cleared
       offTrack = !isJumping && !isTrackSurface(player.position);
       const terrainMultiplier = offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
@@ -1499,7 +1581,7 @@ function App() {
         1.08
       );
       const maxSpeed =
-        (isSprinting ? sprintSpeed : runSpeed) *
+        sprintSpeed *
         terrainMultiplier *
         hillMultiplier;
       const effectiveAcceleration = acceleration *
@@ -1509,7 +1591,7 @@ function App() {
         surfaceDisplayRef.current.style.color = offTrack ? '#ffbc75' : '#9fe49b';
       }
 
-      if (keys.KeyW) {
+      if (keys.KeyW || keys.ArrowUp) {
         currentSpeed +=
           effectiveAcceleration * delta;
 
@@ -1517,7 +1599,7 @@ function App() {
           currentSpeed,
           maxSpeed
         );
-      } else if (keys.KeyS) {
+      } else if (keys.KeyS || keys.ArrowDown) {
         currentSpeed -=
           braking * delta;
 
@@ -1584,8 +1666,8 @@ function App() {
       );
 
       const turnInput =
-        (keys.KeyA ? 1 : 0) -
-        (keys.KeyD ? 1 : 0);
+        (keys.KeyA || keys.ArrowLeft ? 1 : 0) -
+        (keys.KeyD || keys.ArrowRight ? 1 : 0);
 
       // The turn builds and fades: a running dog cannot change line instantly
       steer +=
@@ -1665,7 +1747,7 @@ function App() {
       // Recheck at the new location, so the slowdown begins immediately.
       offTrack = !isJumping && !isTrackSurface(player.position);
       if (offTrack) {
-        const offTrackLimit = (isSprinting ? sprintSpeed : runSpeed) *
+        const offTrackLimit = sprintSpeed *
           OFF_TRACK_SPEED_MULTIPLIER;
         currentSpeed = Math.min(currentSpeed, offTrackLimit);
       }
@@ -1959,6 +2041,7 @@ function App() {
 
     return () => {
       isMounted = false;
+      mapAbort.abort();
 
       cancelAnimationFrame(
         animationId
@@ -1983,6 +2066,8 @@ function App() {
         'keyup',
         handleKeyUp
       );
+      window.removeEventListener('blur', clearKeys);
+      renderer.domElement.removeEventListener('wheel', handleWheel);
 
       timer.disconnect();
 
@@ -2062,7 +2147,16 @@ function App() {
       <div style={pageStyle}>
         <div style={panelStyle}>
           <h1>Dog Racing</h1>
-          <p>Wendover Woods</p>
+          <label htmlFor="menu-map">Choose map</label>
+          <select
+            id="menu-map"
+            value={selectedMap}
+            onChange={event => setSelectedMap(event.target.value)}
+            style={{ display: 'block', width: '100%', padding: 12, marginTop: 8, fontSize: 16 }}
+          >
+            {Object.entries(MAPS).map(([id, map]) => <option key={id} value={id}>{map.name}</option>)}
+          </select>
+          <p>{MAPS[selectedMap].description}</p>
 
           <p>
             Server:{' '}
@@ -2169,6 +2263,7 @@ function App() {
       <div style={pageStyle}>
         <div style={panelStyle}>
           <h2>Choose Your Dog</h2>
+          <p>{MAPS[room?.mapId ?? DEFAULT_MAP].name}</p>
 
           {Object.entries(DOGS).map(
             ([id, dog]) => (
@@ -2210,8 +2305,7 @@ function App() {
   // ---------------------------------
 
   if (screen === 'lobby') {
-    const myId =
-      socketRef.current?.id;
+    const myId = socketId;
 
     const myPlayer =
       room?.players.find(
@@ -2230,6 +2324,17 @@ function App() {
             Room: {room?.code}
           </h1>
 
+          <label htmlFor="lobby-map">Map {isHost ? '' : '(chosen by host)'}</label>
+          <select
+            id="lobby-map"
+            value={room?.mapId ?? DEFAULT_MAP}
+            disabled={!isHost}
+            onChange={event => selectMap(event.target.value)}
+            style={{ display: 'block', width: '100%', padding: 12, marginTop: 8, fontSize: 16 }}
+          >
+            {Object.entries(MAPS).map(([id, map]) => <option key={id} value={id}>{map.name}</option>)}
+          </select>
+          <p>{MAPS[room?.mapId ?? DEFAULT_MAP].description}</p>
           <h3>Players</h3>
 
           {room?.players.map(
@@ -2335,7 +2440,7 @@ function App() {
             letterSpacing: 1
           }}
         >
-          WENDOVER WOODS
+          {MAPS[room?.mapId ?? DEFAULT_MAP].name.toUpperCase()}
         </div>
 
         <div
@@ -2421,6 +2526,11 @@ function App() {
           style={{ fontSize: 12, marginTop: 12, color: '#9fe49b', fontWeight: 'bold' }}
         >
           ON TRACK
+        </div>
+        <div style={{ fontSize: 11, marginTop: 14, color: '#b4c9b5', lineHeight: 1.6 }}>
+          <div>W / ↑ accelerate · S / ↓ brake / reverse</div>
+          <div>A / D or ← / → steer</div>
+          <div>Space or scroll down to jump</div>
         </div>
       </div>
 

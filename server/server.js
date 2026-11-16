@@ -1,6 +1,7 @@
 
 import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
+import { MAPS, DEFAULT_MAP, crossedFinishLine } from '../shared/maps.js';
 
 const PORT = 3001;
 
@@ -11,35 +12,8 @@ const io = new Server(PORT, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo'];
 const TOTAL_LAPS = 3;
-
-const STARTING_GRID = [
-  [-4, 0, 4.2],
-  [-4, 0, 2.1],
-  [-4, 0, 0],
-  [-4, 0, -2.1],
-  [-4, 0, -4.2]
-];
-
-const START_ROTATION = Math.PI / 2;
-
-// Ordered checkpoints following the Wendover Woods circuit (the long
-// version: 1466 m a lap).  Copied from wendover_woods/track_info.json, which
-// the map build writes.  Coordinates are X/Z, with a radius in game units.
-const CHECKPOINTS = [
-  { x: 96.5, z: -52.8, radius: 18 },
-  { x: 174.2, z: -133.4, radius: 18 },
-  { x: 289.2, z: -138.9, radius: 18 },
-  { x: 278.3, z: -258.3, radius: 18 },
-  { x: 190.4, z: -289.6, radius: 18 },
-  { x: 86.6, z: -325.1, radius: 18 },
-  { x: -9.3, z: -371.9, radius: 18 },
-  { x: -43.6, z: -255.2, radius: 18 },
-  { x: -150.3, z: -224.6, radius: 18 },
-  { x: -156.0, z: -103.9, radius: 18 },
-  { x: -122.0, z: -0.1, radius: 18 }
-];
 
 const rooms = new Map();
 const playerRooms = new Map();
@@ -59,6 +33,7 @@ function getRoomData(room) {
     code: room.code,
     hostId: room.hostId,
     status: room.status,
+    mapId: room.mapId,
     players: [...room.players.values()]
   };
 }
@@ -91,12 +66,12 @@ function createPlayer(socketId, name) {
   };
 }
 
-function getRaceProgress(player) {
+function getRaceProgress(room, player) {
   return {
     playerId: player.id,
     lap: player.lap,
     checkpoint: player.checkpoint,
-    totalCheckpoints: CHECKPOINTS.length,
+    totalCheckpoints: MAPS[room.mapId].checkpoints.length,
     totalLaps: TOTAL_LAPS,
     finished: player.finished,
     finishTime: player.finishTime
@@ -106,7 +81,7 @@ function getRaceProgress(player) {
 function broadcastProgress(room, player) {
   io.to(room.code).emit(
     'raceProgress',
-    getRaceProgress(player)
+    getRaceProgress(room, player)
   );
 }
 
@@ -157,11 +132,13 @@ function beginCountdown(room) {
 function checkRaceProgress(room, player, previousPosition) {
   if (player.finished) return;
 
+  const map = MAPS[room.mapId];
+  const checkpoints = map.checkpoints;
   const [x, , z] = player.position;
 
   // Players must visit each checkpoint in order.
-  if (player.checkpoint < CHECKPOINTS.length) {
-    const target = CHECKPOINTS[player.checkpoint];
+  if (player.checkpoint < checkpoints.length) {
+    const target = checkpoints[player.checkpoint];
 
     const distance = Math.hypot(
       x - target.x,
@@ -176,13 +153,7 @@ function checkRaceProgress(room, player, previousPosition) {
     return;
   }
 
-  // All checkpoints visited.
-  // Count the lap only when crossing the finish line
-  // from negative X to positive X, within the track width.
-  const crossedFinish =
-    previousPosition[0] < 0 &&
-    x >= 0 &&
-    Math.abs(z) <= 6.5;
+  const crossedFinish = crossedFinishLine(previousPosition, player.position, map.startFinish);
 
   if (!crossedFinish) return;
 
@@ -276,7 +247,13 @@ io.on('connection', (socket) => {
 
   // HOST GAME
 
-  socket.on('hostGame', (callback) => {
+  socket.on('hostGame', (data, callback) => {
+    // Keep older clients compatible with the default map.
+    if (typeof data === 'function') { callback = data; data = {}; }
+    const mapId = data?.mapId ?? DEFAULT_MAP;
+    if (!Object.hasOwn(MAPS, mapId)) {
+      return callback?.({ success: false, error: 'Invalid map selection' });
+    }
     if (typeof callback !== 'function') return;
 
     leaveRoom(socket);
@@ -288,6 +265,7 @@ io.on('connection', (socket) => {
       code: roomCode,
       hostId: socket.id,
       status: 'lobby',
+      mapId,
       startedAt: null,
       countdownTimer: null,
       players: new Map([[socket.id, player]])
@@ -363,6 +341,26 @@ io.on('connection', (socket) => {
     });
 
     updateLobby(room);
+  });
+
+  // Only the host can change the course, and only before loading starts.
+  socket.on('selectMap', (data, callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || room.status !== 'lobby') {
+      return callback?.({ success: false, error: 'Not in a lobby' });
+    }
+    if (room.hostId !== socket.id) {
+      return callback?.({ success: false, error: 'Only the host can select the map' });
+    }
+    if (!Object.hasOwn(MAPS, data?.mapId)) {
+      return callback?.({ success: false, error: 'Invalid map selection' });
+    }
+    if (room.mapId !== data.mapId) {
+      room.mapId = data.mapId;
+      for (const player of room.players.values()) player.ready = false;
+    }
+    updateLobby(room);
+    callback?.({ success: true });
   });
 
   // SELECT DOG
@@ -474,8 +472,9 @@ io.on('connection', (socket) => {
     }
 
     players.forEach((player, index) => {
-      player.position = [...STARTING_GRID[index]];
-      player.rotation = START_ROTATION;
+      const start = MAPS[room.mapId].startPositions[index];
+      player.position = [...start.position];
+      player.rotation = start.rotationY;
       player.animation = 'Idle';
 
       player.loaded = false;
@@ -492,6 +491,8 @@ io.on('connection', (socket) => {
 
     io.to(roomCode).emit('raceStarted', {
       roomCode,
+      mapId: room.mapId,
+      totalCheckpoints: MAPS[room.mapId].checkpoints.length,
       players,
       totalLaps: TOTAL_LAPS
     });
