@@ -38,6 +38,86 @@ function latest(room, event) {
   return server.events.findLast(item => item.room === room && item.event === event)?.data;
 }
 
+function lobbies() {
+  return latest('lobby-browser', 'lobbiesUpdated');
+}
+
+test('lobby browser lists existing games and updates names, maps, counts and host migration', () => {
+  const host = client(), guest = client(), browser = client();
+  const room = host.call('hostGame', { name: '  Tom   Smith  ', mapId: 'frostpeak' }).room;
+  browser.call('watchLobbies');
+  assert.deepEqual(latest(browser.id, 'lobbiesUpdated'), [{
+    code: room.code, hostName: 'Tom Smith', mapId: 'frostpeak', playerCount: 1, maxPlayers: 5
+  }]);
+  const joined = guest.call('joinGame', { roomCode: room.code, name: 'Sarah' });
+  assert.equal(joined.room.players[1].name, 'Sarah');
+  assert.equal(lobbies()[0].playerCount, 2);
+  host.call('selectMap', { mapId: 'wendover' });
+  assert.equal(lobbies()[0].mapId, 'wendover');
+  host.call('disconnect');
+  assert.equal(lobbies()[0].hostName, 'Sarah');
+  assert.equal(lobbies()[0].playerCount, 1);
+  guest.call('disconnect');
+  assert.deepEqual(lobbies(), []);
+  browser.call('watchLobbies');
+  assert.deepEqual(latest(browser.id, 'lobbiesUpdated'), []);
+  browser.call('unwatchLobbies');
+});
+
+test('single-player games stay hidden and reject guests even with a known code', () => {
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { singlePlayer: true, name: 'Solo' }).room;
+  guest.call('watchLobbies');
+  assert.deepEqual(latest(guest.id, 'lobbiesUpdated'), []);
+  assert.deepEqual(lobbies(), []);
+  assert.equal(guest.call('joinGame', { roomCode: room.code }).success, false);
+  host.call('selectDog', { dog: 'gsp' });
+  host.call('setReady', { ready: true });
+  assert.equal(host.call('startRace').success, true);
+  host.call('leaveGame');
+});
+
+test('full rooms remain listed, reject extra players and reopen when a player leaves', () => {
+  const host = client(), guests = Array.from({ length: 5 }, client);
+  const room = host.call('hostGame', { name: 'Host' }).room;
+  for (const guest of guests.slice(0, 4)) {
+    assert.equal(guest.call('joinGame', { roomCode: room.code }).success, true);
+  }
+  assert.equal(lobbies()[0].playerCount, 5);
+  assert.equal(guests[4].call('joinGame', { roomCode: room.code }).error, 'Room is full');
+  // Retrying an acknowledged join must not fail just because the room filled up.
+  assert.equal(guests[0].call('joinGame', { roomCode: room.code }).success, true);
+  guests[0].call('leaveGame');
+  assert.equal(lobbies()[0].playerCount, 4);
+  assert.equal(guests[4].call('joinGame', { roomCode: room.code }).success, true);
+  host.call('leaveGame');
+  for (const guest of guests) guest.call('leaveGame');
+  assert.deepEqual(lobbies(), []);
+});
+
+test('starting a race removes the listing and stale join attempts fail cleanly', () => {
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { name: 'Racer' }).room;
+  host.call('selectDog', { dog: 'gsp' });
+  host.call('setReady', { ready: true });
+  assert.equal(host.call('startRace').success, true);
+  assert.deepEqual(lobbies(), []);
+  assert.equal(guest.call('joinGame', { roomCode: room.code }).error, 'Race has already started');
+  host.call('leaveGame');
+  assert.equal(guest.call('joinGame', { roomCode: room.code }).error, 'Room not found');
+});
+
+test('display names are bounded and invalid or empty names use defaults', () => {
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { name: 'A'.repeat(100) }).room;
+  assert.equal(room.players[0].name, 'A'.repeat(24));
+  assert.equal(guest.call('joinGame', { roomCode: room.code, name: {} }).room.players[1].name, 'Player 2');
+  guest.call('leaveGame');
+  host.call('leaveGame');
+  assert.equal(host.call('hostGame', { name: '   ' }).room.players[0].name, 'Host');
+  host.call('leaveGame');
+});
+
 test('map choice is validated, synchronized, host-only, and resets readiness', () => {
   const host = client(), guest = client();
   assert.equal(host.call('hostGame', { mapId: 'missing' }).success, false);

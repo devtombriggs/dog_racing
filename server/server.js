@@ -1,9 +1,10 @@
 
 import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
+import { env } from 'node:process';
 import { MAPS, DEFAULT_MAP, crossedFinishLine } from '../shared/maps.js';
 
-const PORT = 3001;
+const PORT = Number(env.PORT || 3001);
 
 const io = new Server(PORT, {
   cors: {
@@ -14,6 +15,8 @@ const io = new Server(PORT, {
 
 const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo'];
 const TOTAL_LAPS = 3;
+const MAX_PLAYERS = 5;
+const LOBBY_BROWSER = 'lobby-browser';
 
 const rooms = new Map();
 const playerRooms = new Map();
@@ -38,8 +41,31 @@ function getRoomData(room) {
   };
 }
 
+function getLobbies() {
+  return [...rooms.values()]
+    .filter(room => !room.singlePlayer && room.status === 'lobby')
+    .map(room => ({
+      code: room.code,
+      hostName: room.players.get(room.hostId).name,
+      mapId: room.mapId,
+      playerCount: room.players.size,
+      maxPlayers: MAX_PLAYERS
+    }));
+}
+
+function updateLobbies() {
+  io.to(LOBBY_BROWSER).emit('lobbiesUpdated', getLobbies());
+}
+
+function playerName(value, fallback) {
+  return typeof value === 'string'
+    ? value.replace(/\s+/g, ' ').trim().slice(0, 24) || fallback
+    : fallback;
+}
+
 function updateLobby(room) {
   io.to(room.code).emit('lobbyUpdated', getRoomData(room));
+  updateLobbies();
 }
 
 function clearCountdown(room) {
@@ -217,6 +243,7 @@ function leaveRoom(socket) {
   if (room.players.size === 0) {
     clearCountdown(room);
     rooms.delete(roomCode);
+    updateLobbies();
 
     console.log(`Room ${roomCode} deleted`);
     return;
@@ -245,6 +272,15 @@ function leaveRoom(socket) {
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
 
+  socket.on('watchLobbies', () => {
+    socket.join(LOBBY_BROWSER);
+    io.to(socket.id).emit('lobbiesUpdated', getLobbies());
+  });
+
+  socket.on('unwatchLobbies', () => {
+    socket.leave(LOBBY_BROWSER);
+  });
+
   // HOST GAME
 
   socket.on('hostGame', (data, callback) => {
@@ -259,12 +295,13 @@ io.on('connection', (socket) => {
     leaveRoom(socket);
 
     const roomCode = generateRoomCode();
-    const player = createPlayer(socket.id, 'Host');
+    const player = createPlayer(socket.id, playerName(data?.name, 'Host'));
 
     const room = {
       code: roomCode,
       hostId: socket.id,
       status: 'lobby',
+      singlePlayer: data?.singlePlayer === true,
       mapId,
       startedAt: null,
       countdownTimer: null,
@@ -303,17 +340,14 @@ io.on('connection', (socket) => {
       });
     }
 
+    if (room.singlePlayer && room.hostId !== socket.id) {
+      return callback({ success: false, error: 'This is a single-player game' });
+    }
+
     if (room.status !== 'lobby') {
       return callback({
         success: false,
         error: 'Race has already started'
-      });
-    }
-
-    if (room.players.size >= 5) {
-      return callback({
-        success: false,
-        error: 'Room is full'
       });
     }
 
@@ -324,11 +358,18 @@ io.on('connection', (socket) => {
       });
     }
 
+    if (room.players.size >= MAX_PLAYERS) {
+      return callback({
+        success: false,
+        error: 'Room is full'
+      });
+    }
+
     leaveRoom(socket);
 
     const player = createPlayer(
       socket.id,
-      `Player ${room.players.size + 1}`
+      playerName(data?.name, `Player ${room.players.size + 1}`)
     );
 
     room.players.set(socket.id, player);

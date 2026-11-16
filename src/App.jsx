@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { io } from 'socket.io-client';
 import { MAPS, DEFAULT_MAP, sampleGroundHeight } from '../shared/maps.js';
 import { prepareHeadLook, applyHeadLook } from './headLook.js';
+import { createRaceNameLabel } from './raceNameLabel.js';
 
 // ---------------------------------
 // DOG CONFIGURATION
@@ -13,6 +14,10 @@ import { prepareHeadLook, applyHeadLook } from './headLook.js';
 const DOGS = {
   gsp: {
     name: 'Pippa (German Shorthaired Pointer)',
+    displayName: 'Pippa',
+    breed: 'German Shorthaired Pointer',
+    portrait: '/portraits/pippa.png',
+    accent: '#eb7aff',
     model: '/models/gsp_female.glb',
     scale: 3,
     // Speed (model metres per second) at which each stride plays at its
@@ -28,18 +33,26 @@ const DOGS = {
   },
   second_dog: {
     name: 'Meela (Greyhound)',
+    displayName: 'Meela',
+    breed: 'Greyhound',
+    portrait: '/portraits/meela.png',
+    accent: '#55caff',
     model: '/models/meela_greyhound.glb',
     scale: 3,
     // meela_greyhound/clip_info.json
     gaitSpeed: {
       Walk: 1.52,
       Trot: 2.587,
-      Run: 4.536,
-      Sprint: 7.06
+      Run: 3.9,
+      Sprint: 5.5
     }
   },
   black_lab: {
     name: 'Poppy (Black Labrador)',
+    displayName: 'Poppy',
+    breed: 'Black Labrador',
+    portrait: '/portraits/poppy.png',
+    accent: '#ffd36c',
     model: '/models/black_lab.glb',
     scale: 3,
     // black_lab/clip_info.json
@@ -52,6 +65,10 @@ const DOGS = {
   },
   pablo: {
     name: 'Pablo (Alaskan Klee Kai)',
+    displayName: 'Pablo',
+    breed: 'Alaskan Klee Kai',
+    portrait: '/portraits/pablo.png',
+    accent: '#b2ff5c',
     model: '/models/pablo.glb',
     scale: 3,
     size: 0.7,
@@ -69,6 +86,10 @@ const DOGS = {
   },
   ralph: {
     name: 'Ralph (Dachshund)',
+    displayName: 'Ralph',
+    breed: 'Dachshund',
+    portrait: '/portraits/ralph.png',
+    accent: '#ffad57',
     model: '/models/ralph.glb',
     scale: 3,
     // A dachshund stands about a third as tall as the pointer.  `size`
@@ -234,7 +255,7 @@ function collectBones(root) {
 }
 
 // Lean the dog and curve its body into a turn.  Call after the animation
-// mixer has updated: the mixer resets the bones every frame.
+// mixer has updated.
 // steer: -1 (right) to 1 (left).  effort: 0 to 1, how hard the dog is running.
 function applyTurnPose(model, bones, steer, effort) {
   if (!model) return;
@@ -249,10 +270,32 @@ function applyTurnPose(model, bones, steer, effort) {
     const bone = bones[name];
 
     if (bone) {
+      // The mixer only rewrites a bone whose animated value changed since the
+      // last frame.  A bone the stride holds still would keep last frame's
+      // bend and have this one added on top, twisting further every frame of
+      // a turn, so put such a bone back to its animated pose first.
+      const turn = (bone.userData.turnPose ??= {
+        animated: new THREE.Quaternion(),
+        posed: new THREE.Quaternion(NaN, NaN, NaN, NaN)
+      });
+
+      if (bone.quaternion.equals(turn.posed)) {
+        bone.quaternion.copy(turn.animated);
+      }
+
+      turn.animated.copy(bone.quaternion);
       bone.rotateZ(BEND_SIGN * bend * weight);
     }
   }
   applyHeadLook(model, steer);
+
+  for (const [name] of BEND_BONES) {
+    const bone = bones[name];
+
+    if (bone) {
+      bone.userData.turnPose.posed.copy(bone.quaternion);
+    }
+  }
 }
 
 function formatTime(seconds) {
@@ -286,8 +329,11 @@ function App() {
   const [selectedMap, setSelectedMap] = useState(DEFAULT_MAP);
   const [room, setRoom] = useState(null);
 
-  const [roomCodeInput, setRoomCodeInput] =
-    useState('');
+  const [playerName, setPlayerName] = useState('');
+  const [availableLobbies, setAvailableLobbies] = useState(null);
+  const [lobbyListError, setLobbyListError] = useState('');
+  const [joiningRoom, setJoiningRoom] = useState(null);
+  const joinRequestRef = useRef(0);
 
   const [socketId, setSocketId] = useState(null);
 
@@ -322,6 +368,10 @@ function App() {
     function handleDisconnect() {
       setConnected(false);
       setSocketId(null);
+      setAvailableLobbies(null);
+      setLobbyListError('');
+      joinRequestRef.current += 1;
+      setJoiningRoom(null);
     }
 
     function handleLobbyUpdated(updatedRoom) {
@@ -445,6 +495,26 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (screen !== 'join' || !connected) return;
+    const socket = socketRef.current;
+    const timer = setTimeout(() => {
+      setLobbyListError('Could not load games. Go back and try again.');
+    }, 8000);
+    function handleLobbiesUpdated(lobbies) {
+      clearTimeout(timer);
+      setAvailableLobbies(lobbies);
+      setLobbyListError('');
+    }
+    socket.on('lobbiesUpdated', handleLobbiesUpdated);
+    socket.emit('watchLobbies');
+    return () => {
+      clearTimeout(timer);
+      socket.off('lobbiesUpdated', handleLobbiesUpdated);
+      if (socket.connected) socket.emit('unwatchLobbies');
+    };
+  }, [screen, connected]);
+
   // ---------------------------------
   // HOST GAME
   // ---------------------------------
@@ -455,7 +525,7 @@ function App() {
 
     socketRef.current.emit(
       'hostGame',
-      { mapId: selectedMap },
+      { mapId: selectedMap, name: playerName },
       (response) => {
         if (!response?.success) {
           setError(
@@ -487,7 +557,7 @@ function App() {
 
     socketRef.current.emit(
       'hostGame',
-      { mapId: selectedMap },
+      { mapId: selectedMap, name: playerName, singlePlayer: true },
       (response) => {
         if (!response?.success) {
           singlePlayerRef.current = false;
@@ -511,14 +581,23 @@ function App() {
   // JOIN GAME
   // ---------------------------------
 
-  function joinGame() {
+  function joinGame(roomCode) {
+    if (!socketRef.current?.connected || joiningRoom) return;
     singlePlayerRef.current = false;
     setError('');
+    setJoiningRoom(roomCode);
+    const requestId = ++joinRequestRef.current;
 
-    socketRef.current.emit(
+    socketRef.current.timeout(8000).emit(
       'joinGame',
-      { roomCode: roomCodeInput },
-      (response) => {
+      { roomCode, name: playerName },
+      (timeoutError, response) => {
+        if (requestId !== joinRequestRef.current) return;
+        setJoiningRoom(null);
+        if (timeoutError) {
+          setError('Joining timed out. Please try again.');
+          return;
+        }
         if (!response?.success) {
           setError(
             response?.error || 'Failed to join game'
@@ -1004,6 +1083,8 @@ function App() {
         (p) => p.id === socket.id
       );
 
+    const localNameLabel = createRaceNameLabel(container, localPlayer?.name || 'Player', true);
+
     if (localPlayer) {
       player.position.fromArray(
         localPlayer.position
@@ -1159,6 +1240,7 @@ function App() {
 
       const remote = {
         group,
+        nameLabel: createRaceNameLabel(container, data.name || 'Player'),
         targetPosition:
           new THREE.Vector3().fromArray(
             data.position
@@ -1254,6 +1336,12 @@ function App() {
       spawnRemotePlayer
     );
 
+    function updateNameLabels() {
+      camera.updateMatrixWorld();
+      localNameLabel.update(dogBones.head, camera);
+      remotePlayers.forEach(remote => remote.nameLabel.update(remote.bones.head, camera));
+    }
+
     function handlePlayerMoved(data) {
       const remote = remotePlayers.get(
         data.playerId
@@ -1331,6 +1419,7 @@ function App() {
       if (!remote) return;
 
       scene.remove(remote.group);
+      remote.nameLabel.dispose();
       remotePlayers.delete(
         data.playerId
       );
@@ -1557,6 +1646,7 @@ function App() {
           }
         );
 
+        updateNameLabels();
         renderer.render(
           scene,
           camera
@@ -2027,6 +2117,7 @@ function App() {
         lookTarget
       );
 
+      updateNameLabels();
       renderer.render(
         scene,
         camera
@@ -2070,6 +2161,8 @@ function App() {
       renderer.domElement.removeEventListener('wheel', handleWheel);
 
       timer.disconnect();
+      localNameLabel.dispose();
+      remotePlayers.forEach(remote => remote.nameLabel.dispose());
 
       if (
         renderer.domElement.parentNode ===
@@ -2147,6 +2240,16 @@ function App() {
       <div style={pageStyle}>
         <div style={panelStyle}>
           <h1>Dog Racing</h1>
+          <label htmlFor="player-name">Your name</label>
+          <input
+            id="player-name"
+            value={playerName}
+            onChange={event => setPlayerName(event.target.value)}
+            maxLength={24}
+            placeholder="Enter your name"
+            autoComplete="nickname"
+            style={{ display: 'block', width: '100%', padding: 12, marginTop: 8, marginBottom: 20, fontSize: 16 }}
+          />
           <label htmlFor="menu-map">Choose map</label>
           <select
             id="menu-map"
@@ -2184,9 +2287,12 @@ function App() {
           <button
             style={buttonStyle}
             disabled={!connected}
-            onClick={() =>
-              setScreen('join')
-            }
+            onClick={() => {
+              setError('');
+              setAvailableLobbies(null);
+              setLobbyListError('');
+              setScreen('join');
+            }}
           >
             Join Game
           </button>
@@ -2208,37 +2314,45 @@ function App() {
   if (screen === 'join') {
     return (
       <div style={pageStyle}>
-        <div style={panelStyle}>
+        <div style={{ ...panelStyle, width: 620, maxHeight: '90dvh', overflowY: 'auto' }}>
           <h2>Join Game</h2>
-
-          <input
-            placeholder="Enter room code"
-            value={roomCodeInput}
-            onChange={(e) =>
-              setRoomCodeInput(
-                e.target.value.toUpperCase()
-              )
-            }
-            style={{
-              padding: 12,
-              fontSize: 18,
-              width: '80%'
-            }}
-          />
-
+          <p>Choose a host to join their lobby. Games update automatically.</p>
+          <div role="status">
+            {!connected ? <p>Disconnected. Reconnecting to the server…</p>
+              : lobbyListError ? <p style={{ color: 'salmon' }}>{lobbyListError}</p>
+                : availableLobbies === null ? <p>Looking for games…</p>
+                  : availableLobbies.length === 0 ? <p>No games waiting for players. Ask a friend to host a game!</p>
+                    : <p>{availableLobbies.length} {availableLobbies.length === 1 ? 'lobby' : 'lobbies'} found</p>}
+          </div>
+          {connected && availableLobbies?.map(lobby => {
+            const full = lobby.playerCount >= lobby.maxPlayers;
+            const disabled = full || joiningRoom !== null;
+            return (
+              <div key={lobby.code} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: 16, marginBottom: 12, background: '#34523b', borderRadius: 8, textAlign: 'left' }}>
+                <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+                  <strong>{lobby.hostName}’s lobby</strong>
+                  <div style={{ marginTop: 6 }}>{MAPS[lobby.mapId]?.name ?? lobby.mapId}</div>
+                  <div style={{ marginTop: 6 }}>{lobby.playerCount}/{lobby.maxPlayers} players{full ? ' · Full' : ''}</div>
+                </div>
+                <button
+                  style={{ ...buttonStyle, opacity: disabled ? 0.55 : 1, cursor: disabled ? 'default' : 'pointer' }}
+                  disabled={disabled}
+                  aria-label={`Join ${lobby.hostName}’s lobby`}
+                  onClick={() => joinGame(lobby.code)}
+                >
+                  {joiningRoom === lobby.code ? 'Joining…' : full ? 'Full' : 'Join'}
+                </button>
+              </div>
+            );
+          })}
           <div>
             <button
               style={buttonStyle}
-              onClick={joinGame}
-            >
-              Join
-            </button>
-
-            <button
-              style={buttonStyle}
-              onClick={() =>
-                setScreen('menu')
-              }
+              disabled={joiningRoom !== null}
+              onClick={() => {
+                setError('');
+                setScreen('menu');
+              }}
             >
               Back
             </button>
@@ -2260,43 +2374,47 @@ function App() {
 
   if (screen === 'selection') {
     return (
-      <div style={pageStyle}>
-        <div style={panelStyle}>
-          <h2>Choose Your Dog</h2>
-          <p>{MAPS[room?.mapId ?? DEFAULT_MAP].name}</p>
+      <main className="character-select">
+        <section className="character-select__panel" aria-labelledby="character-select-title">
+          <header className="character-select__header">
+            <div>
+              <p className="character-select__eyebrow">Dog Racing / Character Select</p>
+              <h1 id="character-select-title">Choose Your Dog</h1>
+              <p className="character-select__hint">Pick your partner. Own the track.</p>
+            </div>
+            <div className="character-select__course">
+              <span>Racing at</span>
+              <strong>{MAPS[room?.mapId ?? DEFAULT_MAP].name}</strong>
+            </div>
+          </header>
 
-          {Object.entries(DOGS).map(
-            ([id, dog]) => (
+          <div className="character-select__grid" role="group" aria-label="Choose your racing dog">
+            {Object.entries(DOGS).map(([id, dog]) => (
               <button
                 key={id}
-                style={{
-                  ...buttonStyle,
-                  display: 'block',
-                  width: '100%'
-                }}
-                onClick={() =>
-                  selectDog(id)
-                }
+                className="character-card"
+                style={{ '--portrait-accent': dog.accent }}
+                aria-label={dog.name}
+                disabled={!connected}
+                onClick={() => selectDog(id)}
               >
-                {dog.name}
+                <img src={dog.portrait} alt="" width="1280" height="1280" draggable="false" />
+                <span className="character-card__action" aria-hidden="true">Select ↗</span>
+                <span className="character-card__caption">
+                  <strong>{dog.displayName}</strong>
+                  <span>{dog.breed}</span>
+                </span>
               </button>
-            )
-          )}
+            ))}
+          </div>
 
-          <button
-            style={buttonStyle}
-            onClick={leaveGame}
-          >
-            Leave Game
-          </button>
-
-          {error && (
-            <p style={{ color: 'salmon' }}>
-              {error}
-            </p>
-          )}
-        </div>
-      </div>
+          <footer className="character-select__footer">
+            <button className="character-select__back" onClick={leaveGame}>Leave Game</button>
+            <p>{connected ? 'Select a portrait to continue' : 'Disconnected. Reconnecting to the server…'}</p>
+          </footer>
+          {error && <p className="character-select__error" role="alert">{error}</p>}
+        </section>
+      </main>
     );
   }
 
@@ -2320,9 +2438,7 @@ function App() {
         <div style={panelStyle}>
           <h2>Game Lobby</h2>
 
-          <h1>
-            Room: {room?.code}
-          </h1>
+          <p>Hosted by {room?.players.find(player => player.id === room.hostId)?.name}</p>
 
           <label htmlFor="lobby-map">Map {isHost ? '' : '(chosen by host)'}</label>
           <select
