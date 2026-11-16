@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
 import { MAPS, DEFAULT_MAP, crossedFinishLine } from '../shared/maps.js';
+import { TREAT_ROAD } from '../shared/treatRoadData.js';
 
 const PORT = Number(env.PORT || 3001);
 
@@ -20,6 +21,56 @@ const LOBBY_BROWSER = 'lobby-browser';
 
 const rooms = new Map();
 const playerRooms = new Map();
+const skyRaceStates = new WeakMap();
+
+// Recovery is decided by the server; clients only animate the fall. A revision
+// prevents movement packets sent before a respawn from moving the dog back off-road.
+function updateSkyRace(room, player, data) {
+  const state = skyRaceStates.get(player);
+  if ((data.respawnRevision ?? 0) !== state.revision) return false;
+  const now = Date.now();
+  if (state.fall) {
+    const elapsed = (now - state.fall.startedAt) / 1000;
+    if (elapsed >= TREAT_ROAD.rules.respawnDelaySeconds) {
+      const cp = TREAT_ROAD.checkpoints[player.checkpoint];
+      const spread = Math.min(1.6, (cp.halfWidth - 1.2) / 2);
+      const point = TREAT_ROAD.pointAt(cp.s, (2 - state.slot) * spread * 0.5);
+      const grid = !state.passedStart && player.lap === 1 && player.checkpoint === 0
+        ? TREAT_ROAD.startPositions[state.slot] : null;
+      player.position = grid ? [...grid.position] : [point.x, point.y, point.z];
+      player.rotation = grid ? grid.rotationY : point.rotationY;
+      player.animation = 'Idle';
+      state.fall = null;
+      state.revision += 1;
+      io.to(room.code).emit('playerRespawned', {
+        playerId: player.id, position: player.position, rotation: player.rotation,
+        respawnRevision: state.revision,
+        penaltySeconds: TREAT_ROAD.rules.respawnPenaltySeconds,
+        speedMultiplier: TREAT_ROAD.rules.respawnSpeedMultiplier
+      });
+    } else {
+      player.position = [...state.fall.position];
+      player.position[1] -= 0.5 * TREAT_ROAD.rules.gravity * elapsed * elapsed;
+    }
+    return false;
+  }
+  const [x, y, z] = data.position;
+  const ground = TREAT_ROAD.query(x, z);
+  if (ground.onTrack && crossedFinishLine(player.position, data.position, MAPS.treat_road.startFinish)) {
+    state.passedStart = true;
+  }
+  player.position = [...data.position];
+  player.rotation = data.rotation;
+  if (!ground.onTrack || y < ground.y - TREAT_ROAD.rules.fallStartsBelow) {
+    state.fall = { startedAt: now, position: [...player.position] };
+    player.animation = 'Jump';
+    io.to(room.code).emit('playerFell', {
+      playerId: player.id, position: player.position
+    });
+    return false;
+  }
+  return true;
+}
 
 function generateRoomCode() {
   let code;
@@ -176,7 +227,9 @@ function checkRaceProgress(room, player, previousPosition) {
       z - target.z
     );
 
-    if (distance <= target.radius) {
+    const pastCheckpoint = !target.forward
+      || (x - target.x) * target.forward[0] + (z - target.z) * target.forward[1] >= -1e-6;
+    if (distance <= target.radius && pastCheckpoint) {
       player.checkpoint += 1;
       broadcastProgress(room, player);
     }
@@ -580,6 +633,9 @@ io.on('connection', (socket) => {
       player.checkpoint = 0;
       player.finished = false;
       player.finishTime = null;
+      if (room.mapId === 'treat_road') {
+        skyRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
+      }
     });
 
     room.startedAt = null;
@@ -664,18 +720,18 @@ io.on('connection', (socket) => {
 
     const previousPosition = [...player.position];
 
-    player.position = [...position];
-    player.rotation = rotation;
-
-    if (validAnimations.includes(data.animation)) {
-      player.animation = data.animation;
+    let onRoad = true;
+    if (room.mapId === 'treat_road') {
+      onRoad = updateSkyRace(room, player, data);
+    } else {
+      player.position = [...position];
+      player.rotation = rotation;
     }
 
-    checkRaceProgress(
-      room,
-      player,
-      previousPosition
-    );
+    if (onRoad) {
+      if (validAnimations.includes(data.animation)) player.animation = data.animation;
+      checkRaceProgress(room, player, previousPosition);
+    }
 
     socket.to(roomCode).emit('playerMoved', {
       playerId: socket.id,

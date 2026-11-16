@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { io } from 'socket.io-client';
 import { MAPS, DEFAULT_MAP, sampleGroundHeight } from '../shared/maps.js';
+import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { prepareHeadLook, applyHeadLook } from './headLook.js';
 import { createRaceNameLabel } from './raceNameLabel.js';
 
@@ -873,6 +874,12 @@ function App() {
     }
 
     const map = MAPS[currentRoom.mapId ?? DEFAULT_MAP];
+    const skyTrack = currentRoom.mapId === 'treat_road' ? TREAT_ROAD : null;
+    let proceduralWorld = null;
+    let restoreEnvironment = null;
+    let fall = null;
+    let respawnRevision = 0;
+    let recoveryUntil = 0;
 
     // ---------------------------------
     // SCENE
@@ -958,6 +965,7 @@ function App() {
     let heightmap = null;
 
     function isTrackSurface(position) {
+      if (skyTrack) return skyTrack.query(position.x, position.z).onTrack;
       // Fail open if the GLB has no identifiable track surface.
       if (trackMeshes.length === 0) return true;
       const origin = new THREE.Vector3(position.x, position.y + 25, position.z);
@@ -973,6 +981,10 @@ function App() {
     // dog, so inside a tunnel or on the bridge it finds the surface the dog
     // is on, not the roof above or the stream below.
     function groundHeightAt(position, fallback = 0) {
+      if (skyTrack) {
+        const ground = skyTrack.query(position.x, position.z);
+        return ground.onTrack ? ground.y : fallback;
+      }
       if (heightmap) {
         // The track ray takes precedence on the bridge; snow uses O(1) sampling.
         groundRaycaster.set(new THREE.Vector3(position.x, position.y + 60, position.z), down);
@@ -1119,7 +1131,21 @@ function App() {
         })
       : Promise.resolve(null);
 
-    Promise.all([loader.loadAsync(map.model), heightmapRequest]).then(
+    if (skyTrack) {
+      import('./tracks/treatRoad/TreatRoadTrack.js').then(({ createTreatRoad }) => {
+        if (!isMounted) return;
+        proceduralWorld = createTreatRoad();
+        scene.add(proceduralWorld.group);
+        scene.remove(ambientLight, sunlight);
+        restoreEnvironment = proceduralWorld.applyEnvironment(scene, renderer);
+        camera.far = 6500;
+        camera.updateProjectionMatrix();
+        groundY = groundHeightAt(player.position);
+        player.position.y = groundY;
+        trackLoaded = true;
+        notifyRaceLoaded();
+      }).catch(error => handleLoadError(map.name, error));
+    } else Promise.all([loader.loadAsync(map.model), heightmapRequest]).then(
       ([gltf, heights]) => {
         if (!isMounted) return;
 
@@ -1554,6 +1580,47 @@ function App() {
       handlePlayerLeft
     );
 
+    function handlePlayerFell(data) {
+      if (!skyTrack || data.playerId !== socket.id) return;
+      fall = { position: new THREE.Vector3().fromArray(data.position), startedAt: performance.now() };
+      currentSpeed = 0;
+      knock.set(0, 0, 0);
+      playAnimation('Jump');
+    }
+
+    function handlePlayerRespawned(data) {
+      if (!skyTrack) return;
+      if (data.playerId === socket.id) {
+        fall = null;
+        respawnRevision = data.respawnRevision;
+        recoveryUntil = performance.now() + data.penaltySeconds * 1000;
+        player.position.fromArray(data.position);
+        player.rotation.set(0, data.rotation, 0);
+        travelYaw = data.rotation;
+        groundY = data.position[1];
+        currentSpeed = jumpHeight = verticalVelocity = slope = steer = 0;
+        isJumping = isLanding = false;
+        knock.set(0, 0, 0);
+        if (dogModel) dogModel.rotation.set(0, 0, 0);
+        playAnimation('Idle');
+        // A checkpoint can be far away: snap the chase camera with the dog.
+        camera.position.copy(player.position).add(cameraOffset.clone().applyQuaternion(player.quaternion));
+      } else {
+        const remote = remotePlayers.get(data.playerId);
+        if (!remote) return;
+        remote.group.position.fromArray(data.position);
+        remote.targetPosition.copy(remote.group.position);
+        remote.group.rotation.set(0, data.rotation, 0);
+        remote.targetRotation = data.rotation;
+        remote.speed = 0;
+        remote.velocity.set(0, 0, 0);
+        remote.lastMoveTime = 0;
+        playRemoteAnimation(remote, 'Idle');
+      }
+    }
+    socket.on('playerFell', handlePlayerFell);
+    socket.on('playerRespawned', handlePlayerRespawned);
+
     // ---------------------------------
     // MOVEMENT SETTINGS
     // ---------------------------------
@@ -1602,6 +1669,7 @@ function App() {
 
     function tryJump() {
       if (
+        map.allowJump === false ||
         !raceGoRef.current ||
         raceFinishedRef.current ||
         isJumping ||
@@ -1720,6 +1788,7 @@ function App() {
         timer.getDelta(),
         0.05
       );
+      proceduralWorld?.update(performance.now() / 1000);
 
       const canMove =
         raceGoRef.current &&
@@ -1791,415 +1860,435 @@ function App() {
 
       lastGoState = true;
 
-      // ---------------------------------
-      // ACCELERATION AND BRAKING
-      // ---------------------------------
-
-      // In the air the dog is off nothing: that is how the stream is cleared
-      offTrack = !isJumping && !isTrackSurface(player.position);
-      const inWater = offTrack && isOverWater(player.position);
-      const terrainMultiplier = inWater
-        ? waterSpeed
-        : offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
-      // A climb takes a little off the top speed, a descent gives a little back
-      const hillMultiplier = THREE.MathUtils.clamp(
-        1 - HANDLING.hillEffect * slope,
-        0.8,
-        1.08
-      );
-      const maxSpeed =
-        sprintSpeed *
-        terrainMultiplier *
-        hillMultiplier;
-      const effectiveAcceleration = acceleration *
-        (inWater
-          ? waterAcceleration
-          : offTrack ? OFF_TRACK_ACCELERATION_MULTIPLIER : 1);
-      if (surfaceDisplayRef.current) {
-        surfaceDisplayRef.current.textContent = offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
-        surfaceDisplayRef.current.style.color = offTrack ? '#ffbc75' : '#9fe49b';
-      }
-
-      if (keys.KeyW || keys.ArrowUp) {
-        currentSpeed +=
-          effectiveAcceleration * delta;
-
-        currentSpeed = Math.min(
-          currentSpeed,
-          maxSpeed
-        );
-      } else if (keys.KeyS || keys.ArrowDown) {
-        currentSpeed -=
-          braking * delta;
-
-        currentSpeed = Math.max(
-          currentSpeed,
-          -reverseSpeed
-        );
+      if (fall) {
+        const elapsed = (performance.now() - fall.startedAt) / 1000;
+        player.position.copy(fall.position);
+        player.position.y -= 0.5 * skyTrack.rules.gravity * elapsed * elapsed;
+        if (dogMixer) dogMixer.update(delta);
+        if (speedDisplayRef.current) speedDisplayRef.current.textContent = '0.0';
+        if (surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = 'FELL — RETURNING TO CHECKPOINT';
+          surfaceDisplayRef.current.style.color = '#ffbc75';
+        }
       } else {
-        if (currentSpeed > 0) {
-          currentSpeed = Math.max(
-            0,
-            currentSpeed -
-              friction * delta
-          );
-        } else if (
-          currentSpeed < 0
-        ) {
+
+        // ---------------------------------
+        // ACCELERATION AND BRAKING
+        // ---------------------------------
+
+        // In the air the dog is off nothing: that is how the stream is cleared
+        offTrack = !isJumping && !isTrackSurface(player.position);
+        const inWater = offTrack && isOverWater(player.position);
+        const terrainMultiplier = inWater
+          ? waterSpeed
+          : offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
+        // A climb takes a little off the top speed, a descent gives a little back
+        const hillMultiplier = THREE.MathUtils.clamp(
+          1 - HANDLING.hillEffect * slope,
+          0.8,
+          1.08
+        );
+        const maxSpeed =
+          sprintSpeed *
+          terrainMultiplier *
+          hillMultiplier *
+          (skyTrack && performance.now() < recoveryUntil ? skyTrack.rules.respawnSpeedMultiplier : 1);
+        const effectiveAcceleration = acceleration *
+          (inWater
+            ? waterAcceleration
+            : offTrack ? OFF_TRACK_ACCELERATION_MULTIPLIER : 1);
+        if (surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
+          surfaceDisplayRef.current.style.color = offTrack ? '#ffbc75' : '#9fe49b';
+        }
+
+        if (keys.KeyW || keys.ArrowUp) {
+          currentSpeed +=
+            effectiveAcceleration * delta;
+
           currentSpeed = Math.min(
-            0,
-            currentSpeed +
-              friction * delta
-          );
-        }
-      }
-
-      if (
-        currentSpeed > maxSpeed
-      ) {
-        currentSpeed = Math.max(
-          maxSpeed,
-          currentSpeed -
-            braking * delta
-        );
-      }
-
-      // ---------------------------------
-      // SPEED HUD
-      // ---------------------------------
-
-      if (speedDisplayRef.current) {
-        const speedKmh =
-          Math.abs(currentSpeed) *
-          3.6;
-
-        speedDisplayRef.current.textContent =
-          speedKmh.toFixed(1);
-      }
-
-      // ---------------------------------
-      // STEERING AND LEAN
-      // ---------------------------------
-
-      const steeringFactor =
-        Math.min(
-          Math.abs(currentSpeed) /
-            HANDLING.fullSteerSpeed,
-          1
-        );
-
-      const effort = sprintFraction(
-        currentSpeed,
-        runSpeed,
-        sprintSpeed
-      );
-
-      const turnInput =
-        (keys.KeyA || keys.ArrowLeft ? 1 : 0) -
-        (keys.KeyD || keys.ArrowRight ? 1 : 0);
-
-      // The turn builds and fades: a running dog cannot change line instantly
-      steer +=
-        (turnInput - steer) *
-        (1 -
-          Math.exp(
-            -HANDLING.steerResponse * delta
-          ));
-
-      // Fast means wide: the turn rate falls away as the dog stretches out
-      const turnRate = THREE.MathUtils.lerp(
-        turnRateSlow,
-        turnRateSprint,
-        effort
-      );
-
-      player.rotation.y +=
-        turnRate *
-        steer *
-        steeringFactor *
-        delta;
-
-      // Turning hard at speed costs speed
-      const turnLimit =
-        maxSpeed *
-        (1 -
-          HANDLING.turnSpeedLoss *
-            Math.abs(steer) *
-            effort);
-
-      if (currentSpeed > turnLimit) {
-        currentSpeed = Math.max(
-          turnLimit,
-          currentSpeed -
-            braking * 0.5 * delta
-        );
-      }
-
-      // ---------------------------------
-      // MOVEMENT
-      // ---------------------------------
-
-      // The dog travels where its momentum takes it, which trails the way
-      // its nose points: at a sprint it drifts a little through a turn
-      const grip = THREE.MathUtils.lerp(
-        HANDLING.gripSlow,
-        gripSprint,
-        effort
-      );
-
-      travelYaw +=
-        Math.atan2(
-          Math.sin(player.rotation.y - travelYaw),
-          Math.cos(player.rotation.y - travelYaw)
-        ) *
-        (1 - Math.exp(-grip * delta));
-
-      const forward = forwardDirection
-        .clone()
-        .applyAxisAngle(
-          THREE.Object3D.DEFAULT_UP,
-          travelYaw
-        );
-
-      const previousPosition = player.position.clone();
-      const proposedPosition = previousPosition.clone().addScaledVector(
-        forward,
-        currentSpeed * delta
-      );
-      if (blockedByObstacle(previousPosition, proposedPosition)) {
-        // Stop forward movement; steering and jumping remain available.
-        currentSpeed = 0;
-      } else {
-        player.position.copy(proposedPosition);
-      }
-
-      // ---------------------------------
-      // BUMPING OTHER DOGS
-      // ---------------------------------
-
-      const mySize = dogConfig.size ?? 1;
-      const myMass = dogMass(dogConfig);
-      const myVelocity = forward
-        .clone()
-        .multiplyScalar(currentSpeed)
-        .add(knock);
-      const push = new THREE.Vector3();
-
-      remotePlayers.forEach((remote) => {
-        const other = remote.group.position;
-        const otherSize = remote.config.size ?? 1;
-        const lift = player.position.y - other.y;
-
-        // One dog is jumping clean over the other
-        if (
-          lift > CONTACT.clearHeight * otherSize ||
-          -lift > CONTACT.clearHeight * mySize
-        ) {
-          return;
-        }
-
-        const hit = dogOverlap(
-          player.position,
-          player.rotation.y,
-          mySize,
-          other,
-          remote.group.rotation.y,
-          otherSize
-        );
-
-        if (!hit) return;
-
-        // The lighter dog gives more of the ground
-        const share =
-          dogMass(remote.config) /
-          (myMass + dogMass(remote.config));
-
-        push.x += hit.x * hit.depth * share;
-        push.z += hit.z * hit.depth * share;
-
-        const fresh =
-          performance.now() - remote.lastMoveTime <
-          CONTACT.staleAfter * 1000;
-        const closing =
-          ((fresh ? remote.velocity.x : 0) - myVelocity.x) * hit.x +
-          ((fresh ? remote.velocity.z : 0) - myVelocity.z) * hit.z;
-
-        if (closing > 0) {
-          // Thrown the way the other dog was driving, harder the faster
-          // they met.  Topped up to that speed, never stacked every frame.
-          const wanted = closing * (1 + CONTACT.bounce) * share;
-          const already = knock.x * hit.x + knock.z * hit.z;
-
-          if (already < wanted) {
-            knock.x += hit.x * (wanted - already);
-            knock.z += hit.z * (wanted - already);
-          }
-        }
-      });
-
-      knock.clampLength(0, CONTACT.maxKnock);
-      push.addScaledVector(knock, delta);
-      knock.multiplyScalar(Math.exp(-CONTACT.fade * delta));
-
-      if (push.lengthSq() > 1e-10) {
-        const from = player.position.clone();
-        const to = from.clone().add(push);
-
-        if (blockedByObstacle(from, to)) {
-          knock.set(0, 0, 0);
-        } else {
-          player.position.copy(to);
-        }
-      }
-
-      // Recheck at the new location, so the slowdown begins immediately.
-      offTrack = !isJumping && !isTrackSurface(player.position);
-      const wading = offTrack && isOverWater(player.position);
-      if (offTrack) {
-        const offTrackLimit = sprintSpeed *
-          (wading ? waterSpeed : OFF_TRACK_SPEED_MULTIPLIER);
-        currentSpeed = Math.min(currentSpeed, offTrackLimit);
-      }
-      if (surfaceDisplayRef.current) {
-        surfaceDisplayRef.current.textContent = wading
-          ? 'IN THE WATER — JUMP IT NEXT TIME'
-          : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
-        surfaceDisplayRef.current.style.color = wading
-          ? '#8fd0ff'
-          : offTrack ? '#ffbc75' : '#9fe49b';
-      }
-
-      // ---------------------------------
-      // JUMPING
-      // ---------------------------------
-
-      if (isJumping) {
-        verticalVelocity -=
-          gravity * delta;
-
-        jumpHeight +=
-          verticalVelocity * delta;
-
-        if (jumpHeight <= 0) {
-          jumpHeight = 0;
-          verticalVelocity = 0;
-          isJumping = false;
-
-          // Landing at a run goes straight back into the stride; only a
-          // standing jump plays the settle-and-stand landing
-          if (
-            Math.abs(currentSpeed) > RUNNING_JUMP_SPEED
-          ) {
-            isLanding = false;
-          } else {
-            isLanding = true;
-            playAnimation('Land');
-          }
-        }
-      }
-
-      // ---------------------------------
-      // FOLLOW THE GROUND
-      // ---------------------------------
-
-      // Over a dip (the stream) a jumping dog keeps the height it took off
-      // from; it only meets lower ground once it comes down
-      const groundBelow = groundHeightAt(player.position, groundY);
-      const groundNow = isJumping
-        ? Math.max(groundBelow, groundY)
-        : groundBelow;
-
-      // Ease onto the new height so tile edges and kerbs do not jolt the dog,
-      // but go straight there after a big change (a respawn, a drop)
-      groundY =
-        Math.abs(groundNow - groundY) > 2.5
-          ? groundNow
-          : groundY +
-            (groundNow - groundY) *
-              (1 - Math.exp(-22 * delta));
-
-      player.position.y = groundY + jumpHeight;
-
-      // Slope under the dog, from the ground a stride ahead
-      const ahead = player.position
-        .clone()
-        .addScaledVector(forward, 1.6);
-      ahead.y = groundY;
-
-      const slopeNow =
-        (groundHeightAt(ahead, groundY) - groundY) / 1.6;
-
-      slope +=
-        (THREE.MathUtils.clamp(slopeNow, -0.4, 0.4) - slope) *
-        (1 - Math.exp(-8 * delta));
-
-      // ---------------------------------
-      // DOG ANIMATIONS
-      // ---------------------------------
-
-      const isMoving =
-        Math.abs(currentSpeed) >
-        0.1;
-
-      if (
-        !isJumping &&
-        !isLanding
-      ) {
-        // A little overlap between strides stops them flickering
-        // The stride follows the speed, as a dog's does.  A little overlap
-        // between strides stops them flickering at the changeover.
-        // A short-legged dog changes stride at lower speeds
-        const bands = dogConfig.strideBands ?? 1;
-        const pace = Math.abs(currentSpeed) / bands;
-        const holding = (name, margin) =>
-          currentAnimation === name ? margin : 0;
-
-        if (!isMoving) {
-          playAnimation('Idle');
-        } else if (
-          pace <
-          HANDLING.walkBelow + holding('Walk', 0.5)
-        ) {
-          playAnimation('Walk');
-        } else if (
-          pace <
-          HANDLING.trotBelow + holding('Trot', 0.7)
-        ) {
-          playAnimation('Trot');
-        } else if (
-          pace >
-          HANDLING.runBelow - holding('Sprint', 1.0)
-        ) {
-          playAnimation('Sprint');
-        } else {
-          playAnimation('Run');
-        }
-      }
-
-      if (currentAction) {
-        currentAction.timeScale =
-          gaitTimeScale(
-            currentAction,
             currentSpeed,
-            dogConfig
+            maxSpeed
           );
-      }
+        } else if (keys.KeyS || keys.ArrowDown) {
+          currentSpeed -=
+            braking * delta;
 
-      if (dogMixer) {
-        dogMixer.update(delta);
+          currentSpeed = Math.max(
+            currentSpeed,
+            -reverseSpeed
+          );
+        } else {
+          if (currentSpeed > 0) {
+            currentSpeed = Math.max(
+              0,
+              currentSpeed -
+                friction * delta
+            );
+          } else if (
+            currentSpeed < 0
+          ) {
+            currentSpeed = Math.min(
+              0,
+              currentSpeed +
+                friction * delta
+            );
+          }
+        }
 
-        applyTurnPose(
-          dogModel,
-          dogBones,
-          steer * steeringFactor,
+        if (
+          currentSpeed > maxSpeed
+        ) {
+          currentSpeed = Math.max(
+            maxSpeed,
+            currentSpeed -
+              braking * delta
+          );
+        }
+
+        // ---------------------------------
+        // SPEED HUD
+        // ---------------------------------
+
+        if (speedDisplayRef.current) {
+          const speedKmh =
+            Math.abs(currentSpeed) *
+            3.6;
+
+          speedDisplayRef.current.textContent =
+            speedKmh.toFixed(1);
+        }
+
+        // ---------------------------------
+        // STEERING AND LEAN
+        // ---------------------------------
+
+        const steeringFactor =
+          Math.min(
+            Math.abs(currentSpeed) /
+              HANDLING.fullSteerSpeed,
+            1
+          );
+
+        const effort = sprintFraction(
+          currentSpeed,
+          runSpeed,
+          sprintSpeed
+        );
+
+        const turnInput =
+          (keys.KeyA || keys.ArrowLeft ? 1 : 0) -
+          (keys.KeyD || keys.ArrowRight ? 1 : 0);
+
+        // The turn builds and fades: a running dog cannot change line instantly
+        steer +=
+          (turnInput - steer) *
+          (1 -
+            Math.exp(
+              -HANDLING.steerResponse * delta
+            ));
+
+        // Fast means wide: the turn rate falls away as the dog stretches out
+        const turnRate = THREE.MathUtils.lerp(
+          turnRateSlow,
+          turnRateSprint,
           effort
         );
 
-        // Nose up the hills and down the far side (not while in the air)
-        if (dogModel) {
-          dogModel.rotation.x = isJumping
-            ? 0
-            : -Math.atan(slope);
+        player.rotation.y +=
+          turnRate *
+          steer *
+          steeringFactor *
+          delta;
+
+        // Turning hard at speed costs speed
+        const turnLimit =
+          maxSpeed *
+          (1 -
+            HANDLING.turnSpeedLoss *
+              Math.abs(steer) *
+              effort);
+
+        if (currentSpeed > turnLimit) {
+          currentSpeed = Math.max(
+            turnLimit,
+            currentSpeed -
+              braking * 0.5 * delta
+          );
+        }
+
+        // ---------------------------------
+        // MOVEMENT
+        // ---------------------------------
+
+        // The dog travels where its momentum takes it, which trails the way
+        // its nose points: at a sprint it drifts a little through a turn
+        const grip = THREE.MathUtils.lerp(
+          HANDLING.gripSlow,
+          gripSprint,
+          effort
+        );
+
+        travelYaw +=
+          Math.atan2(
+            Math.sin(player.rotation.y - travelYaw),
+            Math.cos(player.rotation.y - travelYaw)
+          ) *
+          (1 - Math.exp(-grip * delta));
+
+        const forward = forwardDirection
+          .clone()
+          .applyAxisAngle(
+            THREE.Object3D.DEFAULT_UP,
+            travelYaw
+          );
+
+        const previousPosition = player.position.clone();
+        const proposedPosition = previousPosition.clone().addScaledVector(
+          forward,
+          currentSpeed * delta
+        );
+        if (blockedByObstacle(previousPosition, proposedPosition)) {
+          // Stop forward movement; steering and jumping remain available.
+          currentSpeed = 0;
+        } else {
+          player.position.copy(proposedPosition);
+        }
+
+        // ---------------------------------
+        // BUMPING OTHER DOGS
+        // ---------------------------------
+
+        const mySize = dogConfig.size ?? 1;
+        const myMass = dogMass(dogConfig);
+        const myVelocity = forward
+          .clone()
+          .multiplyScalar(currentSpeed)
+          .add(knock);
+        const push = new THREE.Vector3();
+
+        remotePlayers.forEach((remote) => {
+          const other = remote.group.position;
+          const otherSize = remote.config.size ?? 1;
+          const lift = player.position.y - other.y;
+
+          // One dog is jumping clean over the other
+          if (
+            lift > CONTACT.clearHeight * otherSize ||
+            -lift > CONTACT.clearHeight * mySize
+          ) {
+            return;
+          }
+
+          const hit = dogOverlap(
+            player.position,
+            player.rotation.y,
+            mySize,
+            other,
+            remote.group.rotation.y,
+            otherSize
+          );
+
+          if (!hit) return;
+
+          // The lighter dog gives more of the ground
+          const share =
+            dogMass(remote.config) /
+            (myMass + dogMass(remote.config));
+
+          push.x += hit.x * hit.depth * share;
+          push.z += hit.z * hit.depth * share;
+
+          const fresh =
+            performance.now() - remote.lastMoveTime <
+            CONTACT.staleAfter * 1000;
+          const closing =
+            ((fresh ? remote.velocity.x : 0) - myVelocity.x) * hit.x +
+            ((fresh ? remote.velocity.z : 0) - myVelocity.z) * hit.z;
+
+          if (closing > 0) {
+            // Thrown the way the other dog was driving, harder the faster
+            // they met.  Topped up to that speed, never stacked every frame.
+            const wanted = closing * (1 + CONTACT.bounce) * share;
+            const already = knock.x * hit.x + knock.z * hit.z;
+
+            if (already < wanted) {
+              knock.x += hit.x * (wanted - already);
+              knock.z += hit.z * (wanted - already);
+            }
+          }
+        });
+
+        knock.clampLength(0, CONTACT.maxKnock);
+        push.addScaledVector(knock, delta);
+        knock.multiplyScalar(Math.exp(-CONTACT.fade * delta));
+
+        if (push.lengthSq() > 1e-10) {
+          const from = player.position.clone();
+          const to = from.clone().add(push);
+
+          if (blockedByObstacle(from, to)) {
+            knock.set(0, 0, 0);
+          } else {
+            player.position.copy(to);
+          }
+        }
+
+        // Recheck at the new location, so the slowdown begins immediately.
+        offTrack = !isJumping && !isTrackSurface(player.position);
+        const wading = offTrack && isOverWater(player.position);
+        if (offTrack) {
+          const offTrackLimit = sprintSpeed *
+            (wading ? waterSpeed : OFF_TRACK_SPEED_MULTIPLIER);
+          currentSpeed = Math.min(currentSpeed, offTrackLimit);
+        }
+        if (surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = wading
+            ? 'IN THE WATER — JUMP IT NEXT TIME'
+            : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
+          surfaceDisplayRef.current.style.color = wading
+            ? '#8fd0ff'
+            : offTrack ? '#ffbc75' : '#9fe49b';
+        }
+
+        // ---------------------------------
+        // JUMPING
+        // ---------------------------------
+
+        if (isJumping) {
+          verticalVelocity -=
+            gravity * delta;
+
+          jumpHeight +=
+            verticalVelocity * delta;
+
+          if (jumpHeight <= 0) {
+            jumpHeight = 0;
+            verticalVelocity = 0;
+            isJumping = false;
+
+            // Landing at a run goes straight back into the stride; only a
+            // standing jump plays the settle-and-stand landing
+            if (
+              Math.abs(currentSpeed) > RUNNING_JUMP_SPEED
+            ) {
+              isLanding = false;
+            } else {
+              isLanding = true;
+              playAnimation('Land');
+            }
+          }
+        }
+
+        // ---------------------------------
+        // FOLLOW THE GROUND
+        // ---------------------------------
+
+        // Over a dip (the stream) a jumping dog keeps the height it took off
+        // from; it only meets lower ground once it comes down
+        const groundBelow = groundHeightAt(player.position, groundY);
+        const groundNow = isJumping
+          ? Math.max(groundBelow, groundY)
+          : groundBelow;
+
+        // Ease onto the new height so tile edges and kerbs do not jolt the dog,
+        // but go straight there after a big change (a respawn, a drop)
+        groundY =
+          Math.abs(groundNow - groundY) > 2.5
+            ? groundNow
+            : groundY +
+              (groundNow - groundY) *
+                (1 - Math.exp(-22 * delta));
+
+        player.position.y = groundY + jumpHeight;
+
+        // Slope under the dog, from the ground a stride ahead
+        const ahead = player.position
+          .clone()
+          .addScaledVector(forward, 1.6);
+        ahead.y = groundY;
+
+        const slopeNow =
+          (groundHeightAt(ahead, groundY) - groundY) / 1.6;
+
+        slope +=
+          (THREE.MathUtils.clamp(slopeNow, -0.4, 0.4) - slope) *
+          (1 - Math.exp(-8 * delta));
+
+        // ---------------------------------
+        // DOG ANIMATIONS
+        // ---------------------------------
+
+        const isMoving =
+          Math.abs(currentSpeed) >
+          0.1;
+
+        if (
+          !isJumping &&
+          !isLanding
+        ) {
+          // A little overlap between strides stops them flickering
+          // The stride follows the speed, as a dog's does.  A little overlap
+          // between strides stops them flickering at the changeover.
+          // A short-legged dog changes stride at lower speeds
+          const bands = dogConfig.strideBands ?? 1;
+          const pace = Math.abs(currentSpeed) / bands;
+          const holding = (name, margin) =>
+            currentAnimation === name ? margin : 0;
+
+          if (!isMoving) {
+            playAnimation('Idle');
+          } else if (
+            pace <
+            HANDLING.walkBelow + holding('Walk', 0.5)
+          ) {
+            playAnimation('Walk');
+          } else if (
+            pace <
+            HANDLING.trotBelow + holding('Trot', 0.7)
+          ) {
+            playAnimation('Trot');
+          } else if (
+            pace >
+            HANDLING.runBelow - holding('Sprint', 1.0)
+          ) {
+            playAnimation('Sprint');
+          } else {
+            playAnimation('Run');
+          }
+        }
+
+        if (currentAction) {
+          currentAction.timeScale =
+            gaitTimeScale(
+              currentAction,
+              currentSpeed,
+              dogConfig
+            );
+        }
+
+        if (dogMixer) {
+          dogMixer.update(delta);
+
+          applyTurnPose(
+            dogModel,
+            dogBones,
+            steer * steeringFactor,
+            effort
+          );
+
+          // Nose up the hills and down the far side (not while in the air)
+          if (dogModel) {
+            dogModel.rotation.x = isJumping
+              ? 0
+              : -Math.atan(slope);
+          }
+        }
+
+        if (skyTrack && surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = performance.now() < recoveryUntil
+            ? 'RECOVERING — REDUCED SPEED'
+            : offTrack ? 'OFF THE EDGE' : 'ON TRACK';
         }
       }
 
@@ -2222,7 +2311,8 @@ function App() {
             rotation:
               player.rotation.y,
             animation:
-              currentAnimation
+              currentAnimation,
+            respawnRevision
           }
         );
       }
@@ -2365,6 +2455,10 @@ function App() {
         'playerLeft',
         handlePlayerLeft
       );
+      socket.off('playerFell', handlePlayerFell);
+      socket.off('playerRespawned', handlePlayerRespawned);
+      restoreEnvironment?.();
+      proceduralWorld?.dispose();
 
       window.removeEventListener(
         'keydown',
@@ -2923,7 +3017,9 @@ function App() {
         <div style={{ fontSize: 11, marginTop: 14, color: '#b4c9b5', lineHeight: 1.6 }}>
           <div>W / ↑ accelerate · S / ↓ brake / reverse</div>
           <div>A / D or ← / → steer</div>
-          <div>Space or scroll down to jump</div>
+          <div>{MAPS[room?.mapId ?? DEFAULT_MAP].allowJump === false
+            ? 'Stay on the road · falls return you to a checkpoint'
+            : 'Space or scroll down to jump'}</div>
         </div>
       </div>
 

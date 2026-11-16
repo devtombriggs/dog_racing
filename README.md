@@ -1,6 +1,8 @@
 # Dog Racing
 
-Choose **Wendover Woods** or **Frostpeak Alpine Circuit** from the main menu, then start Single Player or Host Game. Multiplayer guests use the host's map. The host can change maps in the lobby; changing the course clears everyone's ready status.
+Choose **Wendover Woods**, **Frostpeak Alpine Circuit** or **Treat Road** from the main menu, then start Single Player or Host Game. Multiplayer guests use the host's map. The host can change maps in the lobby; chosen dogs stay ready.
+
+**Treat Road** is a 2.9 km, three-lap sky circuit with biscuit tiles, a bone bridge and sunset scenery. There are no barriers or jumps: leaving either edge makes the dog fall, then return to its last checkpoint after one second, with 55% top speed for 1.5 seconds. Checkpoints must be collected in order, after passing their location; finish-line crossings must be forward. The server decides falls and respawns, and discards movement sent before a respawn.
 
 Enter **Your name** on the main menu so friends can recognize you, then choose **Host Game**. Friends choose **Join Game** to browse live lobbies by host name, map and player count, and click **Join** without entering a code. Everyone must connect to the same game server. Full lobbies are marked unavailable; games disappear from the list when a race starts or the last player leaves. If the host leaves, a remaining player becomes the host. Single-player games are private and never appear in the browser.
 
@@ -24,8 +26,10 @@ The backend defaults to port 3001; set `PORT` to run a separate instance and poi
 npm run dev
 ```
 
-Restart the backend after updating: both client and server need the lobby browser and map selection support. For Docker, rebuild both services with `docker compose up --build -d`.
+Restart the backend after updating: both client and server need the same map definitions, including Treat Road. For Docker, rebuild both services with `docker compose up --build -d`.
 
 Checks: `npm test`, `npm run lint`, and `npm run build`. Tests exercise the socket handlers in memory, live lobby listings, single-player privacy, capacity and stale joins, map-specific laps and start positions, and the Frostpeak GLB geometry/heightmap. They do not replace a browser playtest.
 
 Map definitions live in `shared/maps.js`. `shared/frostpeak.json` is copied from `../frostpeak_alpine_circuit/frostpeak_track_config.json`; the GLB and heightmap are copied into `public/models/`. Refresh all three copies if the source map is regenerated.
+
+Treat Road uses `shared/treatRoadData.js` for geometry and `src/tracks/treatRoad/TreatRoadTrack.js` for visuals, copied from `../treat_road/src/tracks/treatRoad/` (the visual module's data import points into `shared/`). The scene is built on demand; no GLB or CDN is needed. `server/server.js` uses the existing lap/checkpoint system plus Treat Road's fall/respawn rules. The standalone `treatRoadRace.js` demo controller is not used by the game. Map/server tests cover the five spawns, road edges, three laps, recovery and stale movement after respawn.

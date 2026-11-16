@@ -1,4 +1,5 @@
 import frostpeak from './frostpeak.json' with { type: 'json' };
+import { TREAT_ROAD } from './treatRoadData.js';
 
 const STARTING_GRID = [
   [-4, 0, 4.2],
@@ -50,6 +51,21 @@ export const MAPS = {
     startFinish: frostpeak.startFinish,
     heightmap: { ...frostpeak.heightmap, file: '/models/frostpeak_heightmap.bin' },
     lighting: frostpeak.lighting
+  },
+  treat_road: {
+    name: TREAT_ROAD.name,
+    description: '2.9 km sky circuit · no barriers · checkpoint respawns',
+    procedural: true,
+    allowJump: false,
+    startPositions: TREAT_ROAD.startPositions,
+    checkpoints: TREAT_ROAD.checkpoints.slice(1).map(({ position, halfWidth, rotationY }) => ({
+      x: position[0], y: position[1], z: position[2], radius: halfWidth + 8,
+      forward: [Math.sin(rotationY), Math.cos(rotationY)]
+    })),
+    startFinish: {
+      ...TREAT_ROAD.startFinish,
+      forward: [Math.sin(TREAT_ROAD.startFinish.rotationY), 0, Math.cos(TREAT_ROAD.startFinish.rotationY)]
+    }
   }
 };
 

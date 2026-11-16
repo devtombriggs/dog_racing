@@ -4,6 +4,31 @@ import { test } from 'node:test';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MAPS, crossedFinishLine, sampleGroundHeight } from '../shared/maps.js';
+import { TREAT_ROAD } from '../shared/treatRoadData.js';
+
+test('Treat Road has a continuous elevated road, supported spawns, and open edges', () => {
+  assert.equal(MAPS.treat_road.startPositions.length, 5);
+  assert.equal(MAPS.treat_road.checkpoints.length, 28);
+  assert.ok(Math.abs(TREAT_ROAD.length - 2900) < 5);
+  const samples = TREAT_ROAD.samples;
+  for (let i = 0; i < TREAT_ROAD.sampleCount; i++) {
+    const j = (i + 1) % TREAT_ROAD.sampleCount;
+    assert.ok(Math.hypot(samples.x[j] - samples.x[i], samples.y[j] - samples.y[i], samples.z[j] - samples.z[i]) < 2.6);
+  }
+  for (const { position } of MAPS.treat_road.startPositions) {
+    const ground = TREAT_ROAD.query(position[0], position[2]);
+    assert.ok(ground.onTrack);
+    assert.ok(Math.abs(ground.y - position[1]) < 0.1);
+  }
+  for (const cp of TREAT_ROAD.checkpoints) {
+    for (const sign of [-1, 1]) {
+      const inside = TREAT_ROAD.pointAt(cp.s, sign * (cp.halfWidth - 0.5));
+      const outside = TREAT_ROAD.pointAt(cp.s, sign * (cp.halfWidth + 2));
+      assert.ok(TREAT_ROAD.query(inside.x, inside.z).onTrack);
+      assert.equal(TREAT_ROAD.query(outside.x, outside.z).onTrack, false);
+    }
+  }
+});
 
 for (const [id, map] of Object.entries(MAPS)) {
   test(`${id}: finish requires forward crossing within the course width`, () => {

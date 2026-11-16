@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 import { MAPS } from '../shared/maps.js';
+import { TREAT_ROAD } from '../shared/treatRoadData.js';
 
 // Exercise the real socket handlers in memory, without binding a network port.
 let server;
@@ -223,8 +224,8 @@ for (const [mapId, map] of Object.entries(MAPS)) {
     for (let lap = 1; lap <= 3; lap++) {
       // Skipping ahead cannot advance the required checkpoint.
       const last = map.checkpoints.at(-1);
-      move([last.x, 0, last.z]);
-      for (const checkpoint of map.checkpoints) move([checkpoint.x, 0, checkpoint.z]);
+      move([last.x, last.y ?? 0, last.z]);
+      for (const checkpoint of map.checkpoints) move([checkpoint.x, checkpoint.y ?? 0, checkpoint.z]);
       let progress = latest(room.code, 'raceProgress');
       assert.equal(progress.checkpoint, map.checkpoints.length);
       assert.equal(progress.lap, lap);
@@ -242,3 +243,44 @@ for (const [mapId, map] of Object.entries(MAPS)) {
     host.call('leaveGame'); guest.call('leaveGame');
   });
 }
+
+test('Treat Road falls, respawns at the last checkpoint, and rejects pre-respawn movement', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { mapId: 'treat_road' }).room;
+  guest.call('joinGame', { roomCode: room.code });
+  host.call('selectDog', { dog: 'gsp' });
+  guest.call('selectDog', { dog: 'ralph' });
+  assert.equal(host.call('startRace').success, true);
+  host.call('raceLoaded'); guest.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const move = (position, respawnRevision = 0) => host.call('playerMove', {
+    position, rotation: 0, animation: 'Run', respawnRevision
+  });
+  const cp = TREAT_ROAD.checkpoints[1];
+  move(cp.position);
+  assert.equal(latest(room.code, 'raceProgress').checkpoint, 1);
+  const edge = TREAT_ROAD.pointAt(cp.s + 20, cp.halfWidth + 3);
+  move([edge.x, edge.y, edge.z]);
+  assert.equal(latest(room.code, 'playerFell').playerId, host.id);
+  context.mock.timers.tick(500);
+  // Sending an on-road location during a fall cannot cancel it or skip ahead.
+  move(TREAT_ROAD.checkpoints[2].position);
+  assert.ok(latest(room.code, 'playerMoved').position[1] < edge.y);
+  assert.equal(latest(room.code, 'raceProgress').checkpoint, 1);
+  assert.equal(latest(room.code, 'playerRespawned'), undefined);
+  context.mock.timers.tick(500);
+  move([edge.x, edge.y - 20, edge.z]);
+  const respawn = latest(room.code, 'playerRespawned');
+  assert.equal(respawn.playerId, host.id);
+  assert.equal(respawn.respawnRevision, 1);
+  assert.equal(respawn.penaltySeconds, 1.5);
+  assert.equal(respawn.speedMultiplier, 0.55);
+  assert.ok(TREAT_ROAD.query(respawn.position[0], respawn.position[2]).onTrack);
+  assert.ok(Math.hypot(respawn.position[0] - cp.position[0], respawn.position[2] - cp.position[2]) < 3);
+  move([edge.x, edge.y - 20, edge.z]);
+  assert.deepEqual(latest(room.code, 'playerMoved').position, respawn.position);
+  move(TREAT_ROAD.checkpoints[2].position, 1);
+  assert.equal(latest(room.code, 'raceProgress').checkpoint, 2);
+  host.call('leaveGame'); guest.call('leaveGame');
+});
