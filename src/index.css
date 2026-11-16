@@ -87,10 +87,10 @@ html, body, #root {
   padding: 0;
   min-width: 0;
   aspect-ratio: 1;
-  border: 1px solid #ffffff25;
+  border: 1px solid transparent;
   border-radius: 16px;
   overflow: hidden;
-  background: #050806;
+  background: transparent;
   color: white;
   font: inherit;
   text-align: left;
@@ -107,7 +107,8 @@ html, body, #root {
 
 .character-card__caption {
   position: absolute;
-  inset: auto 0 0;
+  inset: auto 4% 4%;
+  border-radius: 0 0 14px 14px;
   padding: 36px 16px 16px;
   background: linear-gradient(transparent, #020805e8 55%, #020805);
   pointer-events: none;
