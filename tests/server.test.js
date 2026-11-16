@@ -107,6 +107,46 @@ test('starting a race removes the listing and stale join attempts fail cleanly',
   assert.equal(guest.call('joinGame', { roomCode: room.code }).error, 'Room not found');
 });
 
+test('each dog can be picked once, picking readies, and the host starts when all have picked', () => {
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { name: 'Tom' }).room;
+  guest.call('joinGame', { roomCode: room.code, name: 'Sarah' });
+  assert.equal(host.call('selectDog', { dog: 'second_dog' }).success, true);
+  assert.equal(latest(room.code, 'lobbyUpdated').players[0].ready, true);
+  // Taken dogs are refused, and the host cannot start while someone is still choosing.
+  assert.deepEqual(guest.call('selectDog', { dog: 'second_dog' }), { success: false, error: 'Tom has already picked that dog' });
+  assert.equal(host.call('startRace').error, 'Everyone needs to choose a dog first');
+  // Re-picking your own dog is fine; handing it back frees it for someone else.
+  assert.equal(host.call('selectDog', { dog: 'second_dog' }).success, true);
+  assert.equal(host.call('changeDog').success, true);
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').players[0], { ...latest(room.code, 'lobbyUpdated').players[0], dog: null, ready: false });
+  assert.equal(guest.call('selectDog', { dog: 'second_dog' }).success, true);
+  assert.equal(host.call('selectDog', { dog: 'black_lab' }).success, true);
+  assert.equal(host.call('startRace').success, true);
+  host.call('leaveGame'); guest.call('leaveGame');
+});
+
+test('players keep their own seat colour and see which dog each other is looking at', () => {
+  const host = client(), second = client(), third = client();
+  const room = host.call('hostGame', { name: 'Tom' }).room;
+  second.call('joinGame', { roomCode: room.code });
+  third.call('joinGame', { roomCode: room.code });
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').players.map(player => player.slot), [0, 1, 2]);
+  // A seat freed by someone leaving goes to the next player to join; nobody else's changes.
+  second.call('leaveGame');
+  const fourth = client();
+  fourth.call('joinGame', { roomCode: room.code });
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').players.map(player => player.slot), [0, 2, 1]);
+  third.call('hoverDog', { dog: 'ralph' });
+  assert.equal(latest(room.code, 'lobbyUpdated').players[1].hover, 'ralph');
+  third.call('hoverDog', { dog: 'not-a-dog' });
+  assert.equal(latest(room.code, 'lobbyUpdated').players[1].hover, null);
+  third.call('hoverDog', { dog: 'ralph' });
+  third.call('selectDog', { dog: 'ralph' });
+  assert.equal(latest(room.code, 'lobbyUpdated').players[1].hover, null);
+  host.call('leaveGame'); third.call('leaveGame'); fourth.call('leaveGame');
+});
+
 test('display names are bounded and invalid or empty names use defaults', () => {
   const host = client(), guest = client();
   const room = host.call('hostGame', { name: 'A'.repeat(100) }).room;
@@ -118,7 +158,7 @@ test('display names are bounded and invalid or empty names use defaults', () => 
   host.call('leaveGame');
 });
 
-test('map choice is validated, synchronized, host-only, and resets readiness', () => {
+test('map choice is validated, synchronized, host-only, and keeps chosen dogs', () => {
   const host = client(), guest = client();
   assert.equal(host.call('hostGame', { mapId: 'missing' }).success, false);
   assert.equal(host.call('hostGame', { mapId: 'toString' }).success, false);
@@ -134,8 +174,8 @@ test('map choice is validated, synchronized, host-only, and resets readiness', (
   assert.equal(host.call('selectMap', { mapId: 'wendover' }).success, true);
   const update = latest(room.code, 'lobbyUpdated');
   assert.equal(update.mapId, 'wendover');
-  assert.ok(update.players.every(player => !player.ready));
-  assert.equal(host.call('startRace').success, false);
+  assert.deepEqual(update.players.map(player => player.dog), ['gsp', 'ralph']);
+  assert.ok(update.players.every(player => player.ready));
   host.call('leaveGame'); guest.call('leaveGame');
 });
 

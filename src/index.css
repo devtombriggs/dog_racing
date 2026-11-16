@@ -129,6 +129,44 @@ html, body, #root {
   color: #d0dbd4;
 }
 
+.character-card__caption > .character-card__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 12px;
+  margin-top: 10px;
+  color: #e6eee8;
+}
+
+.character-card__stat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.character-card__stat-name { flex: 0 0 3.9em; color: #b9c8be; }
+
+.character-card__stat-bar {
+  flex: 1 1 auto;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #ffffff26;
+}
+
+.character-card__stat-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--portrait-accent);
+}
+
+.character-card__stat-value { flex: 0 0 1.4em; text-align: right; }
+
 .character-card__action {
   position: absolute;
   top: 12px;
@@ -160,6 +198,55 @@ html, body, #root {
 .character-card:enabled:hover .character-card__action,
 .character-card:focus-visible .character-card__action { opacity: 1; }
 .character-card:disabled { opacity: 0.5; cursor: default; }
+.character-card--taken:disabled { opacity: 1; }
+.character-card--taken img { filter: grayscale(1) brightness(0.45); }
+.character-card--taken .character-card__caption { opacity: 0.6; }
+
+.character-card__cursors {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 60%;
+  pointer-events: none;
+}
+
+.character-card__cursors > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 7px;
+  border-radius: 5px;
+  color: #0b1210;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.character-card__taken {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 88%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 8px 12px;
+  border: 1px solid #ffffff55;
+  border-radius: 6px;
+  background: #070c0df0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 
 .character-select__footer {
   display: flex;
@@ -201,6 +288,7 @@ html, body, #root {
   .character-select__header { padding-bottom: 20px; margin-bottom: 24px; gap: 16px; }
   .character-card__caption { padding: 28px 12px 12px; }
   .character-card__caption > span { font-size: 10px; }
+  .character-card__caption > .character-card__stats { grid-template-columns: 1fr; gap: 4px; margin-top: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -75,10 +75,15 @@ function clearCountdown(room) {
   }
 }
 
-function createPlayer(socketId, name) {
+// `slot` is the player's seat in the room (0 to 4): it stays theirs until they
+// leave, and the game colours each player by it.  `hover` is the dog they are
+// looking at on the select screen.
+function createPlayer(socketId, name, slot = 0) {
   return {
     id: socketId,
     name,
+    slot,
+    hover: null,
     dog: null,
     ready: false,
     loaded: false,
@@ -367,9 +372,14 @@ io.on('connection', (socket) => {
 
     leaveRoom(socket);
 
+    const seats = new Set([...room.players.values()].map((other) => other.slot));
+    let slot = 0;
+    while (seats.has(slot)) slot += 1;
+
     const player = createPlayer(
       socket.id,
-      playerName(data?.name, `Player ${room.players.size + 1}`)
+      playerName(data?.name, `Player ${room.players.size + 1}`),
+      slot
     );
 
     room.players.set(socket.id, player);
@@ -396,10 +406,8 @@ io.on('connection', (socket) => {
     if (!Object.hasOwn(MAPS, data?.mapId)) {
       return callback?.({ success: false, error: 'Invalid map selection' });
     }
-    if (room.mapId !== data.mapId) {
-      room.mapId = data.mapId;
-      for (const player of room.players.values()) player.ready = false;
-    }
+    // Players keep the dogs they have picked when the course changes.
+    room.mapId = data.mapId;
     updateLobby(room);
     callback?.({ success: true });
   });
@@ -435,9 +443,58 @@ io.on('connection', (socket) => {
       });
     }
 
+    // One of each dog per race: the first to pick it has it.
+    const takenBy = [...room.players.values()].find(
+      (other) => other.id !== socket.id && other.dog === dog
+    );
+
+    if (takenBy) {
+      return callback?.({
+        success: false,
+        error: `${takenBy.name} has already picked that dog`
+      });
+    }
+
+    // Picking a dog is readying up: the host can start once everyone has.
     player.dog = dog;
-    player.ready = false;
+    player.hover = null;
+    player.ready = true;
     player.loaded = false;
+
+    callback?.({ success: true });
+    updateLobby(room);
+  });
+
+  // Which dog a player is looking at on the select screen, shown to the others
+
+  socket.on('hoverDog', (data) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    const player = room?.players.get(socket.id);
+    const dog = DOGS.includes(data?.dog) ? data.dog : null;
+
+    if (!room || room.status !== 'lobby' || !player || player.hover === dog) {
+      return;
+    }
+
+    player.hover = dog;
+    io.to(room.code).emit('lobbyUpdated', getRoomData(room));
+  });
+
+  // CHANGE DOG: hand the dog back so someone else can take it
+
+  socket.on('changeDog', (callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    const player = room?.players.get(socket.id);
+
+    if (!room || room.status !== 'lobby' || !player) {
+      return callback?.({
+        success: false,
+        error: 'Not in a lobby'
+      });
+    }
+
+    player.dog = null;
+    player.ready = false;
 
     callback?.({ success: true });
     updateLobby(room);
@@ -508,7 +565,7 @@ io.on('connection', (socket) => {
     ) {
       return callback?.({
         success: false,
-        error: 'All players must select a dog and be ready'
+        error: 'Everyone needs to choose a dog first'
       });
     }
 

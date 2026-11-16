@@ -19,6 +19,7 @@ const DOGS = {
     portrait: '/portraits/pippa.png?v=2',
     accent: '#ff72dd',
     model: '/models/gsp_female.glb',
+    stats: { speed: 8, acceleration: 8, agility: 7, swimming: 6 },
     scale: 3,
     // Speed (model metres per second) at which each stride plays at its
     // natural rhythm: the top of the speed band that stride is used in
@@ -38,6 +39,7 @@ const DOGS = {
     portrait: '/portraits/meela.png?v=2',
     accent: '#cf88ff',
     model: '/models/meela_greyhound.glb',
+    stats: { speed: 10, acceleration: 9, agility: 5, swimming: 4 },
     scale: 3,
     // meela_greyhound/clip_info.json
     gaitSpeed: {
@@ -54,6 +56,7 @@ const DOGS = {
     portrait: '/portraits/poppy.png?v=2',
     accent: '#55aaff',
     model: '/models/black_lab.glb',
+    stats: { speed: 7, acceleration: 7, agility: 8, swimming: 10 },
     scale: 3,
     // black_lab/clip_info.json
     gaitSpeed: {
@@ -70,6 +73,7 @@ const DOGS = {
     portrait: '/portraits/pablo.png?v=2',
     accent: '#63efff',
     model: '/models/pablo.glb',
+    stats: { speed: 7, acceleration: 9, agility: 10, swimming: 5 },
     scale: 3,
     size: 0.7,
     strideBands: 0.7,
@@ -91,6 +95,7 @@ const DOGS = {
     portrait: '/portraits/ralph.png?v=2',
     accent: '#ffad57',
     model: '/models/ralph.glb',
+    stats: { speed: 6, acceleration: 10, agility: 9, swimming: 4 },
     scale: 3,
     // A dachshund stands about a third as tall as the pointer.  `size`
     // scales the collision rays (so he fits the small-dog tunnel), and the
@@ -154,6 +159,100 @@ const BEND_BONES = [
 ];
 
 const TOTAL_LAPS = 3;
+// ---------------------------------
+// DOG STATS
+// ---------------------------------
+// Each dog is rated 1 to 10 (see `stats` in DOGS).  A 7 is the handling the
+// game was tuned around; every point above or below changes it by the share
+// given here.  Raise a share to make the dogs feel more different.
+
+const STAT_EFFECT = {
+  speed: 0.06,         // top speed per point
+  acceleration: 0.1,   // how quickly speed builds per point
+  agilityTurn: 0.14,   // turning speed flat out per point
+  agilityTurnSlow: 0.06, // ...and at a walk or trot
+  agilityGrip: 0.2     // how tightly travel follows the nose per point: lower drifts wide
+};
+
+// Water slows a dog to this share of its top speed: a 4 or below is slowed
+// more than by off-track ground, a 10 swims at close to full speed
+const WATER_SPEED = [0.4, 0.95];
+const WATER_ACCELERATION = [0.5, 1];
+
+// One colour per seat in a game (the server gives each player a `slot`)
+const PLAYER_COLORS = ['#ff6b6b', '#4dabf7', '#ffd43b', '#b197fc', '#63e6be'];
+
+function playerColor(player) {
+  return PLAYER_COLORS[(player?.slot ?? 0) % PLAYER_COLORS.length];
+}
+
+const STAT_LABELS = [
+  ['speed', 'Speed'],
+  ['acceleration', 'Accel'],
+  ['agility', 'Agility'],
+  ['swimming', 'Swim']
+];
+
+function statScale(value, perPoint) {
+  return Math.max(0.4, 1 + ((value ?? 7) - 7) * perPoint);
+}
+
+function swimShare(swimming, [poor, strong]) {
+  return THREE.MathUtils.lerp(
+    poor,
+    strong,
+    THREE.MathUtils.clamp(((swimming ?? 4) - 4) / 6, 0, 1)
+  );
+}
+
+// ---------------------------------
+// DOGS BUMPING INTO EACH OTHER
+// ---------------------------------
+// Each player's game moves only its own dog, so each game works out the
+// knocks its own dog takes from where it last saw the others.
+
+const CONTACT = {
+  radius: 0.7,        // a dog is two circles this size, one over the shoulders, one over the hips
+  spacing: 0.75,      // how far ahead of and behind its middle those circles sit
+  bounce: 0.4,        // how much harder than a dead stop a hit throws a dog
+  fade: 4,            // how quickly a knock dies away: higher = shorter shove
+  maxKnock: 14,       // fastest a knock can throw a dog
+  clearHeight: 1.7,   // jump this far above a dog (times its size) and you pass over it
+  staleAfter: 0.3     // seconds without news before another dog counts as standing still
+};
+
+// Heavier dogs shove lighter ones further: a dog's weight follows its size
+function dogMass(config) {
+  return Math.pow(config?.size ?? 1, 1.5);
+}
+
+// The deepest overlap between two dogs seen from above, as the direction
+// to push dog A (x, z) and how far, or null if they are not touching
+function dogOverlap(positionA, yawA, sizeA, positionB, yawB, sizeB) {
+  const reach = CONTACT.radius * (sizeA + sizeB);
+  let best = null;
+
+  for (const a of [-1, 1]) {
+    const ax = positionA.x + Math.sin(yawA) * CONTACT.spacing * sizeA * a;
+    const az = positionA.z + Math.cos(yawA) * CONTACT.spacing * sizeA * a;
+
+    for (const b of [-1, 1]) {
+      const x = ax - (positionB.x + Math.sin(yawB) * CONTACT.spacing * sizeB * b);
+      const z = az - (positionB.z + Math.cos(yawB) * CONTACT.spacing * sizeB * b);
+      const distance = Math.hypot(x, z);
+      const depth = reach - distance;
+
+      if (depth > 0 && (!best || depth > best.depth)) {
+        best = distance > 1e-4
+          ? { x: x / distance, z: z / distance, depth }
+          : { x: Math.cos(yawA), z: -Math.sin(yawA), depth };
+      }
+    }
+  }
+
+  return best;
+}
+
 const GAITS = new Set(['Walk', 'Trot', 'Run', 'Sprint']);
 
 // Above this speed a jump is a running leap: no crouch first, no pause after
@@ -338,6 +437,7 @@ function App() {
   const [socketId, setSocketId] = useState(null);
 
   const [error, setError] = useState('');
+  const [hoveredDog, setHoveredDog] = useState(null);
   const [connected, setConnected] = useState(false);
 
   const [racePhase, setRacePhase] =
@@ -625,6 +725,7 @@ function App() {
 
   function selectDog(dogId) {
     setError('');
+    setHoveredDog(null);
 
     const socket = socketRef.current;
 
@@ -683,21 +784,34 @@ function App() {
   }
 
   // ---------------------------------
-  // READY UP
+  // CHANGE DOG
   // ---------------------------------
 
-  function toggleReady() {
-    const player = room?.players.find(
-      (p) => p.id === socketRef.current?.id
-    );
+  // Tell the other players which dog this one is looking at
+  function hoverDog(dogId) {
+    setHoveredDog(dogId);
+
+    if (!singlePlayerRef.current) {
+      socketRef.current?.emit('hoverDog', { dog: dogId });
+    }
+  }
+
+  // Hand the dog back (so someone else can take it) and choose again
+  function changeDog() {
+    setError('');
 
     socketRef.current.emit(
-      'setReady',
-      { ready: !player?.ready },
+      'changeDog',
       (response) => {
         if (!response?.success) {
-          setError(response?.error);
+          setError(
+            response?.error ||
+            'Failed to change dog'
+          );
+          return;
         }
+
+        setScreen('selection');
       }
     );
   }
@@ -1249,6 +1363,7 @@ function App() {
         mixer: null,
         config,
         speed: 0,
+        velocity: new THREE.Vector3(),
         lastMoveTime: 0,
         dog: null,
         bones: {},
@@ -1374,6 +1489,10 @@ function App() {
           previous.distanceTo(
             remote.targetPosition
           ) / elapsed;
+
+        remote.velocity
+          .subVectors(remote.targetPosition, previous)
+          .divideScalar(elapsed);
       }
 
       if (
@@ -1440,15 +1559,30 @@ function App() {
     // ---------------------------------
 
     // Real dog speeds at the dogs' scale of 3: an easy canter and a gallop
-    const runSpeed = 11;
-    const sprintSpeed = 17;
+    // ...then each dog's own stats on top (STAT_EFFECT)
+    const stats = dogConfig.stats ?? {};
+    const speedScale = statScale(stats.speed, STAT_EFFECT.speed);
+    const runSpeed = 11 * speedScale;
+    const sprintSpeed = 17 * speedScale;
     const reverseSpeed = 2.5;
 
-    const acceleration = 14;
+    const acceleration =
+      14 * statScale(stats.acceleration, STAT_EFFECT.acceleration);
+    const turnRateSlow = HANDLING.turnRateSlow *
+      statScale(stats.agility, STAT_EFFECT.agilityTurnSlow);
+    const turnRateSprint = HANDLING.turnRateSprint *
+      statScale(stats.agility, STAT_EFFECT.agilityTurn);
+    const gripSprint = HANDLING.gripSprint *
+      statScale(stats.agility, STAT_EFFECT.agilityGrip);
+    const waterSpeed = swimShare(stats.swimming, WATER_SPEED);
+    const waterAcceleration = swimShare(stats.swimming, WATER_ACCELERATION);
     const braking = 22;
     const friction = 9;
 
     let currentSpeed = 0;
+
+    // Speed a bump from another dog has given this one, on top of its own running
+    const knock = new THREE.Vector3();
 
     const forwardDirection =
       new THREE.Vector3(0, 0, 1);
@@ -1663,7 +1797,10 @@ function App() {
 
       // In the air the dog is off nothing: that is how the stream is cleared
       offTrack = !isJumping && !isTrackSurface(player.position);
-      const terrainMultiplier = offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
+      const inWater = offTrack && isOverWater(player.position);
+      const terrainMultiplier = inWater
+        ? waterSpeed
+        : offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
       // A climb takes a little off the top speed, a descent gives a little back
       const hillMultiplier = THREE.MathUtils.clamp(
         1 - HANDLING.hillEffect * slope,
@@ -1675,7 +1812,9 @@ function App() {
         terrainMultiplier *
         hillMultiplier;
       const effectiveAcceleration = acceleration *
-        (offTrack ? OFF_TRACK_ACCELERATION_MULTIPLIER : 1);
+        (inWater
+          ? waterAcceleration
+          : offTrack ? OFF_TRACK_ACCELERATION_MULTIPLIER : 1);
       if (surfaceDisplayRef.current) {
         surfaceDisplayRef.current.textContent = offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
         surfaceDisplayRef.current.style.color = offTrack ? '#ffbc75' : '#9fe49b';
@@ -1769,8 +1908,8 @@ function App() {
 
       // Fast means wide: the turn rate falls away as the dog stretches out
       const turnRate = THREE.MathUtils.lerp(
-        HANDLING.turnRateSlow,
-        HANDLING.turnRateSprint,
+        turnRateSlow,
+        turnRateSprint,
         effort
       );
 
@@ -1804,7 +1943,7 @@ function App() {
       // its nose points: at a sprint it drifts a little through a turn
       const grip = THREE.MathUtils.lerp(
         HANDLING.gripSlow,
-        HANDLING.gripSprint,
+        gripSprint,
         effort
       );
 
@@ -1834,15 +1973,94 @@ function App() {
         player.position.copy(proposedPosition);
       }
 
+      // ---------------------------------
+      // BUMPING OTHER DOGS
+      // ---------------------------------
+
+      const mySize = dogConfig.size ?? 1;
+      const myMass = dogMass(dogConfig);
+      const myVelocity = forward
+        .clone()
+        .multiplyScalar(currentSpeed)
+        .add(knock);
+      const push = new THREE.Vector3();
+
+      remotePlayers.forEach((remote) => {
+        const other = remote.group.position;
+        const otherSize = remote.config.size ?? 1;
+        const lift = player.position.y - other.y;
+
+        // One dog is jumping clean over the other
+        if (
+          lift > CONTACT.clearHeight * otherSize ||
+          -lift > CONTACT.clearHeight * mySize
+        ) {
+          return;
+        }
+
+        const hit = dogOverlap(
+          player.position,
+          player.rotation.y,
+          mySize,
+          other,
+          remote.group.rotation.y,
+          otherSize
+        );
+
+        if (!hit) return;
+
+        // The lighter dog gives more of the ground
+        const share =
+          dogMass(remote.config) /
+          (myMass + dogMass(remote.config));
+
+        push.x += hit.x * hit.depth * share;
+        push.z += hit.z * hit.depth * share;
+
+        const fresh =
+          performance.now() - remote.lastMoveTime <
+          CONTACT.staleAfter * 1000;
+        const closing =
+          ((fresh ? remote.velocity.x : 0) - myVelocity.x) * hit.x +
+          ((fresh ? remote.velocity.z : 0) - myVelocity.z) * hit.z;
+
+        if (closing > 0) {
+          // Thrown the way the other dog was driving, harder the faster
+          // they met.  Topped up to that speed, never stacked every frame.
+          const wanted = closing * (1 + CONTACT.bounce) * share;
+          const already = knock.x * hit.x + knock.z * hit.z;
+
+          if (already < wanted) {
+            knock.x += hit.x * (wanted - already);
+            knock.z += hit.z * (wanted - already);
+          }
+        }
+      });
+
+      knock.clampLength(0, CONTACT.maxKnock);
+      push.addScaledVector(knock, delta);
+      knock.multiplyScalar(Math.exp(-CONTACT.fade * delta));
+
+      if (push.lengthSq() > 1e-10) {
+        const from = player.position.clone();
+        const to = from.clone().add(push);
+
+        if (blockedByObstacle(from, to)) {
+          knock.set(0, 0, 0);
+        } else {
+          player.position.copy(to);
+        }
+      }
+
       // Recheck at the new location, so the slowdown begins immediately.
       offTrack = !isJumping && !isTrackSurface(player.position);
+      const wading = offTrack && isOverWater(player.position);
       if (offTrack) {
         const offTrackLimit = sprintSpeed *
-          OFF_TRACK_SPEED_MULTIPLIER;
+          (wading ? waterSpeed : OFF_TRACK_SPEED_MULTIPLIER);
         currentSpeed = Math.min(currentSpeed, offTrackLimit);
       }
       if (surfaceDisplayRef.current) {
-        const wading = offTrack && isOverWater(player.position);
         surfaceDisplayRef.current.textContent = wading
           ? 'IN THE WATER — JUMP IT NEXT TIME'
           : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
@@ -2380,7 +2598,11 @@ function App() {
             <div>
               <p className="character-select__eyebrow">Dog Racing / Character Select</p>
               <h1 id="character-select-title">Choose Your Dog</h1>
-              <p className="character-select__hint">Pick your partner. Own the track.</p>
+              <p className="character-select__hint">
+                {!room || room.players.length < 2
+                  ? 'Pick your partner. Own the track.'
+                  : `One of each dog per race. ${room.players.filter(player => player.dog).length} of ${room.players.length} players have picked.`}
+              </p>
             </div>
             <div className="character-select__course">
               <span>Racing at</span>
@@ -2389,23 +2611,63 @@ function App() {
           </header>
 
           <div className="character-select__grid" role="group" aria-label="Choose your racing dog">
-            {Object.entries(DOGS).map(([id, dog]) => (
+            {Object.entries(DOGS).map(([id, dog]) => {
+              // Another player in this game already has this dog
+              const takenBy = room?.players.find(player => player.dog === id && player.id !== socketId);
+              // Everyone looking at this dog right now, this player first
+              const looking = (room?.players ?? []).filter(player =>
+                player.id === socketId ? hoveredDog === id : player.hover === id && !player.dog
+              ).sort((a, b) => (b.id === socketId) - (a.id === socketId));
+              const rings = looking.map((player, index) =>
+                `0 0 0 ${3 * (index + 1)}px ${playerColor(player)}`
+              );
+              return (
               <button
                 key={id}
-                className="character-card"
-                style={{ '--portrait-accent': dog.accent }}
-                aria-label={dog.name}
-                disabled={!connected}
+                className={`character-card${takenBy ? ' character-card--taken' : ''}`}
+                style={{
+                  '--portrait-accent': dog.accent,
+                  ...(rings.length ? { boxShadow: rings.join(', '), borderColor: 'transparent' } : {})
+                }}
+                onPointerEnter={() => hoverDog(id)}
+                onPointerLeave={() => hoverDog(null)}
+                onFocus={() => hoverDog(id)}
+                onBlur={() => hoverDog(null)}
+                aria-label={`${dog.name}. ${takenBy ? `Taken by ${takenBy.name}. ` : ''}${STAT_LABELS.map(([key, label]) => `${label} ${dog.stats[key]} out of 10`).join(', ')}`}
+                disabled={!connected || Boolean(takenBy)}
                 onClick={() => selectDog(id)}
               >
                 <img src={dog.portrait} alt="" width="1280" height="1280" draggable="false" />
-                <span className="character-card__action" aria-hidden="true">Select ↗</span>
+                {takenBy
+                  ? <span className="character-card__taken" style={{ borderColor: playerColor(takenBy), color: playerColor(takenBy) }} aria-hidden="true">Taken · {takenBy.name}</span>
+                  : <span className="character-card__action" aria-hidden="true">Select ↗</span>}
+                {looking.length > 0 && (
+                  <span className="character-card__cursors" aria-hidden="true">
+                    {looking.map(player => (
+                      <span key={player.id} style={{ background: playerColor(player) }}>
+                        {player.id === socketId ? 'You' : player.name}
+                      </span>
+                    ))}
+                  </span>
+                )}
                 <span className="character-card__caption">
                   <strong>{dog.displayName}</strong>
                   <span>{dog.breed}</span>
+                  <span className="character-card__stats" aria-hidden="true">
+                    {STAT_LABELS.map(([key, label]) => (
+                      <span key={key} className="character-card__stat">
+                        <span className="character-card__stat-name">{label}</span>
+                        <span className="character-card__stat-bar">
+                          <span style={{ width: `${dog.stats[key] * 10}%` }} />
+                        </span>
+                        <span className="character-card__stat-value">{dog.stats[key]}</span>
+                      </span>
+                    ))}
+                  </span>
                 </span>
               </button>
-            ))}
+              );
+            })}
           </div>
 
           <footer className="character-select__footer">
@@ -2433,9 +2695,12 @@ function App() {
     const isHost =
       room?.hostId === myId;
 
+    const stillChoosing =
+      room?.players.filter((player) => !player.dog).length ?? 0;
+
     return (
       <div style={pageStyle}>
-        <div style={panelStyle}>
+        <div style={{ ...panelStyle, maxHeight: '90dvh', overflowY: 'auto' }}>
           <h2>Game Lobby</h2>
 
           <p>Hosted by {room?.players.find(player => player.id === room.hostId)?.name}</p>
@@ -2465,6 +2730,17 @@ function App() {
                 }}
               >
                 <strong>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: 'inline-block',
+                      width: 10,
+                      height: 10,
+                      marginRight: 8,
+                      borderRadius: '50%',
+                      background: playerColor(player)
+                    }}
+                  />
                   {player.name}
                   {player.id ===
                   room.hostId
@@ -2476,30 +2752,31 @@ function App() {
                   {DOGS[
                     player.dog
                   ]?.name ||
-                    'No dog selected'}
-                </div>
-
-                <div>
-                  {player.ready
-                    ? 'Ready'
-                    : 'Not Ready'}
+                    'Choosing a dog…'}
                 </div>
               </div>
             )
           )}
 
+          <p>
+            {stillChoosing === 0
+              ? isHost
+                ? 'Everyone has picked. Start when you are ready.'
+                : 'Everyone has picked. Waiting for the host to start.'
+              : `Waiting for ${stillChoosing} ${stillChoosing === 1 ? 'player' : 'players'} to choose a dog.`}
+          </p>
+
           <button
             style={buttonStyle}
-            onClick={toggleReady}
+            onClick={changeDog}
           >
-            {myPlayer?.ready
-              ? 'Cancel Ready'
-              : 'Ready Up'}
+            {myPlayer?.dog ? 'Change Dog' : 'Choose Dog'}
           </button>
 
           {isHost && (
             <button
-              style={buttonStyle}
+              style={{ ...buttonStyle, opacity: stillChoosing ? 0.55 : 1, cursor: stillChoosing ? 'default' : 'pointer' }}
+              disabled={stillChoosing > 0}
               onClick={startRace}
             >
               Start Race
