@@ -11,7 +11,7 @@ const io = new Server(PORT, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph'];
 const TOTAL_LAPS = 3;
 
 const STARTING_GRID = [
@@ -24,14 +24,21 @@ const STARTING_GRID = [
 
 const START_ROTATION = Math.PI / 2;
 
-// Ordered checkpoints following the Wendover Woods circuit.
-// Coordinates are X/Z, with a radius in game units.
+// Ordered checkpoints following the Wendover Woods circuit (the long
+// version: 1466 m a lap).  Copied from wendover_woods/track_info.json, which
+// the map build writes.  Coordinates are X/Z, with a radius in game units.
 const CHECKPOINTS = [
-  { x: 35, z: -20, radius: 15 },
-  { x: 63, z: -53, radius: 15 },
-  { x: 30, z: -90, radius: 15 },
-  { x: -30, z: -62, radius: 15 },
-  { x: -49, z: -30, radius: 15 }
+  { x: 96.5, z: -52.8, radius: 18 },
+  { x: 174.2, z: -133.4, radius: 18 },
+  { x: 289.2, z: -138.9, radius: 18 },
+  { x: 278.3, z: -258.3, radius: 18 },
+  { x: 190.4, z: -289.6, radius: 18 },
+  { x: 86.6, z: -325.1, radius: 18 },
+  { x: -9.3, z: -371.9, radius: 18 },
+  { x: -43.6, z: -255.2, radius: 18 },
+  { x: -150.3, z: -224.6, radius: 18 },
+  { x: -156.0, z: -103.9, radius: 18 },
+  { x: -122.0, z: -0.1, radius: 18 }
 ];
 
 const rooms = new Map();
@@ -548,6 +555,7 @@ io.on('connection', (socket) => {
 
     const validAnimations = [
       'Idle',
+      'Walk',
       'Trot',
       'Run',
       'Sprint',

@@ -10,24 +10,107 @@ import { io } from 'socket.io-client';
 
 const DOGS = {
   gsp: {
-    name: 'German Shorthaired Pointer',
+    name: 'Pippa (German Shorthaired Pointer)',
     model: '/models/gsp_female.glb',
     scale: 3,
+    // Speed (model metres per second) at which each stride plays at its
+    // natural rhythm: the top of the speed band that stride is used in
+    // Ground speed (model metres per second) of each captured stride: at
+    // this speed the paws neither slip nor skate (gsp_female/clip_info.json)
     gaitSpeed: {
-      Trot: 1.16,
-      Run: 1.67,
-      Sprint: 3.0
+      Walk: 1.23,
+      Trot: 2.09,
+      Run: 3.66,
+      Sprint: 5.7
     }
   },
   second_dog: {
     name: 'Meela (Greyhound)',
     model: '/models/meela_greyhound.glb',
     scale: 3
+  },
+  black_lab: {
+    name: 'Poppy (Black Labrador)',
+    model: '/models/black_lab.glb',
+    scale: 3,
+    // black_lab/clip_info.json
+    gaitSpeed: {
+      Walk: 1.21,
+      Trot: 2.05,
+      Run: 3.6,
+      Sprint: 5.6
+    }
+  },
+  ralph: {
+    name: 'Ralph (Dachshund)',
+    model: '/models/ralph.glb',
+    scale: 3,
+    // A dachshund stands about a third as tall as the pointer.  `size`
+    // scales the collision rays (so he fits the small-dog tunnel), and the
+    // speeds at which he changes stride: short legs break into a gallop
+    // much sooner.  His legs also turn over faster than a big dog's can.
+    size: 0.45,
+    strideBands: 0.5,
+    maxStrideRate: 2.0,
+    cameraOffset: [0, 2.6, -5.6],
+    cameraLookHeight: 0.9,
+    // ralph_dachshund/clip_info.json
+    gaitSpeed: {
+      Walk: 0.39,
+      Trot: 0.66,
+      Run: 1.16,
+      Sprint: 1.8
+    }
   }
 };
 
+// ---------------------------------
+// HANDLING
+// ---------------------------------
+// How a dog steers.  A dog at full stretch cannot spin on the spot: it
+// carves an arc, leans and bends into it, and has to ease off to turn tight.
+
+const HANDLING = {
+  turnRateSlow: 2.6,    // turning speed at a walk or trot (radians per second)
+  turnRateSprint: 1.5,  // turning speed flat out: lower = wider arcs
+  steerResponse: 5,     // how quickly a turn builds and fades: lower = heavier
+  turnSpeedLoss: 0.22,  // share of top speed lost while turning hard at a sprint
+  gripSlow: 16,         // how tightly travel follows the nose at low speed
+  gripSprint: 5,        // ...and flat out: lower = more drift through a turn
+  lean: 0.2,            // body roll into a turn (radians)
+  bend: 0.07,           // how far the spine, neck and tail curve into a turn
+  fullSteerSpeed: 4,    // below this speed the dog turns less (it cannot spin standing still)
+  // Which stride is used at which speed.  These follow a real dog: walk to
+  // about 1.5 m/s, trot to about 2.8, canter to about 4.5, then gallop
+  // (multiplied by the dogs' scale of 3)
+  hillEffect: 0.9,      // how much a slope changes top speed (0 = hills are free)
+  walkBelow: 4.6,
+  trotBelow: 8.5,
+  runBelow: 13.5
+};
+
+// The rigs' sideways bone axis points so that a negative turn bends the body left
+const BEND_SIGN = -1;
+
+// Bones that curve into a turn, and how much each one takes
+const BEND_BONES = [
+  ['spine1', 0.6],
+  ['spine2', 0.8],
+  ['chest', 0.8],
+  ['neck1', 1.1],
+  ['neck2', 1.1],
+  ['head', 0.9],
+  ['hips', 0.7],
+  ['tail1', 1.4],
+  ['tail2', 1.2],
+  ['tail3', 1.0]
+];
+
 const TOTAL_LAPS = 3;
-const GAITS = new Set(['Trot', 'Run', 'Sprint']);
+const GAITS = new Set(['Walk', 'Trot', 'Run', 'Sprint']);
+
+// Above this speed a jump is a running leap: no crouch first, no pause after
+const RUNNING_JUMP_SPEED = 3.0;
 
 const SERVER_URL =
   import.meta.env.VITE_SERVER_URL ||
@@ -38,8 +121,10 @@ const SERVER_URL =
 // ---------------------------------
 
 function switchAction(actions, current, name) {
+  // Dogs without a walk or trot clip fall back to the next stride up
   const next =
     actions[name] ||
+    (name === 'Walk' ? actions.Trot || actions.Run : null) ||
     (name === 'Trot' ? actions.Run : null);
 
   if (!next || next === current) {
@@ -51,21 +136,32 @@ function switchAction(actions, current, name) {
     GAITS.has(current.getClip().name) &&
     GAITS.has(next.getClip().name);
 
+  // Coming down from a jump into a stride: pick the stride up just before
+  // the front paws strike (the strides start on a hind paw), and blend quickly
+  const fromJump =
+    current &&
+    current.getClip().name === 'Jump' &&
+    GAITS.has(next.getClip().name);
+
   const phase = inStride
     ? (current.time / current.getClip().duration) % 1
-    : 0;
+    : fromJump
+      ? 0.15
+      : 0;
+
+  const fade = fromJump ? 0.12 : 0.2;
 
   if (current) {
-    current.fadeOut(0.2);
+    current.fadeOut(fade);
   }
 
   next.reset();
 
-  if (inStride) {
+  if (inStride || fromJump) {
     next.time = phase * next.getClip().duration;
   }
 
-  next.fadeIn(0.2);
+  next.fadeIn(fade);
   next.play();
 
   return next;
@@ -81,11 +177,54 @@ function gaitTimeScale(action, speed, config) {
 
   const rate = THREE.MathUtils.clamp(
     Math.abs(speed) / (natural * config.scale),
-    0.6,
-    1.5
+    0.7,
+    config.maxStrideRate ?? 1.3
   );
 
   return speed < 0 ? -rate : rate;
+}
+
+// 0 at an easy run, 1 flat out
+function sprintFraction(speed, runSpeed, sprintSpeed) {
+  return THREE.MathUtils.clamp(
+    (Math.abs(speed) - runSpeed * 0.5) /
+      (sprintSpeed - runSpeed * 0.5),
+    0,
+    1
+  );
+}
+
+function collectBones(root) {
+  const bones = {};
+
+  root.traverse((object) => {
+    if (object.isBone) {
+      bones[object.name] = object;
+    }
+  });
+
+  return bones;
+}
+
+// Lean the dog and curve its body into a turn.  Call after the animation
+// mixer has updated: the mixer resets the bones every frame.
+// steer: -1 (right) to 1 (left).  effort: 0 to 1, how hard the dog is running.
+function applyTurnPose(model, bones, steer, effort) {
+  if (!model) return;
+
+  model.rotation.z =
+    -steer * HANDLING.lean * (0.35 + 0.65 * effort);
+
+  const bend =
+    steer * HANDLING.bend * (0.5 + 0.5 * effort);
+
+  for (const [name, weight] of BEND_BONES) {
+    const bone = bones[name];
+
+    if (bone) {
+      bone.rotateZ(BEND_SIGN * bend * weight);
+    }
+  }
 }
 
 function formatTime(seconds) {
@@ -113,6 +252,7 @@ function App() {
 
   const speedDisplayRef = useRef(null);
   const timerDisplayRef = useRef(null);
+  const surfaceDisplayRef = useRef(null);
 
   const [screen, setScreen] = useState('menu');
   const [room, setRoom] = useState(null);
@@ -557,6 +697,124 @@ function App() {
     let remoteModelsPending = 0;
     let readySent = false;
 
+    // Collision geometry comes from the existing Wendover Woods GLB.
+    // Only matching meshes are collidable; terrain and track remain passable.
+    const trackMeshes = [];
+    const groundMeshes = [];   // track + terrain tiles: what the dogs stand on
+    const waterMeshes = [];
+    const obstacleMeshes = [];
+    const obstacleBoxes = [];
+    const surfaceRaycaster = new THREE.Raycaster();
+    const obstacleRaycaster = new THREE.Raycaster();
+    const down = new THREE.Vector3(0, -1, 0);
+    const OFF_TRACK_SPEED_MULTIPLIER = 0.5;
+    const OFF_TRACK_ACCELERATION_MULTIPLIER = 0.6;
+    const DOG_COLLISION_RADIUS = 0.65;
+    let offTrack = false;
+
+    function isTrackSurface(position) {
+      // Fail open if the GLB has no identifiable track surface.
+      if (trackMeshes.length === 0) return true;
+      const origin = new THREE.Vector3(position.x, position.y + 25, position.z);
+      surfaceRaycaster.set(origin, down);
+      surfaceRaycaster.near = 0;
+      surfaceRaycaster.far = 70;
+      return surfaceRaycaster.intersectObjects(trackMeshes, false).length > 0;
+    }
+
+    const groundRaycaster = new THREE.Raycaster();
+
+    // Height of the ground under a point.  The ray starts just above the
+    // dog, so inside a tunnel or on the bridge it finds the surface the dog
+    // is on, not the roof above or the stream below.
+    function groundHeightAt(position, fallback = 0) {
+      if (groundMeshes.length === 0) return fallback;
+
+      for (const lift of [3, 60]) {
+        groundRaycaster.set(
+          new THREE.Vector3(
+            position.x,
+            position.y + lift,
+            position.z
+          ),
+          down
+        );
+        groundRaycaster.near = 0;
+        groundRaycaster.far = lift + 40;
+
+        const hits = groundRaycaster.intersectObjects(
+          groundMeshes,
+          false
+        );
+
+        if (hits.length > 0) return hits[0].point.y;
+      }
+
+      return fallback;
+    }
+
+    function isOverWater(position) {
+      if (waterMeshes.length === 0) return false;
+
+      groundRaycaster.set(
+        new THREE.Vector3(
+          position.x,
+          position.y + 3,
+          position.z
+        ),
+        down
+      );
+      groundRaycaster.near = 0;
+      groundRaycaster.far = 8;
+
+      return (
+        groundRaycaster.intersectObjects(waterMeshes, false)
+          .length > 0
+      );
+    }
+
+    function blockedByObstacle(from, to) {
+      const movement = to.clone().sub(from);
+      movement.y = 0;
+      const distance = movement.length();
+      if (distance < 0.00001) return false;
+      movement.normalize();
+
+      // A few horizontal rays approximate the dog's width and body height.
+      // A small dog's rays sit lower and closer in, so it fits under and
+      // through things the big dogs cannot.
+      const size = dogConfig.size ?? 1;
+      const side = new THREE.Vector3(-movement.z, 0, movement.x);
+      const origins = [
+        new THREE.Vector3(0, 0.55 * size, 0),
+        new THREE.Vector3(0, 1.15 * size, 0),
+        new THREE.Vector3(0, 0.55 * size, 0).addScaledVector(side, 0.45 * size),
+        new THREE.Vector3(0, 0.55 * size, 0).addScaledVector(side, -0.45 * size)
+      ];
+      const sweepLength = distance + DOG_COLLISION_RADIUS;
+      for (let i = 0; i < obstacleMeshes.length; i++) {
+        const box = obstacleBoxes[i];
+        // Coarse filter avoids raycasting against distant forest geometry.
+        const expanded = box.clone().expandByScalar(sweepLength + 1.5);
+        if (!expanded.containsPoint(from) && !expanded.containsPoint(to)) {
+          const segmentBox = new THREE.Box3().setFromPoints([from, to]);
+          if (!expanded.intersectsBox(segmentBox)) continue;
+        }
+        const mesh = obstacleMeshes[i];
+        for (const offset of origins) {
+          const origin = from.clone().add(offset);
+          obstacleRaycaster.set(origin, movement);
+          obstacleRaycaster.near = 0;
+          obstacleRaycaster.far = sweepLength;
+          if (obstacleRaycaster.intersectObject(mesh, false).length > 0) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+
     function notifyRaceLoaded() {
       if (
         !isMounted ||
@@ -600,6 +858,53 @@ function App() {
         if (!isMounted) return;
 
         scene.add(gltf.scene);
+        gltf.scene.updateMatrixWorld(true);
+
+        gltf.scene.traverse((object) => {
+          if (!object.isMesh) return;
+          let name = '';
+          for (let node = object; node && node !== gltf.scene.parent; node = node.parent) {
+            name += ` ${node.name}`;
+          }
+          name = name.toLowerCase();
+          if (/track[_\s-]*surface/.test(name)) {
+            trackMeshes.push(object);
+            groundMeshes.push(object);
+          }
+          if (/terrain[_\s-]*ground/.test(name)) {
+            groundMeshes.push(object);
+          }
+          if (/water/.test(name)) {
+            waterMeshes.push(object);
+          }
+          if (/(scenery[_\s-]*(trees|rocks|fences)|obstacle[_\s-]*log)/.test(name)) {
+            obstacleMeshes.push(object);
+            obstacleBoxes.push(new THREE.Box3().setFromObject(object));
+            // Raycasts must hit either side of thin fence and log geometry.
+            object.material = Array.isArray(object.material)
+              ? object.material.map((material) => {
+                  const copy = material.clone();
+                  copy.side = THREE.DoubleSide;
+                  return copy;
+                })
+              : (() => {
+                  const copy = object.material.clone();
+                  copy.side = THREE.DoubleSide;
+                  return copy;
+                })();
+          }
+        });
+        console.log('Track collision geometry:', {
+          trackMeshes: trackMeshes.map((mesh) => mesh.name),
+          obstacleMeshes: obstacleMeshes.map((mesh) => mesh.name)
+        });
+        if (!trackMeshes.length) {
+          console.warn('Track_Surface mesh not found: off-track penalty disabled.');
+        }
+
+        // Stand the dog on the ground it starts on
+        groundY = groundHeightAt(player.position, 0);
+        player.position.y = groundY;
 
         trackLoaded = true;
         notifyRaceLoaded();
@@ -636,7 +941,12 @@ function App() {
 
     let dogMixer = null;
     let dogModel = null;
-    let leanAngle = 0;
+    let dogBones = {};
+    let groundY = 0;       // height of the ground under the dog
+    let jumpHeight = 0;    // how far the dog is above it
+    let slope = 0;         // rise per unit forward: + uphill
+    let steer = 0;
+    let travelYaw = player.rotation.y;
 
     const actions = {};
     let currentAction = null;
@@ -675,6 +985,7 @@ function App() {
 
         player.add(dog);
         dogModel = dog;
+        dogBones = collectBones(dog);
 
         dogMixer =
           new THREE.AnimationMixer(dog);
@@ -783,6 +1094,10 @@ function App() {
         config,
         speed: 0,
         lastMoveTime: 0,
+        dog: null,
+        bones: {},
+        steer: 0,
+        steerTarget: 0,
         actions: {},
         currentAction: null,
         animation:
@@ -813,6 +1128,8 @@ function App() {
           );
 
           group.add(dog);
+          remote.dog = dog;
+          remote.bones = collectBones(dog);
 
           remote.mixer =
             new THREE.AnimationMixer(dog);
@@ -897,6 +1214,29 @@ function App() {
           ) / elapsed;
       }
 
+      if (
+        remote.lastMoveTime &&
+        elapsed > 0.01 &&
+        elapsed < 0.5
+      ) {
+        // How hard the other dog is turning, from how fast its heading changes
+        const yawRate =
+          Math.atan2(
+            Math.sin(
+              data.rotation - remote.targetRotation
+            ),
+            Math.cos(
+              data.rotation - remote.targetRotation
+            )
+          ) / elapsed;
+
+        remote.steerTarget = THREE.MathUtils.clamp(
+          yawRate / HANDLING.turnRateSprint,
+          -1,
+          1
+        );
+      }
+
       remote.lastMoveTime = now;
       remote.targetRotation =
         data.rotation;
@@ -936,14 +1276,14 @@ function App() {
     // MOVEMENT SETTINGS
     // ---------------------------------
 
-    const runSpeed = 5;
-    const sprintSpeed = 9;
+    // Real dog speeds at the dogs' scale of 3: an easy canter and a gallop
+    const runSpeed = 11;
+    const sprintSpeed = 17;
     const reverseSpeed = 2.5;
 
-    const acceleration = 8;
-    const braking = 12;
-    const friction = 5;
-    const turnSpeed = 2.2;
+    const acceleration = 14;
+    const braking = 22;
+    const friction = 9;
 
     let currentSpeed = 0;
 
@@ -979,14 +1319,22 @@ function App() {
         if (
           !event.repeat &&
           !isJumping &&
-          !isLanding &&
           dogMixer
         ) {
           isJumping = true;
+          isLanding = false;
           verticalVelocity =
             jumpForce;
 
           playAnimation('Jump');
+
+          // A running dog takes off in stride: skip the standing crouch
+          if (
+            currentAction === actions.Jump &&
+            Math.abs(currentSpeed) > RUNNING_JUMP_SPEED
+          ) {
+            currentAction.time = 0.2;
+          }
         }
       }
     }
@@ -1009,11 +1357,15 @@ function App() {
     // CAMERA
     // ---------------------------------
 
+    // A small dog gets a closer, lower camera so it is not lost on screen
     const cameraOffset =
-      new THREE.Vector3(0, 4, -8);
+      new THREE.Vector3(
+        ...(dogConfig.cameraOffset || [0, 4, -8])
+      );
 
     const cameraSmoothness = 6;
-    const cameraLookHeight = 1.5;
+    const cameraLookHeight =
+      dogConfig.cameraLookHeight ?? 1.5;
 
     const initialOffset =
       cameraOffset.clone();
@@ -1137,13 +1489,29 @@ function App() {
         keys.ShiftLeft ||
         keys.ShiftRight;
 
-      const maxSpeed = isSprinting
-        ? sprintSpeed
-        : runSpeed;
+      // In the air the dog is off nothing: that is how the stream is cleared
+      offTrack = !isJumping && !isTrackSurface(player.position);
+      const terrainMultiplier = offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
+      // A climb takes a little off the top speed, a descent gives a little back
+      const hillMultiplier = THREE.MathUtils.clamp(
+        1 - HANDLING.hillEffect * slope,
+        0.8,
+        1.08
+      );
+      const maxSpeed =
+        (isSprinting ? sprintSpeed : runSpeed) *
+        terrainMultiplier *
+        hillMultiplier;
+      const effectiveAcceleration = acceleration *
+        (offTrack ? OFF_TRACK_ACCELERATION_MULTIPLIER : 1);
+      if (surfaceDisplayRef.current) {
+        surfaceDisplayRef.current.textContent = offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
+        surfaceDisplayRef.current.style.color = offTrack ? '#ffbc75' : '#9fe49b';
+      }
 
       if (keys.KeyW) {
         currentSpeed +=
-          acceleration * delta;
+          effectiveAcceleration * delta;
 
         currentSpeed = Math.min(
           currentSpeed,
@@ -1205,60 +1573,111 @@ function App() {
       const steeringFactor =
         Math.min(
           Math.abs(currentSpeed) /
-            runSpeed,
+            HANDLING.fullSteerSpeed,
           1
         );
+
+      const effort = sprintFraction(
+        currentSpeed,
+        runSpeed,
+        sprintSpeed
+      );
 
       const turnInput =
         (keys.KeyA ? 1 : 0) -
         (keys.KeyD ? 1 : 0);
 
-      const targetLean =
-        -turnInput *
-        steeringFactor *
-        (currentSpeed > runSpeed
-          ? 0.16
-          : 0.11);
-
-      leanAngle +=
-        (targetLean - leanAngle) *
+      // The turn builds and fades: a running dog cannot change line instantly
+      steer +=
+        (turnInput - steer) *
         (1 -
-          Math.exp(-8 * delta));
+          Math.exp(
+            -HANDLING.steerResponse * delta
+          ));
 
-      if (dogModel) {
-        dogModel.rotation.z =
-          leanAngle;
-      }
+      // Fast means wide: the turn rate falls away as the dog stretches out
+      const turnRate = THREE.MathUtils.lerp(
+        HANDLING.turnRateSlow,
+        HANDLING.turnRateSprint,
+        effort
+      );
 
-      if (keys.KeyA) {
-        player.rotation.y +=
-          turnSpeed *
-          steeringFactor *
-          delta;
-      }
+      player.rotation.y +=
+        turnRate *
+        steer *
+        steeringFactor *
+        delta;
 
-      if (keys.KeyD) {
-        player.rotation.y -=
-          turnSpeed *
-          steeringFactor *
-          delta;
+      // Turning hard at speed costs speed
+      const turnLimit =
+        maxSpeed *
+        (1 -
+          HANDLING.turnSpeedLoss *
+            Math.abs(steer) *
+            effort);
+
+      if (currentSpeed > turnLimit) {
+        currentSpeed = Math.max(
+          turnLimit,
+          currentSpeed -
+            braking * 0.5 * delta
+        );
       }
 
       // ---------------------------------
       // MOVEMENT
       // ---------------------------------
 
-      const forward =
-        forwardDirection.clone();
-
-      forward.applyQuaternion(
-        player.quaternion
+      // The dog travels where its momentum takes it, which trails the way
+      // its nose points: at a sprint it drifts a little through a turn
+      const grip = THREE.MathUtils.lerp(
+        HANDLING.gripSlow,
+        HANDLING.gripSprint,
+        effort
       );
 
-      player.position.addScaledVector(
+      travelYaw +=
+        Math.atan2(
+          Math.sin(player.rotation.y - travelYaw),
+          Math.cos(player.rotation.y - travelYaw)
+        ) *
+        (1 - Math.exp(-grip * delta));
+
+      const forward = forwardDirection
+        .clone()
+        .applyAxisAngle(
+          THREE.Object3D.DEFAULT_UP,
+          travelYaw
+        );
+
+      const previousPosition = player.position.clone();
+      const proposedPosition = previousPosition.clone().addScaledVector(
         forward,
         currentSpeed * delta
       );
+      if (blockedByObstacle(previousPosition, proposedPosition)) {
+        // Stop forward movement; steering and jumping remain available.
+        currentSpeed = 0;
+      } else {
+        player.position.copy(proposedPosition);
+      }
+
+      // Recheck at the new location, so the slowdown begins immediately.
+      offTrack = !isJumping && !isTrackSurface(player.position);
+      if (offTrack) {
+        const offTrackLimit = (isSprinting ? sprintSpeed : runSpeed) *
+          OFF_TRACK_SPEED_MULTIPLIER;
+        currentSpeed = Math.min(currentSpeed, offTrackLimit);
+      }
+      if (surfaceDisplayRef.current) {
+        const wading = offTrack && isOverWater(player.position);
+        surfaceDisplayRef.current.textContent = wading
+          ? 'IN THE WATER — JUMP IT NEXT TIME'
+          : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
+        surfaceDisplayRef.current.style.color = wading
+          ? '#8fd0ff'
+          : offTrack ? '#ffbc75' : '#9fe49b';
+      }
 
       // ---------------------------------
       // JUMPING
@@ -1268,20 +1687,61 @@ function App() {
         verticalVelocity -=
           gravity * delta;
 
-        player.position.y +=
+        jumpHeight +=
           verticalVelocity * delta;
 
-        if (
-          player.position.y <= 0
-        ) {
-          player.position.y = 0;
+        if (jumpHeight <= 0) {
+          jumpHeight = 0;
           verticalVelocity = 0;
           isJumping = false;
-          isLanding = true;
 
-          playAnimation('Land');
+          // Landing at a run goes straight back into the stride; only a
+          // standing jump plays the settle-and-stand landing
+          if (
+            Math.abs(currentSpeed) > RUNNING_JUMP_SPEED
+          ) {
+            isLanding = false;
+          } else {
+            isLanding = true;
+            playAnimation('Land');
+          }
         }
       }
+
+      // ---------------------------------
+      // FOLLOW THE GROUND
+      // ---------------------------------
+
+      // Over a dip (the stream) a jumping dog keeps the height it took off
+      // from; it only meets lower ground once it comes down
+      const groundBelow = groundHeightAt(player.position, groundY);
+      const groundNow = isJumping
+        ? Math.max(groundBelow, groundY)
+        : groundBelow;
+
+      // Ease onto the new height so tile edges and kerbs do not jolt the dog,
+      // but go straight there after a big change (a respawn, a drop)
+      groundY =
+        Math.abs(groundNow - groundY) > 2.5
+          ? groundNow
+          : groundY +
+            (groundNow - groundY) *
+              (1 - Math.exp(-22 * delta));
+
+      player.position.y = groundY + jumpHeight;
+
+      // Slope under the dog, from the ground a stride ahead
+      const ahead = player.position
+        .clone()
+        .addScaledVector(forward, 1.6);
+      ahead.y = groundY;
+
+      const slopeNow =
+        (groundHeightAt(ahead, groundY) - groundY) / 1.6;
+
+      slope +=
+        (THREE.MathUtils.clamp(slopeNow, -0.4, 0.4) - slope) *
+        (1 - Math.exp(-8 * delta));
 
       // ---------------------------------
       // DOG ANIMATIONS
@@ -1295,25 +1755,32 @@ function App() {
         !isJumping &&
         !isLanding
       ) {
-        const trotLimit =
-          currentAnimation ===
-          'Trot'
-            ? 3.0
-            : 2.5;
+        // A little overlap between strides stops them flickering
+        // The stride follows the speed, as a dog's does.  A little overlap
+        // between strides stops them flickering at the changeover.
+        // A short-legged dog changes stride at lower speeds
+        const bands = dogConfig.strideBands ?? 1;
+        const pace = Math.abs(currentSpeed) / bands;
+        const holding = (name, margin) =>
+          currentAnimation === name ? margin : 0;
 
         if (!isMoving) {
           playAnimation('Idle');
         } else if (
-          isSprinting &&
-          currentSpeed >
-            runSpeed
+          pace <
+          HANDLING.walkBelow + holding('Walk', 0.5)
         ) {
-          playAnimation('Sprint');
+          playAnimation('Walk');
         } else if (
-          Math.abs(currentSpeed) <
-          trotLimit
+          pace <
+          HANDLING.trotBelow + holding('Trot', 0.7)
         ) {
           playAnimation('Trot');
+        } else if (
+          pace >
+          HANDLING.runBelow - holding('Sprint', 1.0)
+        ) {
+          playAnimation('Sprint');
         } else {
           playAnimation('Run');
         }
@@ -1330,6 +1797,20 @@ function App() {
 
       if (dogMixer) {
         dogMixer.update(delta);
+
+        applyTurnPose(
+          dogModel,
+          dogBones,
+          steer * steeringFactor,
+          effort
+        );
+
+        // Nose up the hills and down the far side (not while in the air)
+        if (dogModel) {
+          dogModel.rotation.x = isJumping
+            ? 0
+            : -Math.atan(slope);
+        }
       }
 
       // ---------------------------------
@@ -1400,9 +1881,27 @@ function App() {
               );
           }
 
+          remote.steer +=
+            (remote.steerTarget - remote.steer) *
+            (1 -
+              Math.exp(
+                -HANDLING.steerResponse * delta
+              ));
+
           if (remote.mixer) {
             remote.mixer.update(
               delta
+            );
+
+            applyTurnPose(
+              remote.dog,
+              remote.bones,
+              remote.steer,
+              sprintFraction(
+                remote.speed,
+                runSpeed,
+                sprintSpeed
+              )
             );
           }
         }
@@ -1916,6 +2415,12 @@ function App() {
           }}
         >
           Checkpoints: {checkpoint}/{totalCheckpoints}
+        </div>
+        <div
+          ref={surfaceDisplayRef}
+          style={{ fontSize: 12, marginTop: 12, color: '#9fe49b', fontWeight: 'bold' }}
+        >
+          ON TRACK
         </div>
       </div>
 
