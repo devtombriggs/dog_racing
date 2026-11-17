@@ -101,7 +101,7 @@ export function createWendoverWorld(scene, renderer, terrain) {
       glows.forEach((g,i)=>g.scale.z=1+.08*Math.sin(t*4+i));
       wakes.forEach(w=>w.visible=false);
       swimmers.slice(0,5).forEach((p,i)=>{
-        const water=woodlandWaterAt(p.x,p.z);if(!water?.swimming || Math.abs(p.y-water.waterY)>2) return;
+        const water=woodlandWaterAt(p.x,p.z,p.y);if(!water?.swimming || Math.abs(p.y-water.waterY)>2) return;
         for(let k=0;k<2;k++){const w=wakes[i*2+k],phase=(t*1.5+k*.5)%1;w.visible=true;w.position.set(p.x,water.waterY+.025,p.z);w.scale.setScalar(.8+phase*1.7);}
       });
     },

@@ -6,8 +6,10 @@
 //   ... on fall / respawn:  bones.cancelBoost();
 //   ... leaving the map:    bones.dispose();
 //
-// Pickups are local to each player for now: taking a bone hides it on your screen only, and the
-// server is not told.  Movement is client-side, so other players simply see you run faster.
+// Your own game boosts you the moment you touch a bone (no waiting on the network), and the server
+// decides who really got it: bones.take(index) / bones.respawn(index) follow its goldenBoneTaken /
+// goldenBoneRespawned messages, so a bone a friend eats disappears on your screen too.  Other dogs'
+// boosts (from a road bone or a Golden Bone item) get the same golden trail: bones.showBoost(id).
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -18,7 +20,8 @@ export const GOLDEN_BONE = {
   instantKick: 0.8,           // share of the extra top speed given at once on pickup
   duration: 2.0,              // seconds at full boost
   easeOut: 0.5,               // seconds to blend back to normal afterwards
-  respawnDelay: 6.0,          // seconds before a taken bone comes back
+  respawnDelay: 6.0,          // seconds before a taken bone comes back (the server says when)
+  respawnFallback: 3.0,       // ...extra wait before bringing it back anyway if the server never took it
   pickupRadius: 2.0,          // metres, measured flat (plus a height check)
   scale: 2.0,                 // 0.8 m model -> 1.6 m wide next to the x3 dogs
   floatHeight: 1.3,           // bone centre above the road
@@ -96,7 +99,7 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
   });
 
   // golden trail behind the dog while boosted (vertex colours fade to black = fade out under additive)
-  const TRAIL = 90;
+  const TRAIL = 260;           // shared by every boosting dog on screen
   const trailGeo = new THREE.BufferGeometry();
   trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(TRAIL * 3), 3));
   trailGeo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(TRAIL * 3), 3));
@@ -136,10 +139,11 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
   }).catch(err => console.warn('[GoldenBones] model failed to load:', err));
 
   let boostStart = -Infinity;            // seconds (performance clock)
+  const othersBoostStart = new Map();    // other dogs boosting: id -> start
   const now = () => performance.now() / 1000;
 
-  function boostAmount(t = now()) {      // 1 while boosted, easing to 0 afterwards
-    const e = t - boostStart;
+  function boostAmount(t = now(), start = boostStart) {      // 1 while boosted, easing to 0 afterwards
+    const e = t - start;
     if (e < 0) return 0;
     if (e <= C.duration) return 1;
     return 1 - smooth((e - C.duration) / C.easeOut);
@@ -157,12 +161,21 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
     }
   }
 
-  function updateTrail(delta, playerPosition) {
+  const otherCarry = new Map();
+  function updateTrail(delta, playerPosition, others) {
     const amount = boostAmount();
     if (amount > 0 && playerPosition) {
       trailCarry += delta * 70 * amount;
       const n = Math.floor(trailCarry); trailCarry -= n;
       if (n) emitTrail(playerPosition, n);
+    }
+    for (const [id, start] of othersBoostStart) {
+      const a = boostAmount(now(), start), pos = others?.get(id);
+      if (a <= 0) { othersBoostStart.delete(id); otherCarry.delete(id); continue; }
+      if (!pos) continue;
+      const carry = (otherCarry.get(id) ?? 0) + delta * 70 * a, n = Math.floor(carry);
+      otherCarry.set(id, carry - n);
+      if (n) emitTrail(pos, n);
     }
     const pa = trailGeo.attributes.position.array, ca = trailGeo.attributes.color.array;
     for (let i = 0; i < TRAIL; i++) {
@@ -180,8 +193,9 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
   return {
     group, config: C,
 
-    /** Animate, check for a pickup and run the trail. Returns true on the frame a bone is taken. */
-    update(delta, playerPosition, canCollect = true) {
+    /** Animate, check for a pickup and run the trails. Returns true on the frame a bone is taken.
+     *  others: Map of other dogs' positions (id -> Vector3), for their boost trails. */
+    update(delta, playerPosition, canCollect = true, others = null) {
       const t = now();
       let collected = false;
       for (const b of bones) {
@@ -215,7 +229,7 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
           b.flash.material.opacity = 1 - smooth(k / 0.35);
           if (k > 0.35) { b.state = 'hidden'; b.stateTime = 0; b.flash.visible = false; }
         }
-        if (b.state === 'hidden' && b.stateTime >= C.respawnDelay) { b.state = 'respawn'; b.stateTime = 0; }
+        if (b.state === 'hidden' && b.stateTime >= C.respawnDelay + C.respawnFallback) { b.state = 'respawn'; b.stateTime = 0; }
         if (b.state === 'respawn') {
           const k = smooth(b.stateTime / 0.4);
           if (b.model) b.model.scale.setScalar(C.scale * k);
@@ -228,9 +242,26 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
         b.glow.visible = b.ring.visible = b.sparks.visible = vis && (showing || b.state === 'respawn');
         if (b.model) b.model.visible = vis;
       }
-      updateTrail(delta, playerPosition);
+      updateTrail(delta, playerPosition, others);
       return collected;
     },
+
+    /** The server says bone `index` was taken (by anyone): pop it.  True if it was still showing here. */
+    take(index) {
+      const b = bones[index];
+      if (!b || b.state === 'collect' || b.state === 'hidden') return false;
+      b.state = 'collect'; b.stateTime = 0;
+      return true;
+    },
+    /** The server says bone `index` is back. */
+    respawn(index) {
+      const b = bones[index];
+      if (!b || b.state === 'idle' || b.state === 'respawn') return;
+      b.state = 'respawn'; b.stateTime = 0; b.flash.visible = false;
+    },
+    /** Another dog started a golden-bone boost: draw its trail. */
+    showBoost(playerId) { othersBoostStart.set(playerId, now()); },
+    stopBoost(playerId) { othersBoostStart.delete(playerId); },
 
     /** Multiplier for the dog's top speed right now (1 when not boosted). */
     speedMultiplier() { return 1 + (C.speedMultiplier - 1) * boostAmount(); },

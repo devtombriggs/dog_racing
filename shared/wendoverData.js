@@ -6,13 +6,39 @@ const path = polylinePath(pathData.points, pathData.halfWidth);
 export const WENDOVER = { ...path, ...features };
 const smooth = x => { const t = Math.max(0, Math.min(1,x)); return t*t*(3-2*t); };
 
-// The Blender build uses this same basin profile. Water is a racing surface, so
-// swimming never starts the off-track rescue timer.
-export function woodlandWaterAt(x,z) {
+function poolLocal(pool,x,z) {
+  const dx=x-pool.center[0], dz=z-pool.center[2];
+  const sin=Math.sin(pool.rotationY), cos=Math.cos(pool.rotationY);
+  return { along:dx*sin+dz*cos, side:dx*cos-dz*sin };
+}
+
+// Each pool has one tightrope plank across it, just above the water: really thin, so it is hard
+// to stay on, but a dog that does crosses dry at full running speed.  Its top follows the old
+// ground line at the banks and sits `rise` above the water in between (the Blender build uses this).
+export function plankTopY(pool,along) {
+  const t=(along+pool.halfLength)/(2*pool.halfLength);
+  return Math.max(pool.waterY+pool.plank.rise, pool.startY+(pool.endY-pool.startY)*t);
+}
+
+/** The pool whose plank a dog at (x, y, z) is standing on, or null.  Without a height, nobody is. */
+export function woodlandPlankAt(x,z,y=null) {
+  if (y===null) return null;
   for (const pool of WENDOVER.pools) {
-    const dx=x-pool.center[0], dz=z-pool.center[2];
-    const sin=Math.sin(pool.rotationY), cos=Math.cos(pool.rotationY);
-    const along=dx*sin+dz*cos, side=dx*cos-dz*sin;
+    if (!pool.plank) continue;
+    const { along, side }=poolLocal(pool,x,z);
+    if (Math.abs(along)>pool.halfLength+pool.plank.bankRun || Math.abs(side-pool.plank.lateral)>pool.plank.halfWidth) continue;
+    if (y>=plankTopY(pool,along)-0.5) return pool;     // a swimmer below it stays in the water
+  }
+  return null;
+}
+
+// The Blender build uses this same basin profile. Water is a racing surface, so
+// swimming never starts the off-track rescue timer.  Pass the dog's height (y) so a dog up on a
+// tightrope plank is dry; a dog that slips off it drops into the water.
+export function woodlandWaterAt(x,z,y=null) {
+  if (woodlandPlankAt(x,z,y)) return null;
+  for (const pool of WENDOVER.pools) {
+    const { along, side }=poolLocal(pool,x,z);
     if (Math.abs(along)>pool.halfLength || Math.abs(side)>pool.halfWidth) continue;
     const t=(along+pool.halfLength)/(2*pool.halfLength);
     const original=pool.startY+(pool.endY-pool.startY)*t;
@@ -25,8 +51,12 @@ export function woodlandWaterAt(x,z) {
   return null;
 }
 
+// Share of a dog's own top speed it keeps in the water, from its swim stat: Poppy (10) is faster
+// in the water than she is on land; the weak swimmers (Meela and Ralph, 4) crawl at under half.
+//   10 -> 1.35   6 -> 0.62   5 -> 0.51   4 -> 0.45
 export function woodlandSwimMultiplier(swimming=4) {
-  return 0.38+0.57*Math.max(0,Math.min(1,(swimming-4)/6));
+  const skill=Math.max(0,Math.min(1,(swimming-4)/6));
+  return 0.45+0.9*skill**1.5;
 }
 
 export function entersBurrow(previous,current,tunnel) {

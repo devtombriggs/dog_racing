@@ -10,7 +10,8 @@ import { createGoldenBones } from './pickups/goldenBones.js';
 import { GOLDEN_BONE_SPOTS, racingLineAt } from '../shared/pickupSpots.js';
 import { createItems } from './pickups/items.js';
 import { ITEM_NAMES } from '../shared/items.js';
-import { WENDOVER, woodlandWaterAt, woodlandSwimMultiplier, woodlandDogY } from '../shared/wendoverData.js';
+import { WENDOVER, woodlandWaterAt, woodlandPlankAt, woodlandSwimMultiplier, woodlandDogY } from '../shared/wendoverData.js';
+import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 
 // ---------------------------------
 // DOG CONFIGURATION
@@ -526,6 +527,7 @@ function App() {
 
   // Race order for the board at the top left: [{ playerId, name, dog, place, finished }]
   const [standings, setStandings] = useState([]);
+  const [frisbeesIncoming, setFrisbeesIncoming] = useState([]);   // red frisbees chasing me (ids)
   // The item this player is holding from a Treat Box ('ball' | 'toy' | 'bone' | null)
   const [heldItem, setHeldItem] = useState(null);
   // Map vote countdown: when it ends (performance clock), and a tick to redraw the seconds
@@ -600,6 +602,7 @@ function App() {
       setCheckpoint(0);
       setFinishTime(null);
       setStandings([]);
+      setFrisbeesIncoming([]);
       setHeldItem(null);
 
       const updatedRoom = {
@@ -943,6 +946,7 @@ function App() {
     setRacePhase('');
     setFinishTime(null);
     setStandings([]);
+    setFrisbeesIncoming([]);
     setHeldItem(null);
     setScreen('menu');
   }
@@ -964,6 +968,11 @@ function App() {
 
     const map = MAPS[currentRoom.mapId ?? DEFAULT_MAP];
     const proceduralTrack = PROCEDURAL_TRACKS[currentRoom.mapId] ?? null;
+    // Treat Road's catapult and Frostpeak's cannon fly the dog the same way
+    const launchTrack = proceduralTrack?.launch ? proceduralTrack
+      : currentRoom.mapId === 'frostpeak' ? FROSTPEAK_CANNON : null;
+    // Frostpeak's black run: steep enough that gravity, not legs, sets the pace
+    const steepRun = currentRoom.mapId === 'frostpeak';
     let proceduralWorld = null;
     const woodland = currentRoom.mapId === 'wendover';
     let woodlandWorld = null, tunnelRide = null, burrowBoostUntil = 0;
@@ -1061,7 +1070,7 @@ function App() {
     let heightmap = null;
 
     function isTrackSurface(position) {
-      if (woodland && woodlandWaterAt(position.x, position.z)) return true;
+      if (woodland && woodlandWaterAt(position.x, position.z, position.y)) return true;
       if (proceduralTrack) return proceduralTrack.query(position.x, position.z).onTrack;
       // Fail open if the GLB has no identifiable track surface.
       if (trackMeshes.length === 0) return true;
@@ -1078,7 +1087,7 @@ function App() {
     // dog, so inside a tunnel or on the bridge it finds the surface the dog
     // is on, not the roof above or the stream below.
     function groundHeightAt(position, fallback = 0) {
-      const pool = woodland && woodlandWaterAt(position.x, position.z);
+      const pool = woodland && woodlandWaterAt(position.x, position.z, position.y);
       if (pool) return woodlandDogY(pool, localPlayer.dog);
       if (proceduralTrack) {
         const ground = proceduralTrack.query(position.x, position.z);
@@ -1746,7 +1755,7 @@ function App() {
       }
     }
     function handlePlayerLaunched(data) {
-      if (!proceduralTrack?.launch || data.playerId !== socket.id) return;
+      if (!launchTrack || data.playerId !== socket.id) return;
       launchFlight = { startedAt: performance.now(), lateral: data.lateral };
       fall = null;
       knock.set(0,0,0);
@@ -1756,7 +1765,7 @@ function App() {
       currentAction?.reset();
     }
     function handlePlayerLanded(data) {
-      if (!proceduralTrack?.launch) return;
+      if (!launchTrack) return;
       if (data.playerId !== socket.id) {
         const remote = remotePlayers.get(data.playerId);
         if (remote) {
@@ -1783,6 +1792,19 @@ function App() {
       treatBoxes.setVisible(id, visible);
     }
     socket.on('treatBoxChanged', handleTreatBoxChanged);
+    // A golden bone on the road went: pop it here too.  If it was us and our game had not already
+    // counted it (the server saw it first), boost now.
+    function handleGoldenBoneTaken({ index, playerId }) {
+      const stillShowing = goldenBones.take(index);
+      if (playerId !== socket.id) { goldenBones.showBoost(playerId); return; }
+      if (stillShowing) {
+        goldenBones.startBoost();
+        if (currentSpeed > 0) currentSpeed += goldenBones.instantKick(sprintSpeed);
+      }
+    }
+    function handleGoldenBoneRespawned({ index }) { goldenBones.respawn(index); }
+    socket.on('goldenBoneTaken', handleGoldenBoneTaken);
+    socket.on('goldenBoneRespawned', handleGoldenBoneRespawned);
 
     // ---------------------------------
     // ITEMS
@@ -1792,7 +1814,8 @@ function App() {
       if (playerId === socket.id) { myItem = item; setHeldItem(item); }
     }
     function handleItemUsed({ playerId, item }) {
-      if (playerId !== socket.id || item !== 'bone') return;
+      if (item !== 'bone') return;
+      if (playerId !== socket.id) { goldenBones.showBoost(playerId); return; }   // their golden trail
       goldenBones.startBoost();
       if (currentSpeed > 0) currentSpeed += goldenBones.instantKick(sprintSpeed);
     }
@@ -1801,15 +1824,31 @@ function App() {
     function handleBallThrown(data) { items.throwBall(data); }
     function handleBallHit(data) { items.removeBall(data.id, data.position); }
     function handlePlayerHit({ playerId, stunMs }) {
-      if (playerId !== socket.id) return;
+      if (playerId !== socket.id) { goldenBones.stopBoost(playerId); return; }
       stunLength = stunMs;
       stunUntil = performance.now() + stunMs;
       currentSpeed *= 0.15;
       goldenBones.cancelBoost();
     }
+    // Red frisbee: the server flies it; we draw it, and warn the dog it is chasing
+    function handleFrisbeeThrown(data) {
+      items.throwFrisbee(data);
+      if (data.target === socket.id) setFrisbeesIncoming(list => [...list, data.id]);
+    }
+    function handleFrisbeesMoved({ frisbees }) { items.moveFrisbees(frisbees); }
+    // someone overtook the thrower: the frisbee is after a different dog now
+    function handleFrisbeeTarget({ id, target }) {
+      setFrisbeesIncoming(list => (target === socket.id ? [...new Set([...list, id])] : list.filter(f => f !== id)));
+    }
+    function handleFrisbeeEnded({ id, position }) {
+      items.removeFrisbee(id, position);
+      setFrisbeesIncoming(list => list.filter(f => f !== id));
+    }
     const itemEvents = {
       itemChanged: handleItemChanged, itemUsed: handleItemUsed, hazardPlaced: handleHazardPlaced,
       hazardRemoved: handleHazardRemoved, ballThrown: handleBallThrown, ballHit: handleBallHit, playerHit: handlePlayerHit,
+      frisbeeThrown: handleFrisbeeThrown, frisbeesMoved: handleFrisbeesMoved, frisbeeTarget: handleFrisbeeTarget,
+      frisbeeHit: handleFrisbeeEnded, frisbeeGone: handleFrisbeeEnded,
     };
     for (const [event, handler] of Object.entries(itemEvents)) socket.on(event, handler);
     function handleBurrowEntered(data) {
@@ -1885,6 +1924,10 @@ function App() {
 
     const jumpForce = 7;
     const gravity = 16;
+    // On Frostpeak's black run a normal jump at full speed sails 25 m down the mountain: there the
+    // dog does a short, snappy hop instead (still over 1 m, enough to clear a chew toy)
+    const STEEP_JUMP = { force: 10, gravity: 45, below: -0.12 };
+    let jumpGravity = gravity;
 
     // ---------------------------------
     // KEYBOARD AND MOUSE CONTROLS
@@ -1902,7 +1945,7 @@ function App() {
         raceFinishedRef.current ||
         isJumping ||
         tunnelRide ||
-        (woodland && woodlandWaterAt(player.position.x, player.position.z)?.swimming) ||
+        (woodland && woodlandWaterAt(player.position.x, player.position.z, player.position.y)?.swimming) ||
         !dogMixer
       ) {
         return;
@@ -1910,7 +1953,9 @@ function App() {
 
       isJumping = true;
       isLanding = false;
-      verticalVelocity = jumpForce;
+      const steepHop = steepRun && slope < STEEP_JUMP.below;
+      verticalVelocity = steepHop ? STEEP_JUMP.force : jumpForce;
+      jumpGravity = steepHop ? STEEP_JUMP.gravity : gravity;
       playAnimation('Jump');
 
       // A running dog takes off in stride: skip the standing crouch.
@@ -2032,7 +2077,9 @@ function App() {
       treatBoxes.update(performance.now() / 1000);
       const itemAnchors = new Map([[socket.id, dogBones.head ?? player]]);
       remotePlayers.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
-      items.update(delta, itemAnchors);
+      items.update(delta, itemAnchors, heightmap
+        ? (x, z) => sampleGroundHeight(heightmap, map.heightmap, x, z)   // Frostpeak balls skim the ground
+        : null);
       // knocked over by a ball or a chew toy: a couple of spins on the spot
       if (dogModel) {
         const stunLeft = stunUntil - performance.now();
@@ -2043,8 +2090,11 @@ function App() {
         raceGoRef.current &&
         !raceFinishedRef.current;
 
-      // Golden Bones: running through one is the whole pickup, no button needed
-      if (goldenBones.update(delta, player.position, canMove && !fall && !launchFlight && !tunnelRide) && currentSpeed > 0) {
+      // Golden Bones: running through one is the whole pickup, no button needed.  Your own boost starts
+      // at once; the server tells everyone (you included) which bone went, so it vanishes for all.
+      const otherDogs = new Map();
+      remotePlayers.forEach((remote, id) => otherDogs.set(id, remote.group.position));
+      if (goldenBones.update(delta, player.position, canMove && !fall && !launchFlight && !tunnelRide, otherDogs) && currentSpeed > 0) {
         currentSpeed += goldenBones.instantKick(sprintSpeed);
       }
 
@@ -2130,7 +2180,7 @@ function App() {
         if (speedDisplayRef.current) speedDisplayRef.current.textContent = '»';
       } else if (launchFlight) {
         const elapsed = (performance.now() - launchFlight.startedAt) / 1000;
-        const point = proceduralTrack.launchPoint(elapsed, launchFlight.lateral);
+        const point = launchTrack.launchPoint(elapsed, launchFlight.lateral);
         player.position.set(point.x, point.y, point.z);
         player.rotation.y = point.rotationY;
         if (dogModel) dogModel.rotation.x = point.pitch;
@@ -2158,7 +2208,7 @@ function App() {
 
         // In the air the dog is off nothing: that is how the stream is cleared
         offTrack = !isJumping && !isTrackSurface(player.position);
-        const woodlandSurface = woodland && woodlandWaterAt(player.position.x, player.position.z);
+        const woodlandSurface = woodland && woodlandWaterAt(player.position.x, player.position.z, player.position.y);
         const inWater = !isJumping && (woodlandSurface?.inWater || (offTrack && isOverWater(player.position)));
         const coastalGround = coastalTrack?.query(player.position.x, player.position.z);
         const terrainMultiplier = inWater && woodlandSurface
@@ -2168,23 +2218,23 @@ function App() {
           : inWater
           ? waterSpeed
           : offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
-        // A climb takes a little off the top speed, a descent gives a little back
-        const hillMultiplier = coastalTrack || (inWater && woodlandSurface) ? 1 : THREE.MathUtils.clamp(
-          1 - HANDLING.hillEffect * slope,
-          0.8,
-          1.08
-        );
+        // A climb takes a little off the top speed, a descent gives a little back.
+        // On Frostpeak's black run a descent gives a LOT back: up to 1.75x on the steepest pitches.
+        const hillMultiplier = coastalTrack || (inWater && woodlandSurface) ? 1
+          : steepRun && slope < 0 ? Math.min(1.75, 1 - 1.7 * slope)
+          : THREE.MathUtils.clamp(1 - HANDLING.hillEffect * slope, 0.8, 1.08);
         const maxSpeed =
           sprintSpeed *
           terrainMultiplier *
           hillMultiplier *
           (performance.now() < burrowBoostUntil ? 1.3 : 1) *
-          (performance.now() < launchBoostUntil ? proceduralTrack.launch.exitSpeedMultiplier : 1) *
+          (performance.now() < launchBoostUntil ? launchTrack.launch.exitSpeedMultiplier : 1) *
           (proceduralTrack && performance.now() < recoveryUntil ? proceduralTrack.rules.respawnSpeedMultiplier : 1) *
           goldenBones.speedMultiplier() *
           (performance.now() < stunUntil ? 0.15 : 1);
         const effectiveAcceleration = acceleration *
           goldenBones.accelerationMultiplier() *
+          (steepRun && slope < 0 ? 1 - 4 * slope : 1) *      // gravity does the work going down the black run
           (inWater
             ? waterAcceleration
             : offTrack ? OFF_TRACK_ACCELERATION_MULTIPLIER : 1);
@@ -2445,7 +2495,7 @@ function App() {
 
         // Recheck at the new location, so the slowdown begins immediately.
         offTrack = !isJumping && !isTrackSurface(player.position);
-        const poolNow = woodland && woodlandWaterAt(player.position.x, player.position.z);
+        const poolNow = woodland && woodlandWaterAt(player.position.x, player.position.z, player.position.y);
         const swimming = Boolean(poolNow?.swimming) && !isJumping;
         const wading = !isJumping && (poolNow?.inWater || (offTrack && isOverWater(player.position)));
         if (poolNow?.inWater && !isJumping) {
@@ -2503,7 +2553,7 @@ function App() {
 
         if (isJumping) {
           verticalVelocity -=
-            gravity * delta;
+            jumpGravity * delta;
 
           jumpHeight +=
             verticalVelocity * delta;
@@ -2533,7 +2583,9 @@ function App() {
         // Over a dip (the stream) a jumping dog keeps the height it took off
         // from; it only meets lower ground once it comes down
         const groundBelow = groundHeightAt(player.position, groundY);
-        const groundNow = isJumping
+        // ...except down Frostpeak's black run, where that would sail the dog out level over a
+        // 45 % slope: there a jump is a hop that follows the mountain down
+        const groundNow = isJumping && !steepRun
           ? Math.max(groundBelow, groundY)
           : groundBelow;
 
@@ -2558,7 +2610,7 @@ function App() {
           (groundHeightAt(ahead, groundY) - groundY) / 1.6;
 
         slope +=
-          (THREE.MathUtils.clamp(slopeNow, -0.4, 0.4) - slope) *
+          (THREE.MathUtils.clamp(slopeNow, steepRun ? -0.55 : -0.4, 0.4) - slope) *
           (1 - Math.exp(-8 * delta));
 
         // ---------------------------------
@@ -2634,13 +2686,21 @@ function App() {
         }
 
         if (woodland && surfaceDisplayRef.current) {
-          surfaceDisplayRef.current.textContent = swimming
+          surfaceDisplayRef.current.textContent = woodlandPlankAt(player.position.x, player.position.z, player.position.y)
+            ? 'TIGHTROPE — STAY ON IT!'
+            : swimming
             ? localPlayer.dog === 'black_lab' ? 'POPPY’S WATER DASH' : 'SWIMMING'
             : wading ? 'WADING'
             : performance.now() < burrowBoostUntil ? 'BURROW EXIT BOOST!'
             : goldenBones.isBoosting() ? 'GOLDEN BONE BOOST!'
             : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
           surfaceDisplayRef.current.style.color = wading ? '#9de5df' : '#cbe4ae';
+        }
+        if (steepRun && !offTrack && surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = performance.now() < launchBoostUntil ? 'LANDING BOOST!'
+            : goldenBones.isBoosting() ? 'GOLDEN BONE BOOST!'
+            : slope < -0.2 ? 'BLACK RUN — FULL SEND!' : 'ON TRACK';
+          surfaceDisplayRef.current.style.color = slope < -0.2 ? '#ffd166' : '#9fe49b';
         }
         if (proceduralTrack && surfaceDisplayRef.current) {
           surfaceDisplayRef.current.textContent = performance.now() < recoveryUntil
@@ -2717,7 +2777,7 @@ function App() {
           if (
             remote.currentAction
           ) {
-            remote.currentAction.timeScale = woodland && woodlandWaterAt(remote.group.position.x, remote.group.position.z)?.swimming
+            remote.currentAction.timeScale = woodland && woodlandWaterAt(remote.group.position.x, remote.group.position.z, remote.group.position.y)?.swimming
               ? (remote.speed > 0.1 ? 1.1 : 0.6) : gaitTimeScale(
                 remote.currentAction,
                 remote.speed,
@@ -2817,6 +2877,8 @@ function App() {
         handlePlayerLeft
       );
       socket.off('treatBoxChanged', handleTreatBoxChanged);
+      socket.off('goldenBoneTaken', handleGoldenBoneTaken);
+      socket.off('goldenBoneRespawned', handleGoldenBoneRespawned);
       for (const [event, handler] of Object.entries(itemEvents)) socket.off(event, handler);
       socket.off('playerBurrowEntered', handleBurrowEntered);
       socket.off('playerBurrowExited', handleBurrowExited);
@@ -3278,6 +3340,7 @@ function App() {
 
       {/* Lost: off the track or the wrong way, counting down to the rescue */}
       <div ref={rescueDisplayRef} className="race-rescue" role="status" hidden />
+      {frisbeesIncoming.length > 0 && <div className="race-incoming" role="alert">FRISBEE INCOMING!</div>}
 
       {/* Race HUD */}
       <div style={hudStyle}>
@@ -3398,6 +3461,7 @@ function App() {
           {room?.mapId === 'wendover' && <div>Amber burrows boost Ralph · Poppy swims fastest</div>}
           {room?.mapId === 'treat_road' && <div>Cyan pad launches automatically · falls return to checkpoints</div>}
           {room?.mapId === 'modbury_heights' && <div>Follow the trail · falls return you to a checkpoint</div>}
+          {room?.mapId === 'frostpeak' && <div>Run into the cannon · it fires you to the summit · eat the bones down the black run</div>}
         </div>
       </div>
 

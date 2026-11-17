@@ -6,6 +6,7 @@
 //   items.setHeld(playerId, 'ball' | 'toy' | 'bone' | null);
 //   items.throwBall({ id, origin, direction });   items.removeBall(id, position);
 //   items.placeHazard({ id, position, rotationY }); items.removeHazard(id, burst);
+//   items.throwFrisbee({ id, position, yaw });  items.moveFrisbees([{ id, position, yaw }]);  items.removeFrisbee(id, position);
 //   each frame: items.update(delta, anchors)       // anchors: Map playerId -> Object3D (the dog's head)
 //   items.dispose();
 import * as THREE from 'three';
@@ -13,13 +14,17 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { BALL, ballPositionAt } from '../../shared/items.js';
 
-const MODELS = { ball: '/models/tennis_ball.glb', toy: '/models/chew_toy.glb', bone: '/models/golden_bone.glb' };
-// Size shown above a dog's head, a vertical nudge to centre it, and the glow colour (as on the HUD sheet)
+const MODELS = { ball: '/models/tennis_ball.glb', toy: '/models/chew_toy.glb', bone: '/models/golden_bone.glb', frisbee: '/models/frisbee.glb' };
+// Size shown above a dog's head, a vertical nudge to centre it, the glow colour (as on the HUD sheet),
+// and a tilt: every held item turns the same way as the chew toy (about the vertical), and the round
+// ones are tipped so you can see them turning (a level ball or a flat disc spinning looks still).
 const HELD = {
-  ball: { scale: 1.5, lift: 0, glow: 0x3fc8ff },
-  toy: { scale: 0.6, lift: -0.36, glow: 0xb45cff },
-  bone: { scale: 1.4, lift: 0, glow: 0xffc040 },
+  ball: { scale: 1.5, lift: 0, glow: 0x3fc8ff, tilt: 0.6 },
+  toy: { scale: 0.6, lift: -0.36, glow: 0xb45cff, tilt: 0 },
+  bone: { scale: 1.4, lift: 0, glow: 0xffc040, tilt: 0 },
+  frisbee: { scale: 1.3, lift: 0, glow: 0xff3b3b, tilt: Math.PI / 2 - 0.3 },   // stood up like a coin
 };
+const SPIN = 2.2;            // radians per second, for every held item
 const ABOVE_HEAD = 1.3;
 
 function glowTexture() {
@@ -69,11 +74,14 @@ export function createItems({ scene, renderer }) {
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ ...additive, color: spec.glow, opacity: 0.8 }));
     glow.scale.setScalar(1.9);
     group.add(glow);
+    const spinner = new THREE.Group();               // turns about the vertical, like the chew toy
+    spinner.position.y = spec.lift;
     const model = templates[item].clone(true);
     model.scale.setScalar(spec.scale);
-    model.position.y = spec.lift;
-    group.add(model);
-    group.userData.model = model;
+    model.rotation.x = spec.tilt;
+    spinner.add(model);
+    group.add(spinner);
+    group.userData.spinner = spinner;
     return group;
   }
 
@@ -84,16 +92,36 @@ export function createItems({ scene, renderer }) {
     bursts.push({ sprite, age: 0 });
   }
 
+  // red frisbees in flight (positions from the server, smoothed between its updates)
+  const frisbees = new Map();
+
   const anchorPos = new THREE.Vector3();
   return {
+    throwFrisbee({ id, position, yaw }) {
+      frisbees.set(id, { from: [...position], to: [...position], yaw, at: performance.now(), object: null });
+    },
+    moveFrisbees(list) {
+      for (const { id, position, yaw } of list) {
+        const f = frisbees.get(id);
+        if (!f) continue;
+        f.from = f.object ? f.object.position.toArray() : f.to; f.to = [...position]; f.yaw = yaw; f.at = performance.now();
+      }
+    },
+    removeFrisbee(id, position) {
+      const f = frisbees.get(id);
+      if (f?.object) root.remove(f.object);
+      frisbees.delete(id);
+      if (position) burst(position, 0xff5a5a);
+    },
+
     setHeld(playerId, item) {
       const current = held.get(playerId);
       if (current?.object) { root.remove(current.object); current.object.children[0].material.dispose(); }
       if (item) held.set(playerId, { item, object: null }); else held.delete(playerId);
     },
 
-    throwBall({ id, origin, direction }) {
-      balls.set(id, { ball: { origin, direction }, startedAt: performance.now(), object: null });
+    throwBall({ id, origin, direction, ground }) {
+      balls.set(id, { ball: { origin, direction, ground }, startedAt: performance.now(), object: null });
     },
     removeBall(id, position) {
       const entry = balls.get(id);
@@ -112,7 +140,7 @@ export function createItems({ scene, renderer }) {
       if (showBurst && entry) burst([entry.position[0], entry.position[1] + 0.6, entry.position[2]], 0xff6a6a);
     },
 
-    update(delta, anchors) {
+    update(delta, anchors, groundAt = null) {
       const t = performance.now() / 1000;
       for (const [playerId, entry] of held) {
         if (!entry.object && templates[entry.item]) { entry.object = makeHeld(entry.item); root.add(entry.object); }
@@ -122,14 +150,22 @@ export function createItems({ scene, renderer }) {
         if (!anchor) continue;
         anchor.getWorldPosition(anchorPos);
         entry.object.position.set(anchorPos.x, anchorPos.y + ABOVE_HEAD + Math.sin(t * 3) * 0.08, anchorPos.z);
-        entry.object.userData.model.rotation.y += delta * 2.2;
+        entry.object.userData.spinner.rotation.y += delta * SPIN;
+      }
+      for (const f of frisbees.values()) {
+        if (!f.object && templates.frisbee) { f.object = templates.frisbee.clone(true); f.object.scale.setScalar(1.3); root.add(f.object); }
+        if (!f.object) continue;
+        const k = Math.min(1, (performance.now() - f.at) / 50);       // the server moves it every 50 ms
+        f.object.position.set(f.from[0] + (f.to[0] - f.from[0]) * k, f.from[1] + (f.to[1] - f.from[1]) * k, f.from[2] + (f.to[2] - f.from[2]) * k);
+        f.object.rotation.y += delta * 16;                             // spinning flat as it flies
+        f.object.rotation.z = Math.sin(t * 5) * 0.12;                  // with a little wobble
       }
       for (const [id, entry] of balls) {
         const age = (performance.now() - entry.startedAt) / 1000;
         if (age > BALL.duration) { this.removeBall(id); continue; }
         if (!entry.object && templates.ball) { entry.object = templates.ball.clone(true); root.add(entry.object); }
         if (!entry.object) continue;
-        const p = ballPositionAt(entry.ball, age);
+        const p = ballPositionAt(entry.ball, age, groundAt);
         entry.object.position.set(p[0], p[1] + Math.abs(Math.sin(age * 7)) * 0.5, p[2]);   // skips along
         entry.object.rotation.x += delta * 18;
       }

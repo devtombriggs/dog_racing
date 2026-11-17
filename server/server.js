@@ -2,11 +2,13 @@
 import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
-import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS } from '../shared/maps.js';
-import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox } from '../shared/treatBoxes.js';
-import { rollItem, forwardOf, ballPositionAt, distanceToSegment, BALL, TOY, HIT } from '../shared/items.js';
-import { racingLineAt } from '../shared/pickupSpots.js';
+import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
+import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
+import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE } from '../shared/items.js';
+import { racingLineAt, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { WENDOVER, entersBurrow, woodlandDistanceAt, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
+import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
+import { readFileSync } from 'node:fs';
 
 const PORT = Number(env.PORT || 3001);
 
@@ -26,6 +28,16 @@ const rooms = new Map();
 const playerRooms = new Map();
 const proceduralRaceStates = new WeakMap();
 const woodlandRaceStates = new WeakMap();
+const frostpeakRaceStates = new WeakMap();
+
+// Ground heights, for balls that skim down a slope instead of flying level (Frostpeak's black run)
+const BALL_GROUND = {};
+for (const [mapId, map] of Object.entries(MAPS)) {
+  if (!map.heightmap) continue;
+  const buf = readFileSync(new URL(`../public${map.heightmap.file}`, import.meta.url));
+  const heights = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+  BALL_GROUND[mapId] = (x, z) => sampleGroundHeight(heights, map.heightmap, x, z);
+}
 const woodlandCheckpointDistances = MAPS.wendover.checkpoints.map(cp => woodlandDistanceAt(cp.x, cp.z));
 
 function updateWoodlandRace(room, player, data) {
@@ -58,6 +70,45 @@ function updateWoodlandRace(room, player, data) {
     }
   }
   player.position = [...data.position]; player.rotation = data.rotation;
+  return true;
+}
+
+// Frostpeak's cannon: run off the end of the launch pad and the server flies the dog up to the top of
+// the ski slope (the same curve the game draws), then lands it with a short boost.  Moves sent from
+// before the landing carry an old revision and are ignored, so the dog cannot be dragged back down.
+function updateFrostpeakRace(room, player, data) {
+  const state = frostpeakRaceStates.get(player);
+  if ((data.respawnRevision ?? 0) !== state.revision) return false;
+  const now = Date.now();
+  if (state.launch) {
+    const elapsed = (now - state.launch.startedAt) / 1000;
+    const point = FROSTPEAK_CANNON.launchPoint(elapsed, state.launch.lateral);
+    player.position = [point.x, point.y, point.z];
+    player.rotation = point.rotationY;
+    player.animation = 'Jump';
+    if (elapsed < FROSTPEAK_CANNON.launch.duration) return false;
+    state.launch = null;
+    state.revision += 1;
+    player.animation = 'Sprint';
+    io.to(room.code).emit('playerLanded', {
+      playerId: player.id, position: player.position, rotation: player.rotation,
+      respawnRevision: state.revision, boostSeconds: FROSTPEAK_CANNON.launch.boostSeconds,
+      speedMultiplier: FROSTPEAK_CANNON.launch.exitSpeedMultiplier
+    });
+    return true;
+  }
+  const lateral = FROSTPEAK_CANNON.cannonFired(player.position, data.position);
+  if (lateral !== null) {
+    state.launch = { startedAt: now, lateral };
+    const point = FROSTPEAK_CANNON.launchPoint(0, lateral);
+    player.position = [point.x, point.y, point.z];
+    player.rotation = point.rotationY;
+    player.animation = 'Jump';
+    io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral });
+    return false;
+  }
+  player.position = [...data.position];
+  player.rotation = data.rotation;
   return true;
 }
 
@@ -161,6 +212,20 @@ function collectTreatBoxes(room, player, previousPosition) {
   }
 }
 
+// Golden Bones on the road: first dog through gets the boost, and the bone is gone for everyone
+// until it comes back.  (The dog's own game boosts it straight away; this keeps the others in step.)
+function collectGoldenBones(room, player, previousPosition) {
+  (GOLDEN_BONE_SPOTS[room.mapId] ?? []).forEach((spot, index) => {
+    if (room.boneTimers.has(index) || !touchesGoldenBone(previousPosition, player.position, spot)) return;
+    io.to(room.code).emit('goldenBoneTaken', { index, playerId: player.id });
+    room.boneTimers.set(index, setTimeout(() => {
+      if (rooms.get(room.code) !== room) return;
+      room.boneTimers.delete(index);
+      io.to(room.code).emit('goldenBoneRespawned', { index });
+    }, GOLDEN_BONE_RESPAWN_MS));
+  });
+}
+
 // ---------------------------------
 // ITEMS (tennis ball, chew toy, golden bone)
 // ---------------------------------
@@ -175,6 +240,9 @@ function grantItem(room, player) {
 }
 
 function resetItems(room) {
+  stopFrisbees(room);
+  for (const timer of room.boneTimers?.values() ?? []) clearTimeout(timer);
+  room.boneTimers = new Map();
   room.hazards = new Map();
   room.balls = new Map();
   room.nextItemId = 1;
@@ -208,12 +276,77 @@ function useItem(room, player) {
   } else if (item === 'ball') {
     const ball = {
       id: `ball-${room.nextItemId++}`, owner: player.id, firedAt: Date.now(),
-      origin: [x + forward[0] * BALL.launchAhead, y + BALL.height, z + forward[2] * BALL.launchAhead], direction: forward
+      origin: [x + forward[0] * BALL.launchAhead, y + BALL.height, z + forward[2] * BALL.launchAhead], direction: forward,
+      ground: room.mapId === 'frostpeak'          // skims down the black run rather than flying off level into the sky
     };
     room.balls.set(ball.id, ball);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
-    io.to(room.code).emit('ballThrown', { id: ball.id, owner: ball.owner, origin: ball.origin, direction: ball.direction });
+    io.to(room.code).emit('ballThrown', { id: ball.id, owner: ball.owner, origin: ball.origin, direction: ball.direction, ground: ball.ground });
+  } else if (item === 'frisbee') {
+    throwFrisbee(room, player);
+    io.to(room.code).emit('itemUsed', { playerId: player.id, item });
   }
+}
+
+// ---------------------------------
+// RED FRISBEE: chases the dog directly ahead of the thrower (whoever that is right now: if someone
+// overtakes the thrower, it goes after them instead), knocks that one dog over and is gone.  It
+// flies straight through anyone else.  The server flies it (it has to see every dog), moving it every
+// FRISBEE.tickMs and telling everyone where it is, and it gives up after FRISBEE.duration.
+// ---------------------------------
+function frisbeeTarget(room, player) {
+  const standings = raceStandings(room);
+  const place = standings.find(entry => entry.playerId === player.id)?.place ?? 1;
+  const ahead = standings.find(entry => entry.place === place - 1 && !entry.finished);
+  return ahead ? ahead.playerId : null;
+}
+
+function throwFrisbee(room, player) {
+  const forward = forwardOf(player.rotation);
+  const [x, y, z] = player.position;
+  const frisbee = {
+    id: `frisbee-${room.nextItemId++}`, owner: player.id, target: frisbeeTarget(room, player), firedAt: Date.now(),
+    position: [x + forward[0] * FRISBEE.launchAhead, y + FRISBEE.height, z + forward[2] * FRISBEE.launchAhead], yaw: player.rotation
+  };
+  room.frisbees.set(frisbee.id, frisbee);
+  io.to(room.code).emit('frisbeeThrown', { id: frisbee.id, owner: frisbee.owner, target: frisbee.target, position: frisbee.position, yaw: frisbee.yaw });
+  room.frisbeeTimer ??= setInterval(() => tickFrisbees(room), FRISBEE.tickMs);
+}
+
+function tickFrisbees(room) {
+  if (rooms.get(room.code) !== room || room.status !== 'racing') { stopFrisbees(room); return; }
+  const now = Date.now(), dt = FRISBEE.tickMs / 1000, moved = [];
+  for (const f of room.frisbees.values()) {
+    if ((now - f.firedAt) / 1000 > FRISBEE.duration) {
+      room.frisbees.delete(f.id);
+      io.to(room.code).emit('frisbeeGone', { id: f.id, position: f.position });
+      continue;
+    }
+    const thrower = room.players.get(f.owner);
+    const target = room.players.get(thrower ? frisbeeTarget(room, thrower) : f.target);
+    if (target && target.id !== f.target) {
+      f.target = target.id;
+      io.to(room.code).emit('frisbeeTarget', { id: f.id, target: f.target });
+    }
+    Object.assign(f, stepFrisbee(f, target && !target.finished ? target.position : null, dt));
+    // only the dog it is chasing: it flies through anyone else
+    const victim = target && !target.finished && now >= target.hitImmuneUntil && frisbeeHits(f.position, target.position) ? target : null;
+    if (victim) {
+      room.frisbees.delete(f.id);
+      io.to(room.code).emit('frisbeeHit', { id: f.id, playerId: victim.id, position: f.position });
+      hitPlayer(room, victim, f.owner, 'frisbee');
+      continue;
+    }
+    moved.push({ id: f.id, position: f.position, yaw: f.yaw });
+  }
+  if (moved.length) io.to(room.code).emit('frisbeesMoved', { frisbees: moved });
+  if (room.frisbees.size === 0) stopFrisbees(room);
+}
+
+function stopFrisbees(room) {
+  if (room.frisbeeTimer) clearInterval(room.frisbeeTimer);
+  room.frisbeeTimer = null;
+  room.frisbees = new Map();
 }
 
 function hitPlayer(room, player, by, item) {
@@ -230,8 +363,9 @@ function checkItemHits(room, player, previousPosition) {
     const age = (now - ball.firedAt) / 1000;
     if (age > BALL.duration) { room.balls.delete(ball.id); continue; }
     if (ball.owner === player.id || now < player.hitImmuneUntil) continue;
-    const from = ballPositionAt(ball, Math.max(0, age - 0.12)), to = ballPositionAt(ball, age);
-    if (Math.abs(player.position[1] + 1 - ball.origin[1]) <= 3
+    const groundAt = BALL_GROUND[room.mapId];
+    const from = ballPositionAt(ball, Math.max(0, age - 0.12), groundAt), to = ballPositionAt(ball, age, groundAt);
+    if (Math.abs(player.position[1] + 1 - to[1]) <= 3
       && distanceToSegment(player.position, from, to) <= BALL.radius) {
       room.balls.delete(ball.id);
       io.to(room.code).emit('ballHit', { id: ball.id, playerId: player.id, position: to });
@@ -279,6 +413,7 @@ function startRaceIn(room) {
     player.finished = false;
     player.finishTime = null;
     if (room.mapId === 'wendover') woodlandRaceStates.set(player, { revision: 0, tunnel: null, used: new Set() });
+    if (room.mapId === 'frostpeak') frostpeakRaceStates.set(player, { revision: 0, launch: null });
     if (MAPS[room.mapId].procedural) {
       proceduralRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
     }
@@ -331,6 +466,7 @@ function rescuePoint(room, player) {
 
 function rescuePlayer(room, player) {
   const state = room.mapId === 'wendover' ? woodlandRaceStates.get(player)
+    : room.mapId === 'frostpeak' ? frostpeakRaceStates.get(player)
     : MAPS[room.mapId].procedural ? proceduralRaceStates.get(player) : null;
   if (state && (state.launch || state.fall || state.tunnel)) return false;      // already being handled
   const { position, rotation } = rescuePoint(room, player);
@@ -675,6 +811,8 @@ function leaveRoom(socket) {
     clearCountdown(room);
     clearMapVote(room);
     for (const timer of room.treatBoxTimers.values()) clearTimeout(timer);
+    for (const timer of room.boneTimers?.values() ?? []) clearTimeout(timer);
+    stopFrisbees(room);
     rooms.delete(roomCode);
     updateLobbies();
 
@@ -745,6 +883,9 @@ io.on('connection', (socket) => {
       startedAt: null,
       countdownTimer: null,
       treatBoxTimers: new Map(),
+      boneTimers: new Map(),
+      frisbees: new Map(),
+      frisbeeTimer: null,
       votes: new Map(),
       voteEndsAt: 0,
       voteTimer: null,
@@ -1095,6 +1236,8 @@ io.on('connection', (socket) => {
       onRoad = updateProceduralRace(room, player, data);
     } else if (room.mapId === 'wendover') {
       onRoad = updateWoodlandRace(room, player, data);
+    } else if (room.mapId === 'frostpeak') {
+      onRoad = updateFrostpeakRace(room, player, data);
     } else {
       player.position = [...position];
       player.rotation = rotation;
@@ -1104,6 +1247,7 @@ io.on('connection', (socket) => {
 
     if (onRoad) {
       collectTreatBoxes(room, player, previousPosition);
+      collectGoldenBones(room, player, previousPosition);
       if (validAnimations.includes(data.animation)) player.animation = data.animation;
       checkRaceProgress(room, player, previousPosition);
     }

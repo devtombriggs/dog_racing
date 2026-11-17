@@ -44,7 +44,7 @@ export const MAPS = {
   },
   frostpeak: {
     name: frostpeak.name,
-    description: '2.5 km snowy alpine circuit',
+    description: '2.5 km alpine circuit · summit cannon · black run slalom',
     model: '/models/frostpeak_alpine.glb',
     startPositions: frostpeak.startPositions,
     // Checkpoint zero is the finish line, tested separately after the others.

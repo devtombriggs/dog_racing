@@ -38,15 +38,87 @@ export const PICKUP_PATHS = {
       ...WENDOVER.tunnels.flatMap(t => [around(t.entryS, 12), around(t.exitS, 16)])
     ],
   },
-  frostpeak: {
-    ...polylinePath(frostpeak.centerline.points.map(([x, y, z, hw]) => [x, y, z, hw])),
+  frostpeak: frostpeakPath(),
+};
+
+// Frostpeak: keep pickups off the cannon (run-in, flight, landing), the boost pads and the logs.
+// The map file's `s` values are measured in 3D, so the 88 m cannon climb would put them out of step
+// with this flat path: hazards are found from their positions instead.
+function frostpeakPath() {
+  const path = polylinePath(frostpeak.centerline.points.map(([x, y, z, hw]) => [x, y, z, hw]));
+  const sOf = ([x, , z]) => {
+    let best = 0, bestD = Infinity;
+    for (let s = 0; s < path.length; s += 1) {
+      const p = path.pointAt(s), d = (p.x - x) ** 2 + (p.z - z) ** 2;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    return best;
+  };
+  const c = frostpeak.cannon;
+  const takeoffS = sOf(c.takeoff), landingS = sOf(c.landing);
+  return {
+    ...path,
     hazards: [
-      ...frostpeak.obstacles.map(o => around(o.s, 35)),
-      [frostpeak.bridge.sStart - 30, frostpeak.bridge.sEnd + 30],
+      [takeoffS - (c.takeoffS - c.padStartS) - 30, landingS + 30],
+      ...frostpeak.obstacles.map(o => around(sOf(o.position), 35)),
       ...frostpeak.iceZones.map(z => [z.sStart - 20, z.sEnd + 20]),
     ],
-  },
-};
+    // the black run, and the slalom obstacles on it (s, lateral as a share of the half width)
+    runStartS: takeoffS - (c.takeoffS - c.padStartS),
+    slope: { topS: sOf(frostpeak.skiSlope.top), bottomS: sOf(frostpeak.skiSlope.bottom) },
+    slalom: frostpeak.slalomObstacles.map(o => {
+      const os = sOf(o.position), p = path.pointAt(os);
+      // polylinePath's lateral is to the right of the way the race goes; this is the same measure
+      const lat = ((o.position[0] - p.x) * -Math.cos(p.rotationY) + (o.position[2] - p.z) * Math.sin(p.rotationY)) / p.halfWidth;
+      return { s: os, lateral: lat, radius: o.radius };
+    }),
+  };
+}
+
+// Frostpeak's black run is the party: 30 golden bones zig-zagging down it and a dozen rows of
+// Treat Boxes, so the whole field is boosting and throwing balls all the way down.  The rest of
+// the lap (village and forest) keeps a few of each.
+function frostpeakPickups(path) {
+  const { topS, bottomS } = path.slope;
+  const clearOfSlalom = (s, lateral, gap) => path.slalom.every(o =>
+    lapDistance(s, o.s, path.length) > gap || Math.abs(o.lateral - lateral) > 0.55);
+  const spread = (a, b, n) => Array.from({ length: n }, (_, k) => a + (b - a) * (k + 0.5) / n);
+  // box rows span the road, so they keep 9 m clear of every obstacle
+  const rows = spread(topS + 25, bottomS - 15, 12).map(s => {
+    for (const d of [0, 6, -6, 12, -12, 18, -18, 24, -24]) {
+      if (path.slalom.every(o => lapDistance(s + d, o.s, path.length) > 9)) return s + d;
+    }
+    return s;
+  });
+  const bones = [], laterals = [];
+  spread(topS + 15, bottomS - 5, 30).forEach((s, n) => {
+    let lateral = n % 2 ? -0.45 : 0.45;               // left, right, left... a slalom of bones
+    for (const d of [0, 4, -4, 8, -8]) {
+      if (rows.some(r => lapDistance(s + d, r, path.length) < 5)) continue;
+      if (clearOfSlalom(s + d, lateral, 6)) { bones.push(s + d); laterals.push(lateral); return; }
+      if (clearOfSlalom(s + d, -lateral, 6)) { bones.push(s + d); laterals.push(-lateral); return; }
+    }
+    bones.push(s); laterals.push(0.8 * lateral);
+  });
+  // village and forest: before the cannon
+  const before = (a, b, n) => spread(a, b, n);
+  const forestRows = before(START_CLEAR + 40, path.runStartS - 50, 4).map(s => nudgeClear(path, s));
+  const forestBones = before(START_CLEAR + 80, path.runStartS - 30, 3).map(s => nudgeClear(path, s))
+    .map(s => (forestRows.some(r => lapDistance(s, r, path.length) < 30) ? nudgeClear(path, s - 45) : s));
+  return {
+    rows: [...forestRows, ...rows],
+    bones: [...forestBones, ...bones],
+    laterals: [...forestBones.map((_, n) => (n % 2 ? -0.45 : 0.45)), ...laterals],
+  };
+}
+
+function nudgeClear(path, s) {
+  for (let d = 0; d < 200; d += 5) {
+    if (isClear(path, s + d)) return s + d;
+    if (isClear(path, s - d)) return s - d;
+  }
+  return s;
+}
 
 function lapDistance(a, b, length) {
   const d = Math.abs(a - b) % length;
@@ -112,14 +184,14 @@ const PLAN = {
   wendover:        { rows: [0.19, 0.60, 0.72],                  bones: [0.05, 0.31, 0.45, 0.88] },
   // the two long courses get more, so there is always something coming up
   // (even: stay near each target where the road allows, so they are spread along the lap)
-  frostpeak:       { rows: [0.06, 0.20, 0.34, 0.49, 0.62, 0.76, 0.90],
-                     bones: [0.13, 0.27, 0.41, 0.55, 0.69, 0.83, 0.96], even: true },
+  frostpeak:       { custom: true },   // see frostpeakPickups(): 4 rows + 3 bones before the cannon, 12 rows + 30 bones on the black run
   modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91],
                      bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.97], even: true },
 };
 
 /** { mapId: [s, ...] } for box rows and for bones */
 export const BOX_ROW_S = {}, BONE_S = {};
+const BONE_LATERAL = {};          // optional: which side of the road each bone sits (share of the half width)
 for (const [mapId, plan] of Object.entries(PLAN)) {
   const path = PICKUP_PATHS[mapId], taken = [];
   if (mapId === 'treat_road') {
@@ -131,6 +203,11 @@ for (const [mapId, plan] of Object.entries(PLAN)) {
       for (let guard = 0; guard < 200 && !isClear(path, s); guard++) s += 10;
       return s % path.length;
     });
+  } else if (mapId === 'frostpeak') {
+    const f = frostpeakPickups(path);
+    BOX_ROW_S[mapId] = f.rows;
+    BONE_S[mapId] = f.bones;
+    BONE_LATERAL[mapId] = f.laterals;
   } else {
     BOX_ROW_S[mapId] = pickSpots(path, plan.rows, taken, 0.08, plan.even);
     BONE_S[mapId] = pickSpots(path, plan.bones, taken, 0.08, plan.even);
@@ -141,7 +218,7 @@ for (const [mapId, plan] of Object.entries(PLAN)) {
 export const GOLDEN_BONE_SPOTS = Object.fromEntries(Object.entries(BONE_S).map(([mapId, list]) => {
   const path = PICKUP_PATHS[mapId];
   return [mapId, list.map((s, n) => {
-    const c = path.pointAt(s), p = path.pointAt(s, (n % 2 ? -0.45 : 0.45) * c.halfWidth);
+    const c = path.pointAt(s), p = path.pointAt(s, (BONE_LATERAL[mapId]?.[n] ?? (n % 2 ? -0.45 : 0.45)) * c.halfWidth);
     return { s, x: p.x, y: p.y, z: p.z };
   })];
 }));

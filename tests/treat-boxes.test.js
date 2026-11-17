@@ -6,6 +6,7 @@ import { PICKUP_PATHS, BOX_ROW_S, BONE_S, GOLDEN_BONE_SPOTS } from '../shared/pi
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS } from '../shared/modburyData.js';
 import { MAPS, sampleGroundHeight } from '../shared/maps.js';
+import { FROSTPEAK_SLALOM } from '../shared/frostpeakCannon.js';
 
 const lapDistance = (a, b, L) => { const d = Math.abs(a - b) % L; return Math.min(d, L - d); };
 
@@ -46,9 +47,28 @@ test('pickups keep clear of hazards, the start line and each other', () => {
         assert.ok(lapDistance(s, (a + b) / 2, path.length) > (b - a) / 2, `${mapId}: ${s.toFixed(0)} m is inside hazard ${a}-${b}`);
       }
     }
-    const sorted = [...spots].sort((a, b) => a - b);
+    // Frostpeak's black run is packed on purpose (30 bones, 12 box rows); everywhere else keeps 70 m
+    const onRun = s => path.slope && s > path.slope.topS && s < path.slope.bottomS;
+    const sorted = [...spots].filter(s => !onRun(s)).sort((a, b) => a - b);
     sorted.forEach((s, i) => assert.ok(lapDistance(s, sorted[(i + 1) % sorted.length], path.length) >= 70, `${mapId}: spots too close at ${s.toFixed(0)} m`));
   }
+});
+
+test('Frostpeak black run: 30 bones and 12 box rows, none inside a slalom obstacle', () => {
+  const path = PICKUP_PATHS.frostpeak;
+  const onRun = s => s > path.slope.topS && s < path.slope.bottomS;
+  assert.equal(BONE_S.frostpeak.filter(onRun).length, 30);
+  assert.equal(BOX_ROW_S.frostpeak.filter(onRun).length, 12);
+  const obstacles = FROSTPEAK_SLALOM.map(o => o.position);
+  const pickups = [...TREAT_BOXES_BY_MAP.frostpeak.map(b => b.groundPosition), ...GOLDEN_BONE_SPOTS.frostpeak.map(b => [b.x, b.y, b.z])];
+  for (const [x, , z] of pickups) {
+    for (const [ox, , oz] of obstacles) {
+      assert.ok(Math.hypot(x - ox, z - oz) > 3, `pickup at (${x.toFixed(0)}, ${z.toFixed(0)}) is inside a slalom obstacle`);
+    }
+  }
+  // spread down the whole run, not bunched
+  const run = BONE_S.frostpeak.filter(onRun).sort((a, b) => a - b);
+  assert.ok(run[0] - path.slope.topS < 60 && path.slope.bottomS - run.at(-1) < 60);
 });
 
 test('boxes and bones sit on the road on the procedural maps', () => {

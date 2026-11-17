@@ -5,7 +5,7 @@ import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 import { TREAT_BOXES, TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { forwardOf } from '../shared/items.js';
-import { racingLineAt } from '../shared/pickupSpots.js';
+import { racingLineAt, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 
 // Exercise the real socket handlers in memory, without binding a network port.
 let server;
@@ -434,6 +434,37 @@ test('treat boxes hide for the whole room for exactly five seconds and can be co
   assert.equal(changes().length,3,'leaving an empty room cancels its pending respawns');
 });
 
+test('golden bones: the first dog through gets it, it vanishes for everyone, and comes back after 6 s', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { mapId: 'treat_road' }).room;
+  guest.call('joinGame', { roomCode: room.code });
+  host.call('selectDog', { dog: 'gsp' }); guest.call('selectDog', { dog: 'pablo' });
+  host.call('startRace'); host.call('raceLoaded'); guest.call('raceLoaded');
+  const spot = GOLDEN_BONE_SPOTS.treat_road[0];
+  const lane = 0.45 * TREAT_ROAD.pointAt(spot.s).halfWidth;          // bone 0 sits this far across the road
+  const at = d => { const p = TREAT_ROAD.pointAt(spot.s + d, lane); return [p.x, p.y, p.z]; };
+  const runThrough = who => { who.call('playerMove', { position: at(-4), rotation: 0, animation: 'Run' });
+    who.call('playerMove', { position: at(4), rotation: 0, animation: 'Run' }); };
+  const events = kind => server.events.filter(e => e.room === room.code && e.event === kind);
+  runThrough(host);
+  assert.equal(events('goldenBoneTaken').length, 0, 'nothing before GO');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  runThrough(host);
+  assert.deepEqual(events('goldenBoneTaken').map(e => e.data), [{ index: 0, playerId: host.id }], 'whole room told who got it');
+  runThrough(guest);
+  assert.equal(events('goldenBoneTaken').length, 1, 'a taken bone cannot be eaten again');
+  context.mock.timers.tick(5999);
+  assert.equal(events('goldenBoneRespawned').length, 0);
+  context.mock.timers.tick(1);
+  assert.deepEqual(events('goldenBoneRespawned').map(e => e.data), [{ index: 0 }]);
+  runThrough(guest);
+  assert.deepEqual(events('goldenBoneTaken').at(-1).data, { index: 0, playerId: guest.id });
+  host.call('leaveGame'); guest.call('leaveGame');
+  context.mock.timers.tick(6000);
+  assert.equal(events('goldenBoneRespawned').length, 1, 'leaving an empty room cancels pending respawns');
+});
+
 test('treat box cooldowns are independent between races, and each map only has its own crates', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const players = ['treat_road','treat_road','wendover'].map(mapId => {
@@ -530,7 +561,7 @@ test('treat boxes give one item by race place; balls, chew toys and bones do the
   move(tom, boxes[1].groundPosition);
   assert.equal(events('itemChanged').filter(e => e.playerId === tom.id).length, 1, 'a second box gives nothing while holding');
   assert.ok(events('treatBoxChanged').some(e => e.id === boxes[1].id && !e.visible), 'but the box is still taken');
-  roll = 0.99;
+  roll = 0.5;           // last place: 10 % ball, 70 % bone, 20 % frisbee
   move(sam, boxes[2].groundPosition);
   assert.deepEqual(events('itemChanged').at(-1), { playerId: sam.id, item: 'bone' });
 
@@ -582,6 +613,106 @@ test('treat boxes give one item by race place; balls, chew toys and bones do the
   sam.call('useItem');
   assert.deepEqual(events('itemUsed').at(-1), { playerId: sam.id, item: 'bone' });
   for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
+test('red frisbee: chases the dog directly ahead round a corner, flies through anyone else, hits once', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client(), sam = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' }); sam.call('selectDog', { dog: 'ralph' });
+  tom.call('startRace');
+  for (const p of [tom, berri, sam]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
+  // Berri leads (two checkpoints), Tom 2nd (one), Sam last
+  move(berri, cp(0)); move(berri, cp(1));
+  move(tom, cp(0));
+  context.mock.method(Math, 'random', () => 0.9);          // 2nd of 3: 40 % bone, then 25 % frisbee at the top
+  move(tom, boxes[0].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'frisbee');
+  // Tom stands still facing +Z; Berri is 30 m away to the side (+X): it must turn to get her.
+  // Sam (last) stands right in its path, 6 m in front of Tom: it flies through him.
+  const at = boxes[0].groundPosition;
+  move(tom, at, 0);
+  move(berri, [at[0] + 30, at[1], at[2] + 10]);
+  move(sam, [at[0], at[1], at[2] + 6]);
+  tom.call('useItem');
+  const thrown = events('frisbeeThrown').at(-1);
+  assert.equal(thrown.owner, tom.id);
+  assert.equal(thrown.target, berri.id, 'after the dog directly ahead');
+  for (let i = 0; i < 40 && !events('frisbeeHit').length; i++) context.mock.timers.tick(50);
+  assert.ok(events('frisbeesMoved').length > 3, 'everyone is told where it is as it flies');
+  assert.equal(events('playerHit').filter(e => e.playerId === sam.id).length, 0, 'it flew through Sam');
+  assert.deepEqual({ ...events('frisbeeHit').at(-1), position: undefined }, { id: thrown.id, playerId: berri.id, position: undefined });
+  assert.deepEqual({ ...events('playerHit').at(-1) }, { playerId: berri.id, by: tom.id, item: 'frisbee', stunMs: 1100 });
+  assert.equal(events('frisbeeHit').length, 1, 'one hit and it is gone');
+  // no frisbees left: the server stops moving them
+  const moves = events('frisbeesMoved').length;
+  context.mock.timers.tick(500);
+  assert.equal(events('frisbeesMoved').length, moves);
+  for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
+test('red frisbee: if someone overtakes the thrower while it flies, it goes after them instead', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client(), sam = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' }); sam.call('selectDog', { dog: 'ralph' });
+  tom.call('startRace');
+  for (const p of [tom, berri, sam]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
+  move(berri, cp(0)); move(berri, cp(1)); move(berri, cp(2));       // Berri well ahead
+  move(tom, cp(0));                                                   // Tom 2nd, Sam 3rd
+  context.mock.method(Math, 'random', () => 0.9);
+  move(tom, boxes[0].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'frisbee');
+  const at = boxes[0].groundPosition;
+  move(tom, at, 0);
+  move(berri, [at[0] + 300, at[1], at[2] + 300]);                   // far away up the course
+  tom.call('useItem');
+  assert.equal(events('frisbeeThrown').at(-1).target, berri.id);
+  context.mock.timers.tick(100);
+  // Sam overtakes Tom (two checkpoints to Tom's one) and stops 25 m away: now he is directly ahead
+  move(sam, cp(0)); move(sam, cp(1)); move(sam, [at[0] - 25, at[1], at[2] + 5]);
+  for (let i = 0; i < 60 && !events('frisbeeHit').length; i++) context.mock.timers.tick(50);
+  assert.equal(events('frisbeeTarget').at(-1).target, sam.id, 'everyone is told it switched');
+  assert.equal(events('frisbeeHit').at(-1).playerId, sam.id);
+  for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
+test('red frisbee: gives up after its time if it cannot reach its target', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' });
+  tom.call('startRace'); tom.call('raceLoaded'); berri.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  context.mock.method(Math, 'random', () => 0.95);         // 2nd of 2 is last: 20 % frisbee at the top
+  berri.call('playerMove', { position: boxes[0].groundPosition, rotation: 0, animation: 'Run' });
+  assert.equal(events('itemChanged').at(-1).item, 'frisbee');
+  // Berri is 2nd, so it locks on to Tom; Tom is 400 m away, so it runs out of time before it gets there
+  berri.call('useItem');
+  const thrown = events('frisbeeThrown').at(-1);
+  assert.equal(thrown.target, tom.id);
+  tom.call('playerMove', { position: [boxes[0].groundPosition[0] + 400, 0, boxes[0].groundPosition[2] + 400], rotation: 0, animation: 'Run' });
+  context.mock.timers.tick(6100);
+  assert.deepEqual(events('frisbeeGone').map(e => e.id), [thrown.id], 'it gives up');
+  assert.equal(events('frisbeeHit').length, 0);
+  for (const p of [tom, berri]) p.call('leaveGame');
 });
 
 test('jumping: a dog in the air still launches off Treat Road\'s pad and can clear a chew toy', context => {

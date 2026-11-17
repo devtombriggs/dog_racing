@@ -43,3 +43,21 @@ export function touchesTreatBox(previous, current, box) {
   return Math.abs(dogY - y) <= 1.5
     && Math.hypot(previous[0] + dx * t - x, previous[2] + dz * t - z) <= PICKUP_RADIUS;
 }
+
+// ---------------------------------
+// Golden Bones on the road: the server decides who got each one, so a bone one dog eats disappears
+// for everyone.  Same sweep as the crates, with the bone's own reach (it floats 1.3 m up).
+// ---------------------------------
+export const GOLDEN_BONE_RESPAWN_MS = 6000;
+export const GOLDEN_BONE_REACH = { radius: 2.0, below: 1.5, above: 3.3 };
+
+export function touchesGoldenBone(previous, current, spot) {
+  const dx = current[0] - previous[0], dz = current[2] - previous[2];
+  const lengthSq = dx * dx + dz * dz;
+  const t = lengthSq > 0 && lengthSq <= 144
+    ? Math.max(0, Math.min(1, ((spot.x - previous[0]) * dx + (spot.z - previous[2]) * dz) / lengthSq))
+    : 1;
+  const dy = previous[1] + (current[1] - previous[1]) * t - spot.y;
+  return dy > -GOLDEN_BONE_REACH.below && dy < GOLDEN_BONE_REACH.above
+    && Math.hypot(previous[0] + dx * t - spot.x, previous[2] + dz * t - spot.z) < GOLDEN_BONE_REACH.radius;
+}
