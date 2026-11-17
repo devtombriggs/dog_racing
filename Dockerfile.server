@@ -8,6 +8,8 @@ RUN npm ci --omit=dev
 
 COPY server/ ./server/
 COPY shared/ ./shared/
+# Server-side terrain sampling uses the same heightmaps as the browser.
+COPY public/models/*_heightmap.bin ./public/models/
 
 EXPOSE 3001
 
