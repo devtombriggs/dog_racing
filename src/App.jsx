@@ -9,7 +9,11 @@ import { createTreatBoxes } from './pickups/treatBoxes.js';
 import { createGoldenBones } from './pickups/goldenBones.js';
 import { GOLDEN_BONE_SPOTS, racingLineAt } from '../shared/pickupSpots.js';
 import { createItems } from './pickups/items.js';
+import { createSpecials } from './abilities/specials.js';
+import { createVoiceChat } from './voiceChat.js';
+import { createMinimap } from './minimap.js';
 import { ITEM_NAMES } from '../shared/items.js';
+import { SPECIALS, SPECIAL_ITEM } from '../shared/specials.js';
 import { WENDOVER, woodlandWaterAt, woodlandPlankAt, woodlandSwimMultiplier, woodlandDogY } from '../shared/wendoverData.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 
@@ -498,6 +502,7 @@ function App() {
   const timerDisplayRef = useRef(null);
   const surfaceDisplayRef = useRef(null);
   const rescueDisplayRef = useRef(null);
+  const minimapRef = useRef(null);
 
   const [screen, setScreen] = useState('menu');
   const [room, setRoom] = useState(null);
@@ -524,6 +529,16 @@ function App() {
 
   const [finishTime, setFinishTime] =
     useState(null);
+  // The race is over for everyone: when the room goes back to the lobby (performance clock), and a
+  // clock to redraw the seconds left
+  const [lobbyReturnAt, setLobbyReturnAt] = useState(null);
+  const [clockNow, setClockNow] = useState(0);
+  useEffect(() => {
+    if (lobbyReturnAt === null) return undefined;
+    const tick = () => setClockNow(performance.now());
+    const timer = setInterval(tick, 250);
+    return () => clearInterval(timer);
+  }, [lobbyReturnAt]);
 
   // Race order for the board at the top left: [{ playerId, name, dog, place, finished }]
   const [standings, setStandings] = useState([]);
@@ -533,13 +548,41 @@ function App() {
   // Map vote countdown: when it ends (performance clock), and a tick to redraw the seconds
   // Accessibility mode: the dog runs by itself, Up jumps and Down uses the item
   const [accessibilityMode, setAccessibilityMode] = useState(() => {
-    try { return localStorage.getItem('dogRacing.accessibilityMode') === '1'; } catch { return false; }
+    // Off unless the player turns it on.  (The key was renamed so that browsers which had remembered it
+    // as on start with it off again.)
+    try { return localStorage.getItem('dogRacing.accessibilityMode.v2') === '1'; } catch { return false; }
   });
   const accessibilityRef = useRef(accessibilityMode);
   useEffect(() => {
     accessibilityRef.current = accessibilityMode;
-    try { localStorage.setItem('dogRacing.accessibilityMode', accessibilityMode ? '1' : '0'); } catch { /* storage blocked */ }
+    try { localStorage.setItem('dogRacing.accessibilityMode.v2', accessibilityMode ? '1' : '0'); } catch { /* storage blocked */ }
   }, [accessibilityMode]);
+  // Voice chat: the microphone option in the lobby, which stays on through the race.  Not remembered
+  // between visits: a microphone should only ever come on because you ticked the box this time.
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState({ enabled: false, muted: false, error: null, connected: 0 });
+  const [voiceMap, setVoiceMap] = useState({});          // "room:playerId" -> has a microphone on (as the server tells it)
+  const voiceRef = useRef(null);
+  const inVoiceRoom = Boolean(room && !room.singlePlayer && connected);
+  const voiceRoomCode = room?.code ?? null;
+  useEffect(() => {
+    voiceRef.current?.setEnabled(voiceEnabled && inVoiceRoom);
+  }, [voiceEnabled, inVoiceRoom, voiceRoomCode]);
+  // connect to everyone in the room who is talking (or to everyone, if we are)
+  useEffect(() => {
+    const players = inVoiceRoom ? room.players : [];
+    voiceRef.current?.sync(players.map(p => p.id),
+      id => voiceMap[`${voiceRoomCode}:${id}`] ?? players.find(p => p.id === id)?.voice ?? false);
+  }, [inVoiceRoom, room, voiceRoomCode, voiceMap, voiceStatus.enabled]);
+  // M mutes and unmutes during the race
+  useEffect(() => {
+    if (screen !== 'race' || !voiceStatus.enabled) return undefined;
+    const onKey = event => {
+      if (event.code === 'KeyM' && !event.repeat) voiceRef.current?.setMuted(!voiceRef.current.isMuted());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [screen, voiceStatus.enabled]);
   // Countdown and music stop as soon as the player leaves the race screen
   useEffect(() => {
     if (screen !== 'race') stopRaceAudio();
@@ -601,6 +644,7 @@ function App() {
       setLap(1);
       setCheckpoint(0);
       setFinishTime(null);
+      setLobbyReturnAt(null);
       setStandings([]);
       setFrisbeesIncoming([]);
       setHeldItem(null);
@@ -656,6 +700,31 @@ function App() {
       if (Array.isArray(data?.standings)) setStandings(data.standings);
     }
 
+    // Everyone is home (or the time allowed after the winner ran out): the race is over for all,
+    // and the room goes back to the lobby shortly
+    function handleRaceEnded(data) {
+      raceFinishedRef.current = true;
+      raceGoRef.current = false;
+      setRacePhase('');
+      setClockNow(performance.now());
+      setLobbyReturnAt(performance.now() + (data?.returnMs ?? 0));
+    }
+
+    // Back to character select with the same players: the next race starts from there as the first did
+    function handleReturnedToLobby() {
+      raceGoRef.current = false;
+      raceFinishedRef.current = false;
+      raceStartRef.current = null;
+      setRacePhase('');
+      setFinishTime(null);
+      setLobbyReturnAt(null);
+      setStandings([]);
+      setFrisbeesIncoming([]);
+      setHeldItem(null);
+      setError('');
+      setScreen(current => (current === 'race' ? 'selection' : current));
+    }
+
     function handlePlayerFinished(data) {
       if (data.playerId === socket.id) {
         console.log(
@@ -671,6 +740,17 @@ function App() {
 
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
+
+    // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
+    const voice = createVoiceChat({ socket, onChange: setVoiceStatus });
+    voiceRef.current = voice;
+    const handleVoiceSignal = message => voice.handleSignal(message);
+    const handleVoiceChanged = ({ playerId, enabled }) => {
+      const key = `${roomRef.current?.code ?? null}:${playerId}`;
+      setVoiceMap(map => ({ ...map, [key]: enabled }));
+    };
+    socket.on('voiceSignal', handleVoiceSignal);
+    socket.on('voiceChanged', handleVoiceChanged);
 
     socket.on(
       'lobbyUpdated',
@@ -688,6 +768,8 @@ function App() {
     );
 
     socket.on('raceGo', handleRaceGo);
+    socket.on('raceEnded', handleRaceEnded);
+    socket.on('returnedToLobby', handleReturnedToLobby);
 
     socket.on(
       'raceProgress',
@@ -708,9 +790,15 @@ function App() {
       socket.off('raceStarted', handleRaceStarted);
       socket.off('raceCountdown', handleRaceCountdown);
       socket.off('raceGo', handleRaceGo);
+      socket.off('raceEnded', handleRaceEnded);
+      socket.off('returnedToLobby', handleReturnedToLobby);
       socket.off('raceProgress', handleRaceProgress);
       socket.off('playerFinished', handlePlayerFinished);
       socket.off('raceStandings', handleRaceStandings);
+      socket.off('voiceSignal', handleVoiceSignal);
+      socket.off('voiceChanged', handleVoiceChanged);
+      voice.dispose();
+      voiceRef.current = null;
 
       socket.disconnect();
       socketRef.current = null;
@@ -945,6 +1033,7 @@ function App() {
     setError('');
     setRacePhase('');
     setFinishTime(null);
+    setLobbyReturnAt(null);
     setStandings([]);
     setFrisbeesIncoming([]);
     setHeldItem(null);
@@ -1148,6 +1237,7 @@ function App() {
       );
     }
 
+    const exitNormal = new THREE.Vector3();
     function blockedByObstacle(from, to) {
       const movement = to.clone().sub(from);
       movement.y = 0;
@@ -1176,12 +1266,20 @@ function App() {
           if (!expanded.intersectsBox(segmentBox)) continue;
         }
         const mesh = obstacleMeshes[i];
+        // A solid block (Frostpeak's hidden collision boxes: slalom gates, snowmen, logs, rocks...):
+        // only running INTO it blocks.  A dog that ends up inside one (a jump at black-run speed can
+        // carry it in) hits the block's far wall from the inside, an exit face, and may walk out.
+        // Thin fences and nets have no inside, so any hit on them blocks.
+        const solid = /^Collision_/.test(mesh.name) && !/Fences|Nets/.test(mesh.name);
         for (const offset of origins) {
           const origin = from.clone().add(offset);
           obstacleRaycaster.set(origin, movement);
           obstacleRaycaster.near = 0;
           obstacleRaycaster.far = sweepLength;
-          if (obstacleRaycaster.intersectObject(mesh, false).length > 0) {
+          const hits = obstacleRaycaster.intersectObject(mesh, false);
+          if (hits.length === 0) continue;
+          if (!solid) return true;
+          if (hits.some(hit => hit.face && exitNormal.copy(hit.face.normal).transformDirection(mesh.matrixWorld).dot(movement) < 0)) {
             return true;
           }
         }
@@ -1338,6 +1436,16 @@ function App() {
     const goldenBones = createGoldenBones({ scene, renderer, placements: GOLDEN_BONE_SPOTS[pickupMapId] ?? [] });
     // Items from the boxes: held above heads, thrown balls, dropped chew toys (the server decides)
     const items = createItems({ scene, renderer });
+    // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
+    const specials = createSpecials({
+      scene,
+      resolve: id => (id === socket.id ? player : remotePlayers.get(id)?.group ?? null)
+    });
+    // The course map, bottom left: the whole lap from above with a dot for every dog (src/minimap.js)
+    const minimap = createMinimap({
+      canvas: minimapRef.current, mapId: pickupMapId,
+      marks: (PROCEDURAL_TRACKS[pickupMapId]?.chasms ?? []).map(chasm => chasm.s)    // Modbury's broken bridges
+    });
     let myItem = null;
     let stunUntil = 0, stunLength = 1;
     // Lost dogs: seconds off the track / running the wrong way, and whether a rescue is on its way
@@ -1453,6 +1561,11 @@ function App() {
           currentAction = actions.Idle;
           currentAction.play();
         }
+
+        specials.register(socket.id, {
+          dogId: localPlayer?.dog || 'gsp', group: player, model: dog, mixer: dogMixer, animations: gltf.animations,
+          getAction: () => currentAction, setAction: action => { currentAction = action; }
+        });
 
         dogLoaded = true;
         notifyRaceLoaded();
@@ -1588,6 +1701,10 @@ function App() {
             remote,
             remote.animation
           );
+          specials.register(data.id, {
+            dogId: data.dog, group, model: dog, mixer: remote.mixer, animations: gltf.animations,
+            getAction: () => remote.currentAction, setAction: action => { remote.currentAction = action; }
+          });
 
           remoteModelsPending -= 1;
           notifyRaceLoaded();
@@ -1674,10 +1791,8 @@ function App() {
       remote.animation =
         data.animation;
 
-      playRemoteAnimation(
-        remote,
-        data.animation
-      );
+      // (a dog in the middle of its special keeps the special's own clips)
+      if (!specials.animating(data.playerId)) playRemoteAnimation(remote, data.animation);
     }
 
     function handlePlayerLeft(data) {
@@ -1688,6 +1803,7 @@ function App() {
       if (!remote) return;
 
       scene.remove(remote.group);
+      specials.unregister(data.playerId);
       items.setHeld(data.playerId, null);
       remotePlayers.delete(
         data.playerId
@@ -1844,7 +1960,20 @@ function App() {
       items.removeFrisbee(id, position);
       setFrisbeesIncoming(list => list.filter(f => f !== id));
     }
+    // Special abilities: the server says when one starts, who it knocks over and when it ends
+    function handleSpecialStarted(data) {
+      specials.start(data.playerId, data);
+      if (data.playerId !== socket.id) return;
+      const spec = SPECIALS[localPlayer?.dog];
+      if (spec?.speed && currentSpeed > 0) currentSpeed = Math.max(currentSpeed, sprintSpeed);   // straight up to full pace
+      if (spec?.flyHeight) { jumpGravity = gravity; verticalVelocity = 0; }
+    }
+    function handleSpecialHit({ playerId }) { specials.hit(playerId); }
+    function handleSpecialEnded({ playerId, reason }) { specials.end(playerId, reason); }
+    function handlePheasantLanded({ owner, playerId, hit }) { specials.pheasantLanded(owner, playerId, hit); }
     const itemEvents = {
+      specialStarted: handleSpecialStarted, specialHit: handleSpecialHit, specialEnded: handleSpecialEnded,
+      pheasantLanded: handlePheasantLanded,
       itemChanged: handleItemChanged, itemUsed: handleItemUsed, hazardPlaced: handleHazardPlaced,
       hazardRemoved: handleHazardRemoved, ballThrown: handleBallThrown, ballHit: handleBallHit, playerHit: handlePlayerHit,
       frisbeeThrown: handleFrisbeeThrown, frisbeesMoved: handleFrisbeesMoved, frisbeeTarget: handleFrisbeeTarget,
@@ -1925,8 +2054,9 @@ function App() {
     const jumpForce = 7;
     const gravity = 16;
     // On Frostpeak's black run a normal jump at full speed sails 25 m down the mountain: there the
-    // dog does a short, snappy hop instead (still over 1 m, enough to clear a chew toy)
-    const STEEP_JUMP = { force: 10, gravity: 45, below: -0.12 };
+    // dog does a short, snappy hop instead: about 2 m high (clears the padded slalom gates, solid to
+    // 1.7 m; the snowmen are too tall and must be steered round) and 0.6 s in the air
+    const STEEP_JUMP = { force: 12.9, gravity: 41.6, below: -0.12 };
     let jumpGravity = gravity;
 
     // ---------------------------------
@@ -1945,6 +2075,7 @@ function App() {
         raceFinishedRef.current ||
         isJumping ||
         tunnelRide ||
+        specials.busy(socket.id) ||          // no jumping in the middle of a special
         (woodland && woodlandWaterAt(player.position.x, player.position.z, player.position.y)?.swimming) ||
         !dogMixer
       ) {
@@ -2075,6 +2206,11 @@ function App() {
       woodlandWorld?.update(performance.now() / 1000, player.position,
         [player.position, ...[...remotePlayers.values()].filter(r => r.group.visible).map(r => r.group.position)]);
       treatBoxes.update(performance.now() / 1000);
+      minimap.draw([
+        { x: player.position.x, z: player.position.z, rotation: player.rotation.y, color: dogConfig.accent, me: true },
+        ...[...remotePlayers.values()].filter(remote => remote.group.visible)
+          .map(remote => ({ x: remote.group.position.x, z: remote.group.position.z, color: remote.config.accent }))
+      ]);
       const itemAnchors = new Map([[socket.id, dogBones.head ?? player]]);
       remotePlayers.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
       items.update(delta, itemAnchors, heightmap
@@ -2164,7 +2300,7 @@ function App() {
       lastGoState = true;
 
       const desiredFov = launchFlight ? 94
-        : performance.now() < launchBoostUntil || goldenBones.isBoosting() ? 84 : 75;
+        : performance.now() < launchBoostUntil || goldenBones.isBoosting() || specials.physics(socket.id)?.speed ? 84 : 75;
       if (Math.abs(camera.fov - desiredFov) > 0.01) {
         camera.fov += (desiredFov - camera.fov) * (1 - Math.exp(-8 * delta));
         camera.updateProjectionMatrix();
@@ -2206,6 +2342,9 @@ function App() {
         // ACCELERATION AND BRAKING
         // ---------------------------------
 
+        // This dog's special, while it is in force: faster, flying (Ralph) or steering itself (Poppy)
+        const special = specials.physics(socket.id);
+
         // In the air the dog is off nothing: that is how the stream is cleared
         offTrack = !isJumping && !isTrackSurface(player.position);
         const woodlandSurface = woodland && woodlandWaterAt(player.position.x, player.position.z, player.position.y);
@@ -2231,8 +2370,10 @@ function App() {
           (performance.now() < launchBoostUntil ? launchTrack.launch.exitSpeedMultiplier : 1) *
           (proceduralTrack && performance.now() < recoveryUntil ? proceduralTrack.rules.respawnSpeedMultiplier : 1) *
           goldenBones.speedMultiplier() *
+          (special?.speed ?? 1) *
           (performance.now() < stunUntil ? 0.15 : 1);
         const effectiveAcceleration = acceleration *
+          (special?.speed ? 2.5 : 1) *
           goldenBones.accelerationMultiplier() *
           (steepRun && slope < 0 ? 1 - 4 * slope : 1) *      // gravity does the work going down the black run
           (inWater
@@ -2247,7 +2388,7 @@ function App() {
         const autoRun = accessibilityRef.current;
         const running = autoRun
           ? raceGoRef.current && !raceFinishedRef.current
-          : keys.KeyW || keys.ArrowUp;
+          : keys.KeyW || keys.ArrowUp || Boolean(special?.speed);   // a special carries the dog along by itself
         if (running) {
           currentSpeed +=
             effectiveAcceleration * delta;
@@ -2322,7 +2463,7 @@ function App() {
           sprintSpeed
         );
 
-        const turnInput =
+        const turnInput = special?.steerLocked ? 0 :
           (keys.KeyA || keys.ArrowLeft ? 1 : 0) -
           (keys.KeyD || keys.ArrowRight ? 1 : 0);
 
@@ -2346,6 +2487,22 @@ function App() {
           steer *
           steeringFactor *
           delta;
+
+        // Poppy's wave steers itself: it follows the road, wandering from side to side, so it only
+        // hits the dogs that happen to be in its way
+        if (special?.steerLocked) {
+          const line = racingLineAt(pickupMapId, player.position.x, player.position.z, lineS);
+          if (line) {
+            const leftX = Math.cos(line.rotationY), leftZ = -Math.sin(line.rotationY);
+            const offset = (player.position.x - line.x) * leftX + (player.position.z - line.z) * leftZ;
+            const wander = Math.sin(performance.now() / 1000 * 1.1) * 0.5 * line.halfWidth;
+            const want = line.rotationY +
+              THREE.MathUtils.clamp((wander - offset) / Math.max(line.halfWidth, 1) * 0.9, -0.6, 0.6);
+            player.rotation.y +=
+              Math.atan2(Math.sin(want - player.rotation.y), Math.cos(want - player.rotation.y)) *
+              (1 - Math.exp(-5 * delta));
+          }
+        }
 
         // Turning hard at speed costs speed
         const turnLimit =
@@ -2551,7 +2708,15 @@ function App() {
         // JUMPING
         // ---------------------------------
 
-        if (isJumping) {
+        if (special?.flyHeight) {
+          // Ralph's rocket paws: up to flying height and held there, over the other dogs and
+          // anything on the road; when they go out he drops and lands in his stride
+          isJumping = true;
+          isLanding = false;
+          verticalVelocity = 0;
+          jumpGravity = gravity;
+          jumpHeight += (special.flyHeight - jumpHeight) * (1 - Math.exp(-4 * delta));
+        } else if (isJumping) {
           verticalVelocity -=
             jumpGravity * delta;
 
@@ -2585,7 +2750,7 @@ function App() {
         const groundBelow = groundHeightAt(player.position, groundY);
         // ...except down Frostpeak's black run, where that would sail the dog out level over a
         // 45 % slope: there a jump is a hop that follows the mountain down
-        const groundNow = isJumping && !steepRun
+        const groundNow = isJumping && !steepRun && !special?.flyHeight   // (flying, he follows the ground)
           ? Math.max(groundBelow, groundY)
           : groundBelow;
 
@@ -2623,7 +2788,8 @@ function App() {
 
         if (
           !isJumping &&
-          !isLanding
+          !isLanding &&
+          !specials.animating(socket.id)       // a special plays its own clips
         ) {
           // A little overlap between strides stops them flickering
           // The stride follows the speed, as a dog's does.  A little overlap
@@ -2658,7 +2824,7 @@ function App() {
           }
         }
 
-        if (currentAction) {
+        if (currentAction && !specials.animating(socket.id)) {
           currentAction.timeScale = swimming ? (isMoving ? 1.1 : 0.6) :
             gaitTimeScale(
               currentAction,
@@ -2714,6 +2880,10 @@ function App() {
           surfaceDisplayRef.current.style.color = coastalSurface?.inWater ? '#8fd0ff'
             : offTrack || coastalSurface?.surface === 'shoulder' ? '#ffbc75' : '#9fe49b';
         }
+        if (special && surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = `${special.name.toUpperCase()}!`;
+          surfaceDisplayRef.current.style.color = '#ffe45c';
+        }
       }
 
       // ---------------------------------
@@ -2746,7 +2916,7 @@ function App() {
       // ---------------------------------
 
       remotePlayers.forEach(
-        (remote) => {
+        (remote, remoteId) => {
           const smoothing =
             1 -
             Math.exp(
@@ -2775,7 +2945,8 @@ function App() {
             smoothing;
 
           if (
-            remote.currentAction
+            remote.currentAction &&
+            !specials.animating(remoteId)
           ) {
             remote.currentAction.timeScale = woodland && woodlandWaterAt(remote.group.position.x, remote.group.position.z, remote.group.position.y)?.swimming
               ? (remote.speed > 0.1 ? 1.1 : 0.6) : gaitTimeScale(
@@ -2810,6 +2981,9 @@ function App() {
           }
         }
       );
+
+      // Special abilities: their clips, effects and timing, for every dog (after the dogs have moved)
+      specials.update(delta);
 
       // ---------------------------------
       // THIRD-PERSON CAMERA
@@ -2892,6 +3066,8 @@ function App() {
       burrowOverlay.remove();
       treatBoxes.dispose();
       items.dispose();
+      specials.dispose();
+      minimap.dispose();
       goldenBones.dispose();
 
       window.removeEventListener(
@@ -3204,6 +3380,22 @@ function App() {
                 <small>Runs for you · ↑ jump · ↓ use item</small>
               </span>
             </label>
+            {multiplayer && (
+              <label className="character-select__accessibility">
+                <input
+                  type="checkbox"
+                  checked={voiceEnabled}
+                  onChange={(event) => setVoiceEnabled(event.target.checked)}
+                />
+                <span>
+                  Voice chat
+                  <small>
+                    {voiceStatus.error
+                      ?? (voiceStatus.enabled ? 'Microphone on · stays on in the race · M mutes' : 'Microphone on to talk in the race')}
+                  </small>
+                </span>
+              </label>
+            )}
             <p>
               {!connected ? 'Disconnected. Reconnecting to the server…'
                 : !multiplayer || !myDog ? 'Select a portrait to continue'
@@ -3319,6 +3511,13 @@ function App() {
         }}
       />
 
+      {/* Course map, bottom left: where every dog is on the lap */}
+      <canvas
+        ref={minimapRef}
+        aria-label="Course map"
+        style={{ position: 'absolute', left: 16, bottom: 16, pointerEvents: 'none' }}
+      />
+
       {/* Race order, top left: slides rows into place when someone overtakes */}
       {standings.length > 0 && (
         <ol className="race-standings" aria-label="Race positions" style={{ height: standings.length * 38 - 4 }}>
@@ -3367,7 +3566,12 @@ function App() {
 
         <div style={{ fontSize: 12, color: '#b4c9b5', marginBottom: 3 }}>ITEM</div>
         <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 12, color: heldItem ? '#ffd257' : '#6f8573' }}>
-          {heldItem ? `${ITEM_NAMES[heldItem]} · press Shift` : 'None: run through a box'}
+          {heldItem === SPECIAL_ITEM && (
+            <img src="/icons/special.png" alt="" style={{ width: 30, height: 30, verticalAlign: 'middle', marginRight: 6 }} />
+          )}
+          {heldItem === SPECIAL_ITEM
+            ? `${SPECIALS[room?.players.find(p => p.id === socketId)?.dog]?.name ?? 'Special'} · press Shift`
+            : heldItem ? `${ITEM_NAMES[heldItem]} · press Shift` : 'None: run through a box'}
         </div>
 
         <div
@@ -3458,6 +3662,13 @@ function App() {
               <div>Space or scroll down to jump · Shift to use an item</div>
             </>
           )}
+          {room && !room.singlePlayer && (
+            <div style={{ color: voiceStatus.enabled && !voiceStatus.muted ? '#9fe49b' : '#b4c9b5' }}>
+              {voiceStatus.error ? `Voice chat: ${voiceStatus.error}`
+                : !voiceStatus.enabled ? 'Voice chat: your microphone is off'
+                  : voiceStatus.muted ? 'Microphone muted · M to unmute' : 'Microphone on · M to mute'}
+            </div>
+          )}
           {room?.mapId === 'wendover' && <div>Amber burrows boost Ralph · Poppy swims fastest</div>}
           {room?.mapId === 'treat_road' && <div>Cyan pad launches automatically · falls return to checkpoints</div>}
           {room?.mapId === 'modbury_heights' && <div>Follow the trail · falls return you to a checkpoint</div>}
@@ -3504,7 +3715,7 @@ function App() {
       )}
 
       {/* Finish result */}
-      {finishTime !== null && (
+      {(finishTime !== null || lobbyReturnAt !== null) && (
         <div
           style={{
             position: 'absolute',
@@ -3522,23 +3733,41 @@ function App() {
           }}
         >
           <h2>
-            Race Complete!
+            {finishTime !== null ? 'Race Complete!' : 'Race Over'}
           </h2>
 
           <p>
-            3 laps completed
+            {finishTime !== null ? '3 laps completed' : 'Time ran out before you finished'}
           </p>
 
-          <h1>
-            {formatTime(finishTime)}
-          </h1>
+          {finishTime !== null && (
+            <h1>
+              {formatTime(finishTime)}
+            </h1>
+          )}
 
-          <button
-            style={buttonStyle}
-            onClick={leaveGame}
-          >
-            Main Menu
-          </button>
+          <p style={{ color: '#b4c9b5' }}>
+            {lobbyReturnAt !== null
+              ? `Back to the lobby in ${Math.max(0, Math.ceil((lobbyReturnAt - clockNow) / 1000))} s`
+              : 'Waiting for the other dogs to finish: then everyone goes back to the lobby'}
+          </p>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            {lobbyReturnAt !== null && (
+              <button
+                style={buttonStyle}
+                onClick={() => socketRef.current?.emit('returnToLobby')}
+              >
+                Back to Lobby
+              </button>
+            )}
+            <button
+              style={buttonStyle}
+              onClick={leaveGame}
+            >
+              Main Menu
+            </button>
+          </div>
         </div>
       )}
     </div>

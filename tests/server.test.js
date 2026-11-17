@@ -939,3 +939,212 @@ test('Wendover burrows reject other dogs and Ralph with missing earlier checkpoi
     host.call('leaveGame');
   }
 });
+
+test('specials: not for the leader; pheasants land on every other dog, Ralph flies clear, a wave knocks over who it meets', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client(), sam = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' }); sam.call('selectDog', { dog: 'ralph' });
+  for (const p of [tom, berri, sam]) p.call('setReady', { ready: true });
+  tom.call('startRace');
+  for (const p of [tom, berri, sam]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+
+  context.mock.method(Math, 'random', () => 0);          // every roll that can give a special does
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
+
+  // Berri leads: no special for her, however the dice fall.  Tom, behind, gets his.
+  move(berri, cp(0)); move(berri, cp(1)); move(berri, boxes[0].groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: berri.id, item: 'ball' });
+  move(tom, boxes[1].groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: tom.id, item: 'special' });
+
+  // Pippa's flush: one pheasant for each other dog, each landing after its own flight
+  tom.call('useItem');
+  const flush = events('specialStarted').at(-1);
+  assert.equal(flush.playerId, tom.id); assert.equal(flush.kind, 'flush');
+  assert.deepEqual(flush.targets.map(t => t.id).sort(), [berri.id, sam.id].sort());
+  assert.ok(flush.targets.every(t => t.flightMs >= 900 && t.flightMs <= 4000));
+  assert.equal(events('pheasantLanded').length, 0, 'not yet');
+  context.mock.timers.tick(4000);
+  assert.deepEqual(events('pheasantLanded').map(e => [e.playerId, e.hit]).sort(), [[berri.id, true], [sam.id, true]].sort());
+  assert.deepEqual(events('playerHit').filter(e => e.item === 'special').map(e => e.stunMs), [1300, 1300]);
+  assert.equal(events('specialEnded').at(-1).playerId, tom.id);
+
+  // Ralph's rocket paws: fifteen seconds in the air, and a second flush cannot touch him
+  context.mock.timers.tick(2000);
+  move(sam, boxes[2].groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: sam.id, item: 'special' });
+  sam.call('useItem');
+  assert.deepEqual(events('specialStarted').at(-1), { playerId: sam.id, kind: 'jet', durationMs: 15000 });
+  move(tom, boxes[3].groundPosition);
+  tom.call('useItem');
+  const landedBefore = events('pheasantLanded').length;
+  context.mock.timers.tick(4000);
+  const second = events('pheasantLanded').slice(landedBefore);
+  assert.equal(second.find(e => e.playerId === sam.id).hit, false, 'the bird cannot catch a flying Ralph');
+  assert.equal(second.find(e => e.playerId === berri.id).hit, true);
+  assert.ok(!events('specialEnded').some(e => e.playerId === sam.id), 'still flying after four seconds');
+  context.mock.timers.tick(11100);
+  assert.deepEqual(events('specialEnded').at(-1), { playerId: sam.id, reason: 'done' });
+
+  // Poppy's wave, once she is no longer leading: whoever it meets is knocked over; a hit ends a special
+  move(tom, cp(0)); move(tom, cp(1)); move(tom, cp(2));
+  context.mock.timers.tick(5000);                           // the boxes are back
+  berri.call('useItem');                                    // (she throws the ball she was still holding)
+  move(berri, boxes[0].groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: berri.id, item: 'special' });
+  berri.call('useItem');
+  assert.equal(events('specialStarted').at(-1).kind, 'wave');
+  const [x, y, z] = boxes[0].groundPosition;
+  move(sam, [x + 40, y, z]);
+  assert.equal(events('specialHit').length, 0, 'out of reach');
+  move(sam, [x + 1, y, z + 1]);
+  assert.deepEqual(events('specialHit').at(-1), { playerId: berri.id, victim: sam.id });
+  assert.deepEqual({ ...events('playerHit').at(-1) }, { playerId: sam.id, by: berri.id, item: 'special', stunMs: 1300 });
+  const hits = events('playerHit').length;
+  move(sam, [x + 1, y, z + 1.5]);
+  assert.equal(events('playerHit').length, hits, 'not hit again while recovering');
+  context.mock.timers.tick(5000);
+  assert.deepEqual(events('specialEnded').at(-1), { playerId: berri.id, reason: 'done' });
+  for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
+test('voice chat: the room hears who has a microphone on; connection messages only pass between players in the same room', () => {
+  const tom = client(), berri = client(), stranger = client();
+  const room = tom.call('hostGame', { name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  stranger.call('hostGame', { name: 'Elsewhere' });
+  assert.equal(room.players[0].voice, false, 'off until asked for');
+  tom.call('setVoice', { enabled: true });
+  assert.deepEqual(latest(room.code, 'voiceChanged'), { playerId: tom.id, enabled: true });
+  const joined = client().call('joinGame', { roomCode: room.code, name: 'Late' });
+  assert.equal(joined.room.players.find(p => p.id === tom.id).voice, true, 'someone joining later is told too');
+  tom.call('voiceSignal', { to: berri.id, signal: { description: { type: 'offer', sdp: 'x' } } });
+  assert.deepEqual(latest(berri.id, 'voiceSignal'), { from: tom.id, signal: { description: { type: 'offer', sdp: 'x' } } });
+  const before = server.events.length;
+  tom.call('voiceSignal', { to: stranger.id, signal: { candidate: {} } });
+  tom.call('voiceSignal', { to: tom.id, signal: { candidate: {} } });
+  tom.call('voiceSignal', { to: berri.id, signal: 'not an object' });
+  assert.equal(server.events.length, before, 'nothing goes to another room, to yourself, or malformed');
+  tom.call('setVoice', { enabled: false });
+  assert.deepEqual(latest(room.code, 'voiceChanged'), { playerId: tom.id, enabled: false });
+  for (const p of [tom, berri, stranger]) p.call('leaveGame');
+});
+
+test('Modbury broken bridges: running into the break is a fall, a jump carries over, a special carries over', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { mapId: 'modbury_heights' }).room;
+  guest.call('joinGame', { roomCode: room.code });
+  host.call('selectDog', { dog: 'black_lab' });
+  guest.call('selectDog', { dog: 'ralph' });
+  assert.equal(host.call('startRace').success, true);
+  host.call('raceLoaded'); guest.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  let revision = 0;
+  const move = (s, lift = 0) => {
+    const p = COAST.pointAt(s);
+    host.call('playerMove', { position: [p.x, p.y + lift, p.z], rotation: p.rotationY, animation: 'Sprint', respawnRevision: revision });
+  };
+  const fell = () => server.events.filter(e => e.room === room.code && e.event === 'playerFell').length;
+  const c = COAST.chasms[0];
+  // across the planks, a jump over the break, and down the far planks: no fall
+  move(c.ravineStart - 5); move(c.ravineStart + 2); move(c.gapStart - 0.5);
+  move(c.s - 1, 1.2); move(c.s + 1, 1.4); move(c.gapEnd + 0.5, 0.3); move(c.ravineEnd + 4);
+  assert.equal(fell(), 0, 'a jump carries over');
+  // back round to the bridge and straight into the break at deck height
+  move(c.ravineStart - 5); move(c.gapStart - 0.5);
+  assert.equal(fell(), 0, 'still on the planks at the broken end');
+  move(c.s);
+  assert.equal(fell(), 1, 'no planks: down into the ravine');
+  context.mock.timers.tick(1000);
+  move(c.s);
+  const respawn = latest(room.code, 'playerRespawned');
+  assert.equal(respawn.playerId, host.id);
+  assert.ok(COAST.query(respawn.position[0], respawn.position[2]).onTrack);
+  revision = respawn.respawnRevision;
+  // on her wave she cannot jump: the special carries her over the break
+  context.mock.method(Math, 'random', () => 0);
+  const box = TREAT_BOXES_BY_MAP.modbury_heights[0];
+  guest.call('playerMove', { position: COAST.checkpoints[1].position, rotation: 0, animation: 'Run', respawnRevision: 0 });   // Ralph leads
+  host.call('playerMove', { position: box.groundPosition, rotation: 0, animation: 'Run', respawnRevision: revision });
+  assert.deepEqual(latest(room.code, 'itemChanged'), { playerId: host.id, item: 'special' });
+  host.call('useItem');
+  move(c.gapStart - 0.5); move(c.s); move(c.gapEnd + 0.5);
+  assert.equal(fell(), 1, 'carried over on the wave');
+  context.mock.timers.tick(5000);
+  move(c.gapStart - 0.5); move(c.s);
+  assert.equal(fell(), 2, 'once it is over, the break is a fall again');
+  host.call('leaveGame'); guest.call('leaveGame');
+});
+
+test('after the race: the rest get 90 s once the first dog is home, then everyone returns to the lobby together and can race again', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const map = MAPS.wendover;
+  const tom = client(), berri = client(), watcher = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  watcher.call('watchLobbies');
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' });
+  for (const p of [tom, berri]) p.call('setReady', { ready: true });
+  const count = name => server.events.filter(e => e.room === room.code && e.event === name).length;
+  const state = () => latest(room.code, 'lobbyUpdated');
+  const race = () => {
+    assert.equal(tom.call('startRace').success, true);
+    for (const p of [tom, berri]) p.call('raceLoaded');
+    for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  };
+  const finishPoint = d => map.startFinish.position.map((v, axis) => v + d * map.startFinish.forward[axis]);
+  const runRace = who => {
+    const go = position => who.call('playerMove', { position, rotation: 0, animation: 'Run' });
+    for (let lap = 1; lap <= 3; lap++) {
+      for (const cp of map.checkpoints) go([cp.x, 0, cp.z]);
+      go(finishPoint(-2)); go(finishPoint(2));
+    }
+  };
+
+  // race one: both finish; the lobby follows 15 s later by itself
+  race();
+  assert.equal(tom.call('returnToLobby').success, false, 'not while the race is on');
+  runRace(tom);
+  assert.equal(count('finishGrace'), 1, 'the first dog home starts the clock for the rest');
+  assert.equal(count('raceEnded'), 0);
+  runRace(berri);
+  assert.deepEqual(latest(room.code, 'raceEnded'), { returnMs: 15000 });
+  assert.equal(state().status, 'finished');
+  context.mock.timers.tick(14999);
+  assert.equal(count('returnedToLobby'), 0);
+  context.mock.timers.tick(1);
+  assert.equal(count('returnedToLobby'), 1);
+  assert.equal(state().status, 'lobby');
+  assert.deepEqual(state().players.map(p => [p.dog, p.ready, p.finished, p.lap, p.checkpoint, p.item]),
+    [['gsp', true, false, 1, 0, null], ['black_lab', true, false, 1, 0, null]], 'same dogs, ready to go again');
+  assert.ok(latest(watcher.id, 'lobbiesUpdated').some(l => l.code === room.code), 'the room is listed again for others to join');
+  assert.equal(berri.call('selectDog', { dog: 'ralph' }).success, true, 'a dog can be changed for the next race');
+
+  // race two: Berri never finishes; 90 s after Tom is home the race ends anyway, and anyone can skip the wait
+  berri.call('setReady', { ready: true });
+  race();
+  assert.equal(latest(room.code, 'raceStarted').players.length, 2);
+  runRace(tom);
+  context.mock.timers.tick(89999);
+  assert.equal(count('raceEnded'), 1, 'still waiting for Berri');
+  context.mock.timers.tick(1);
+  assert.equal(count('raceEnded'), 2, 'time is up');
+  assert.equal(berri.call('returnToLobby').success, true);
+  assert.equal(count('returnedToLobby'), 2);
+  assert.equal(state().status, 'lobby');
+  context.mock.timers.tick(20000);
+  assert.equal(count('returnedToLobby'), 2, 'the timer does not fire a second time');
+
+  // race three starts cleanly from there
+  race();
+  assert.equal(state().status, 'racing');
+  for (const p of [tom, berri, watcher]) p.call('leaveGame');
+});

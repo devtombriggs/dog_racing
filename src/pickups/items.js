@@ -23,7 +23,9 @@ const HELD = {
   toy: { scale: 0.6, lift: -0.36, glow: 0xb45cff, tilt: 0 },
   bone: { scale: 1.4, lift: 0, glow: 0xffc040, tilt: 0 },
   frisbee: { scale: 1.3, lift: 0, glow: 0xff3b3b, tilt: Math.PI / 2 - 0.3 },   // stood up like a coin
+  special: { scale: 1.5, lift: 0, glow: 0x7df9ff },        // the dog's own special: the crackling paw badge, not a model
 };
+const SPECIAL_ICON = '/icons/special.png';
 const SPIN = 2.2;            // radians per second, for every held item
 const ABOVE_HEAD = 1.3;
 
@@ -51,6 +53,11 @@ export function createItems({ scene, renderer }) {
     pmrem.dispose(); owned.push(envTex);
   }
 
+  const specialTex = new THREE.TextureLoader().load(SPECIAL_ICON);
+  specialTex.colorSpace = THREE.SRGBColorSpace; owned.push(specialTex);
+  const specialMat = new THREE.SpriteMaterial({ map: specialTex, transparent: true, depthWrite: false, toneMapped: false });
+  owned.push(specialMat);
+
   const loader = new GLTFLoader();
   for (const [id, url] of Object.entries(MODELS)) {
     loader.loadAsync(url).then(gltf => {
@@ -76,12 +83,19 @@ export function createItems({ scene, renderer }) {
     group.add(glow);
     const spinner = new THREE.Group();               // turns about the vertical, like the chew toy
     spinner.position.y = spec.lift;
+    group.add(spinner);
+    group.userData.spinner = spinner;
+    if (item === 'special') {                        // a badge that always faces you, pulsing
+      const badge = new THREE.Sprite(specialMat);
+      badge.scale.setScalar(spec.scale);
+      group.add(badge);
+      group.userData.badge = badge;
+      return group;
+    }
     const model = templates[item].clone(true);
     model.scale.setScalar(spec.scale);
     model.rotation.x = spec.tilt;
     spinner.add(model);
-    group.add(spinner);
-    group.userData.spinner = spinner;
     return group;
   }
 
@@ -143,7 +157,7 @@ export function createItems({ scene, renderer }) {
     update(delta, anchors, groundAt = null) {
       const t = performance.now() / 1000;
       for (const [playerId, entry] of held) {
-        if (!entry.object && templates[entry.item]) { entry.object = makeHeld(entry.item); root.add(entry.object); }
+        if (!entry.object && (templates[entry.item] || entry.item === 'special')) { entry.object = makeHeld(entry.item); root.add(entry.object); }
         if (!entry.object) continue;
         const anchor = anchors.get(playerId);
         entry.object.visible = !!anchor;
@@ -151,6 +165,7 @@ export function createItems({ scene, renderer }) {
         anchor.getWorldPosition(anchorPos);
         entry.object.position.set(anchorPos.x, anchorPos.y + ABOVE_HEAD + Math.sin(t * 3) * 0.08, anchorPos.z);
         entry.object.userData.spinner.rotation.y += delta * SPIN;
+        entry.object.userData.badge?.scale.setScalar(HELD.special.scale * (1 + 0.1 * Math.sin(t * 9)));
       }
       for (const f of frisbees.values()) {
         if (!f.object && templates.frisbee) { f.object = templates.frisbee.clone(true); f.object.scale.setScalar(1.3); root.add(f.object); }

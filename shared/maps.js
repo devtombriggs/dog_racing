@@ -58,7 +58,7 @@ export const MAPS = {
   ...Object.fromEntries(Object.entries(PROCEDURAL_TRACKS).map(([id, track]) => [id, {
     name: track.name,
     description: id === 'modbury_heights'
-      ? '3.12 km coastal circuit · clifftops · water crossing'
+      ? '3.12 km coastal circuit · clifftops · broken bridges to jump · water crossing'
       : '1.45 km of sky road · catapult gap · landing boost',
     procedural: true,
     startPositions: track.startPositions,

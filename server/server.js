@@ -5,6 +5,7 @@ import { env } from 'node:process';
 import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE } from '../shared/items.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, specialChance, specialFor, specialTouches, pheasantFlightMs } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { WENDOVER, entersBurrow, woodlandDistanceAt, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
@@ -23,11 +24,22 @@ const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo'];
 const TOTAL_LAPS = 3;
 const MAX_PLAYERS = 5;
 const LOBBY_BROWSER = 'lobby-browser';
+// For trying the specials out: ALWAYS_SPECIAL=1 makes every Treat Box give the special, even to the leader,
+// and hands every dog its special at GO and again three seconds after each use.
+const ALWAYS_SPECIAL = env.ALWAYS_SPECIAL === '1';
+// After a race: once the first dog is home the rest have FINISH_GRACE_MS to finish (a dog left standing
+// cannot hold everyone up), and when the race is over everyone goes back to the lobby together after
+// LOBBY_RETURN_MS, or as soon as anyone asks.
+const FINISH_GRACE_MS = Number(env.FINISH_GRACE_MS) || 90000;      // (both can be shortened for testing)
+const LOBBY_RETURN_MS = Number(env.LOBBY_RETURN_MS) || 15000;
 
 const rooms = new Map();
 const playerRooms = new Map();
 const proceduralRaceStates = new WeakMap();
 const woodlandRaceStates = new WeakMap();
+// The special a dog is using right now: { spec, until, timer }.  Kept off the player object, which is
+// sent to the clients as it is (a timer cannot be sent).
+const activeSpecials = new WeakMap();
 const frostpeakRaceStates = new WeakMap();
 
 // Ground heights, for balls that skim down a slope instead of flying level (Frostpeak's black run)
@@ -65,6 +77,7 @@ function updateWoodlandRace(room, player, data) {
       if (state.used.has(key) || player.checkpoint !== required || !entersBurrow(player.position,data.position,tunnel)) continue;
       state.used.add(key); state.tunnel = { tunnel, startedAt: Date.now() };
       player.position = [...tunnel.entry]; player.rotation = tunnel.entryYaw; player.animation = 'Run';
+      endSpecial(room, player, 'cancelled');
       io.to(room.code).emit('playerBurrowEntered', { playerId: player.id, tunnelId: tunnel.id, duration: tunnel.duration });
       return false;
     }
@@ -104,6 +117,7 @@ function updateFrostpeakRace(room, player, data) {
     player.position = [point.x, point.y, point.z];
     player.rotation = point.rotationY;
     player.animation = 'Jump';
+    endSpecial(room, player, 'cancelled');
     io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral });
     return false;
   }
@@ -175,6 +189,7 @@ function updateProceduralRace(room, player, data) {
       state.launch = { startedAt: now, lateral: Math.max(-halfWidth, Math.min(halfWidth, ground.lateral)) };
       const point = track.launchPoint(0, state.launch.lateral);
       player.position = [point.x,point.y,point.z]; player.rotation = point.rotationY; player.animation = 'Jump';
+      endSpecial(room, player, 'cancelled');
       io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral: state.launch.lateral });
       return false;
     }
@@ -187,9 +202,13 @@ function updateProceduralRace(room, player, data) {
   }
   player.position = position;
   player.rotation = data.rotation;
-  if (!ground.onTrack || (!ground.blocked && y < ground.y - track.rules.fallStartsBelow)) {
+  // a broken bridge (Modbury Heights): over the missing planks a dog has to be in the air.  A dog in the
+  // middle of its special cannot jump, so its special carries it over.
+  const inGap = ground.gap && y < ground.y + track.rules.gapClearance && !activeSpecials.has(player);
+  if (!ground.onTrack || inGap || (!ground.blocked && y < ground.y - track.rules.fallStartsBelow)) {
     state.fall = { startedAt: now, position: [...player.position] };
     player.animation = 'Jump';
+    endSpecial(room, player, 'cancelled');
     io.to(room.code).emit('playerFell', {
       playerId: player.id, position: player.position
     });
@@ -235,7 +254,9 @@ function grantItem(room, player) {
   if (player.item) return;
   const standings = raceStandings(room);
   const place = standings.find((entry) => entry.playerId === player.id)?.place ?? 1;
-  player.item = rollItem(place, standings.length);
+  // the dog's own special: never for the leader, more likely the further back (shared/specials.js)
+  const special = specialFor(player.dog) && (ALWAYS_SPECIAL || Math.random() < specialChance(place, standings.length));
+  player.item = special ? SPECIAL_ITEM : rollItem(place, standings.length);
   io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item });
 }
 
@@ -246,9 +267,13 @@ function resetItems(room) {
   room.hazards = new Map();
   room.balls = new Map();
   room.nextItemId = 1;
+  for (const timer of room.specialTimers ?? []) clearTimeout(timer);
+  room.specialTimers = new Set();
   for (const player of room.players.values()) {
     player.item = null;
     player.hitImmuneUntil = 0;
+    clearTimeout(activeSpecials.get(player)?.timer);
+    activeSpecials.delete(player);
   }
 }
 
@@ -285,6 +310,79 @@ function useItem(room, player) {
   } else if (item === 'frisbee') {
     throwFrisbee(room, player);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+  } else if (item === SPECIAL_ITEM) {
+    startSpecial(room, player);
+    if (ALWAYS_SPECIAL) {
+      const timer = setTimeout(() => {
+        room.specialTimers.delete(timer);
+        if (rooms.get(room.code) === room && room.status === 'racing' && room.players.get(player.id) === player) grantItem(room, player);
+      }, 3000);
+      room.specialTimers.add(timer);
+    }
+  }
+}
+
+// ---------------------------------
+// SPECIAL ABILITIES (shared/specials.js): each dog's own move.  The dog's own game moves it (faster,
+// flying, or steering itself); the server says when it starts and ends, and decides who it hits.
+// ---------------------------------
+function startSpecial(room, player) {
+  const spec = specialFor(player.dog);
+  if (!spec) return;
+  clearTimeout(activeSpecials.get(player)?.timer);
+  const now = Date.now();
+  activeSpecials.set(player, {
+    spec, until: now + spec.durationMs,
+    timer: setTimeout(() => {
+      if (rooms.get(room.code) === room && room.players.get(player.id) === player) endSpecial(room, player, 'done');
+    }, spec.durationMs)
+  });
+  if (spec.immune) player.hitImmuneUntil = Math.max(player.hitImmuneUntil, now + spec.durationMs);
+  const started = { playerId: player.id, kind: spec.kind, durationMs: spec.durationMs };
+  if (spec.kind === 'flush') started.targets = sendPheasants(room, player);
+  io.to(room.code).emit('specialStarted', started);
+}
+
+function endSpecial(room, player, reason) {
+  const active = activeSpecials.get(player);
+  if (!active) return;
+  clearTimeout(active.timer);
+  activeSpecials.delete(player);
+  io.to(room.code).emit('specialEnded', { playerId: player.id, reason });
+}
+
+// Pippa's pheasants: one for every other dog still racing.  Each lands after its flight time and
+// knocks its dog over, unless that dog cannot be hit just then (it flies off in a puff all the same).
+function sendPheasants(room, owner) {
+  const targets = [];
+  for (const victim of room.players.values()) {
+    if (victim === owner || victim.finished) continue;
+    const flightMs = pheasantFlightMs(Math.hypot(victim.position[0] - owner.position[0], victim.position[2] - owner.position[2]));
+    targets.push({ id: victim.id, flightMs });
+    const timer = setTimeout(() => {
+      room.specialTimers.delete(timer);
+      if (rooms.get(room.code) !== room || room.status !== 'racing' || room.players.get(victim.id) !== victim) return;
+      const hit = !victim.finished && Date.now() >= victim.hitImmuneUntil && !woodlandRaceStates.get(victim)?.tunnel;
+      io.to(room.code).emit('pheasantLanded', { owner: owner.id, playerId: victim.id, hit });
+      if (hit) hitPlayer(room, victim, owner.id, SPECIAL_ITEM);
+    }, flightMs);
+    room.specialTimers.add(timer);
+  }
+  return targets;
+}
+
+// Checked on every dog's move: is a dog on a sled, in a spin or on a wave touching another dog?
+function checkSpecialContacts(room, mover) {
+  const now = Date.now();
+  for (const owner of room.players.values()) {
+    const spec = activeSpecials.get(owner)?.spec;
+    if (!spec?.hitRadius || owner.finished) continue;
+    for (const victim of owner === mover ? room.players.values() : [mover]) {
+      if (victim === owner || victim.finished || now < victim.hitImmuneUntil || woodlandRaceStates.get(victim)?.tunnel) continue;
+      if (!specialTouches(spec, owner.position, owner.rotation, victim.position)) continue;
+      io.to(room.code).emit('specialHit', { playerId: owner.id, victim: victim.id });
+      hitPlayer(room, victim, owner.id, SPECIAL_ITEM);
+    }
   }
 }
 
@@ -351,8 +449,10 @@ function stopFrisbees(room) {
 
 function hitPlayer(room, player, by, item) {
   player.hitImmuneUntil = Date.now() + HIT.immuneMs;
+  endSpecial(room, player, 'hit');                               // knocked over: whatever special it was using is lost
   io.to(room.code).emit('playerHit', {
-    playerId: player.id, by, item, stunMs: item === 'toy' ? HIT.toyStunMs : HIT.ballStunMs
+    playerId: player.id, by, item,
+    stunMs: item === SPECIAL_ITEM ? SPECIAL_HIT.stunMs : item === 'toy' ? HIT.toyStunMs : HIT.ballStunMs
   });
 }
 
@@ -386,6 +486,61 @@ function checkItemHits(room, player, previousPosition) {
   }
 }
 
+// ---------------------------------
+// AFTER THE RACE: back to the lobby, same room, same players
+// ---------------------------------
+function clearRaceEndTimers(room) {
+  clearTimeout(room.finishTimer); clearTimeout(room.returnTimer);
+  room.finishTimer = room.returnTimer = null;
+}
+
+// The first dog is home: the others have a limited time to finish.
+function startFinishGrace(room) {
+  if (room.finishTimer || room.status !== 'racing') return;
+  room.finishTimer = setTimeout(() => { if (rooms.get(room.code) === room) endRace(room); }, FINISH_GRACE_MS);
+  room.finishTimer.unref?.();
+  io.to(room.code).emit('finishGrace', { ms: FINISH_GRACE_MS });
+}
+
+// Everyone is home (or time is up): the race is over, and the lobby follows shortly.
+function endRace(room) {
+  if (room.status !== 'racing') return;
+  clearRaceEndTimers(room);
+  room.status = 'finished';
+  for (const player of room.players.values()) endSpecial(room, player, 'done');
+  room.returnTimer = setTimeout(() => returnToLobby(room), LOBBY_RETURN_MS);
+  room.returnTimer.unref?.();
+  io.to(room.code).emit('raceEnded', { returnMs: LOBBY_RETURN_MS });
+  broadcastStandings(room);
+  updateLobby(room);
+}
+
+// Back to character select: everyone keeps their dog (and can change it), the room is listed again
+// for others to join, and the host starts the next race as before.
+function returnToLobby(room) {
+  if (rooms.get(room.code) !== room || room.status !== 'finished') return;
+  clearRaceEndTimers(room);
+  resetItems(room);
+  for (const timer of room.treatBoxTimers.values()) clearTimeout(timer);
+  room.treatBoxTimers = new Map();
+  room.votes = new Map();
+  room.startedAt = null;
+  room.status = 'lobby';
+  for (const player of room.players.values()) {
+    player.loaded = false;
+    player.hover = null;
+    player.lap = 1;
+    player.checkpoint = 0;
+    player.finished = false;
+    player.finishTime = null;
+    player.animation = 'Idle';
+    player.ready = Boolean(player.dog);
+  }
+  io.to(room.code).emit('returnedToLobby', { roomCode: room.code });
+  updateLobby(room);
+  console.log(`Room ${room.code} back in the lobby`);
+}
+
 // Puts everyone on the grid of room.mapId and tells the clients to load the race.
 function startRaceIn(room) {
   const players = [...room.players.values()];
@@ -400,6 +555,7 @@ function startRaceIn(room) {
   }
 
   clearMapVote(room);
+  clearRaceEndTimers(room);
 
   players.forEach((player, index) => {
     const start = MAPS[room.mapId].startPositions[index];
@@ -478,6 +634,7 @@ function rescuePlayer(room, player) {
   player.rotation = rotation;
   player.animation = 'Idle';
   if (state) state.revision += 1;                               // older packets from before the move are ignored
+  endSpecial(room, player, 'cancelled');
   io.to(room.code).emit('playerRespawned', {
     playerId: player.id, position, rotation,
     respawnRevision: state?.revision ?? 0,
@@ -611,6 +768,7 @@ function createPlayer(socketId, name, slot = 0) {
     finished: false,
     finishTime: null,
     item: null,
+    voice: false,            // microphone on for voice chat (the players talk to each other directly)
     hitImmuneUntil: 0
   };
 }
@@ -698,6 +856,7 @@ function beginCountdown(room) {
         startedAt: room.startedAt
       });
       broadcastStandings(room);
+      if (ALWAYS_SPECIAL) for (const player of room.players.values()) grantItem(room, player);
 
       updateLobby(room);
 
@@ -752,6 +911,7 @@ function checkRaceProgress(room, player, previousPosition) {
     player.finished = true;
     player.finishTime =
       (Date.now() - room.startedAt) / 1000;
+    endSpecial(room, player, 'done');
 
     broadcastProgress(room, player);
 
@@ -770,8 +930,9 @@ function checkRaceProgress(room, player, previousPosition) {
         (participant) => participant.finished
       )
     ) {
-      room.status = 'finished';
-      updateLobby(room);
+      endRace(room);
+    } else {
+      startFinishGrace(room);
     }
 
     return;
@@ -799,6 +960,8 @@ function leaveRoom(socket) {
 
   if (!room) return;
 
+  const leaving = room.players.get(socket.id);
+  if (leaving) { clearTimeout(activeSpecials.get(leaving)?.timer); activeSpecials.delete(leaving); }
   room.players.delete(socket.id);
 
   io.to(roomCode).emit('playerLeft', {
@@ -812,6 +975,8 @@ function leaveRoom(socket) {
     clearMapVote(room);
     for (const timer of room.treatBoxTimers.values()) clearTimeout(timer);
     for (const timer of room.boneTimers?.values() ?? []) clearTimeout(timer);
+    for (const timer of room.specialTimers ?? []) clearTimeout(timer);
+    clearRaceEndTimers(room);
     stopFrisbees(room);
     rooms.delete(roomCode);
     updateLobbies();
@@ -836,7 +1001,7 @@ function leaveRoom(socket) {
       (player) => player.finished
     )
   ) {
-    room.status = 'finished';
+    endRace(room);              // the only dogs still running have left
   }
 
   if (room.status === 'racing' || room.status === 'finished') {
@@ -1243,7 +1408,7 @@ io.on('connection', (socket) => {
       player.rotation = rotation;
     }
 
-    if (room.mapId !== 'wendover' || onRoad) checkItemHits(room, player, previousPosition);
+    if (room.mapId !== 'wendover' || onRoad) { checkItemHits(room, player, previousPosition); checkSpecialContacts(room, player); }
 
     if (onRoad) {
       collectTreatBoxes(room, player, previousPosition);
@@ -1283,6 +1448,33 @@ io.on('connection', (socket) => {
     const player = room.players.get(socket.id);
     if (!player || player.finished || !player.item || woodlandRaceStates.get(player)?.tunnel) return;
     useItem(room, player);
+  });
+
+  // VOICE CHAT: the players' browsers talk to each other directly; the server only says who has a
+  // microphone on and passes their connection set-up messages across, within one room.
+  socket.on('setVoice', (data) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    const player = room?.players.get(socket.id);
+    if (!player || room.singlePlayer) return;
+    player.voice = data?.enabled === true;
+    io.to(room.code).emit('voiceChanged', { playerId: socket.id, enabled: player.voice });
+  });
+
+  socket.on('voiceSignal', (data) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || typeof data?.to !== 'string' || data.to === socket.id || !room.players.has(data.to)) return;
+    if (data.signal === null || typeof data.signal !== 'object') return;
+    io.to(data.to).emit('voiceSignal', { from: socket.id, signal: data.signal });
+  });
+
+  // The race is over: take the whole room back to the lobby now rather than waiting for the timer.
+  socket.on('returnToLobby', (callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || !room.players.has(socket.id) || room.status !== 'finished') {
+      return callback?.({ success: false, error: 'The race is not over yet' });
+    }
+    returnToLobby(room);
+    callback?.({ success: true });
   });
 
   socket.on('leaveGame', (callback) => {

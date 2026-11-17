@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Special ability: a dog's paw crackling with electricity -->
+  <defs>
+    <radialGradient id="badge" cx="50%" cy="42%" r="62%">
+      <stop offset="0" stop-color="#3a2a8c"/>
+      <stop offset="0.6" stop-color="#1c1250"/>
+      <stop offset="1" stop-color="#0d0828"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7df9ff"/>
+      <stop offset="0.5" stop-color="#ffe45c"/>
+      <stop offset="1" stop-color="#ff5ce0"/>
+    </linearGradient>
+    <linearGradient id="paw" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#fff3a0"/>
+      <stop offset="1" stop-color="#ffc21f"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+  </defs>
+
+  <circle cx="128" cy="128" r="116" fill="url(#badge)"/>
+  <circle cx="128" cy="128" r="116" fill="none" stroke="url(#ring)" stroke-width="7" filter="url(#glow)"/>
+
+  <!-- the charge behind the paw -->
+  <circle cx="128" cy="136" r="62" fill="#59e8ff" opacity="0.38" filter="url(#soft)"/>
+
+  <!-- lightning out of the paw -->
+  <g fill="none" stroke="#7df9ff" stroke-width="7" stroke-linejoin="miter" stroke-linecap="round" filter="url(#glow)">
+    <polyline points="128,60 118,40 134,36 124,14"/>
+    <polyline points="78,84 58,76 62,60 38,50"/>
+    <polyline points="178,84 198,76 194,60 218,50"/>
+    <polyline points="62,150 44,156 46,172 22,180"/>
+    <polyline points="194,150 212,156 210,172 234,180"/>
+    <polyline points="96,206 86,220 98,226 86,242"/>
+    <polyline points="160,206 170,220 158,226 170,242"/>
+  </g>
+  <g fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="miter" stroke-linecap="round">
+    <polyline points="128,60 118,40 134,36 124,14"/>
+    <polyline points="78,84 58,76 62,60 38,50"/>
+    <polyline points="178,84 198,76 194,60 218,50"/>
+    <polyline points="62,150 44,156 46,172 22,180"/>
+    <polyline points="194,150 212,156 210,172 234,180"/>
+    <polyline points="96,206 86,220 98,226 86,242"/>
+    <polyline points="160,206 170,220 158,226 170,242"/>
+  </g>
+
+  <!-- the paw: four toes and the pad -->
+  <g fill="url(#paw)" stroke="#fff8d0" stroke-width="2" filter="url(#glow)">
+    <ellipse cx="84" cy="116" rx="15" ry="20" transform="rotate(-24 84 116)"/>
+    <ellipse cx="111" cy="90" rx="15" ry="21" transform="rotate(-8 111 90)"/>
+    <ellipse cx="145" cy="90" rx="15" ry="21" transform="rotate(8 145 90)"/>
+    <ellipse cx="172" cy="116" rx="15" ry="20" transform="rotate(24 172 116)"/>
+    <path d="M128 122 C150 122 172 146 172 168 C172 186 158 194 146 190 C138 187 134 186 128 186 C122 186 118 187 110 190 C98 194 84 186 84 168 C84 146 106 122 128 122 Z"/>
+  </g>
+
+  <!-- little sparks -->
+  <g fill="#ffffff" filter="url(#glow)">
+    <path d="M52 112 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3z"/>
+    <path d="M204 112 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3z"/>
+    <path d="M128 208 l2.5 6 6 2.5 -6 2.5 -2.5 6 -2.5 -6 -6 -2.5 6 -2.5z"/>
+    <circle cx="162" cy="44" r="3.5"/><circle cx="94" cy="44" r="3.5"/>
+    <circle cx="36" cy="140" r="3"/><circle cx="220" cy="140" r="3"/>
+  </g>
+</svg>

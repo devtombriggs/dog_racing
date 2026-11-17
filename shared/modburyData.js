@@ -24,6 +24,19 @@ const CONTROL_POINTS = [
 ];
 const BOARDWALK_U = [29.25, 30.0];      // spline parameter range covered by the wooden boardwalk (section F)
 
+// Ravines cut across the clifftop trail, each crossed by a wooden bridge with its middle missing: the
+// dog has to jump the break or it falls into the ravine (and goes back to its last checkpoint).
+//   s: distance round the lap to the middle of the break;  gap: how wide the break is, metres.
+// Each sits 60 m or more after a checkpoint (room to get back up to speed after a fall) on a straight.
+// A jump at a sprint carries about 13 m, so the timing is forgiving; the wider ones are later in the lap.
+// The third and fourth are on the exposed cliff edge, where the ravine is cut right through to the sea.
+const CHASMS = [
+  { s: 1070, gap: 6 }, { s: 1175, gap: 6.5 }, { s: 1570, gap: 7 }, { s: 1680, gap: 7 }, { s: 1975, gap: 7.5 },
+];
+const RAVINE_HALF = 9;                  // the ravine (and its bridge) reaches this far either side of the middle of the break
+const RAVINE_DEPTH = 15;
+const GAP_LIP = 0.8;                    // a dog this close to either broken end still counts as on the planks
+
 export const SECTIONS = {
   A: { name: 'Beach Start', stat: null, surface: 'wet sand' },
   B: { name: 'The Cliff Climb', stat: 'stamina', surface: 'dirt' },
@@ -131,6 +144,14 @@ function buildTrack() {
   const wrapIndex = i => ((i % N) + N) % N, yawAt = i => Math.atan2(TX[i], TZ[i]);
   const indexAtS = s => wrapIndex(Math.round((((s % LENGTH) + LENGTH) % LENGTH) / LENGTH * N));
 
+  // the ravines: each starts and ends on a trail sample, so the trail surface can stop exactly there
+  const chasms = CHASMS.map((c, index) => {
+    const firstIndex = indexAtS(c.s - RAVINE_HALF), lastIndex = indexAtS(c.s + RAVINE_HALF);
+    return { index, s: c.s, gap: c.gap, gapStart: c.s - c.gap / 2, gapEnd: c.s + c.gap / 2, firstIndex, lastIndex,
+      ravineStart: S[firstIndex], ravineEnd: S[lastIndex], depth: RAVINE_DEPTH };
+  });
+  const chasmAt = s => { for (const c of chasms) if (s >= c.ravineStart && s <= c.ravineEnd) return c; return null; };
+
   // coarse buckets so terrain lookups only test nearby trail samples
   const CELL = 50, REACH = 95, buckets = new Map();
   for (let i = 0; i < N; i++) {
@@ -160,8 +181,16 @@ function buildTrack() {
       const e = a - hw - 0.6;
       if (e > 0) { const cut = Math.max(Math.min(H, p.trackY - 0.25 - 48 * sstep(0, 13, e)), lowland(x, z)); H += (cut - H) * ex; }
     }
-    const bk = BANK[sd][i];
+    const segLen = p.b === 0 ? LENGTH - S[p.a] : S[p.b] - S[p.a], sHere = S[p.a] + segLen * p.t, ravine = chasmAt(sHere);
+    // how far into a ravine this point is: 0 at its ends (where the trail stops), 1 across its floor
+    const cut = ravine ? sstep(0, 4.5, Math.min(sHere - ravine.ravineStart, ravine.ravineEnd - sHere)) : 0;
+    const bk = BANK[sd][i] * (1 - cut);
     if (bk > 0.01) H += 1.3 * bk * Math.exp(-(((a - hw - SH[sd][i] - 1.6) / 1.3) ** 2));     // grassy bank = the visible natural boundary
+    if (cut > 0) {
+      // across the trail and well out to either side; on an exposed edge it is cut right through to the cliff face
+      const reach = ex > 0.01 ? 1 : sstep(hw + 34, hw + 12, a);
+      H = Math.max(H - ravine.depth * cut * reach, Math.min(H, lowland(x, z)));
+    }
     return Math.max(-8, H);
   }
   /** Height of the landscape (trail cut included) at any point. Used to build the terrain mesh and for dogs off the trail. */
@@ -189,7 +218,15 @@ function buildTrack() {
       exposedEdge: dropRaw[sd][i] === 1, onBoardwalk: BOARD[i] && a <= hw + EDGE_TOLERANCE,
       surface: 'trail', fall: false, blocked: false, clampX: x, clampZ: z, y: p.trackY,
     };
-    if (a > hw + EDGE_TOLERANCE) {
+    const ravine = chasmAt(q.s);
+    if (ravine) {
+      // a bridge over a ravine: railed, so the dog cannot leave by the side; the planks are missing in the middle
+      q.surface = 'bridge'; q.onBridge = true; q.exposedEdge = false;
+      const rail = hw - 0.25;
+      if (a > rail) { const sgn = sd === 0 ? 1 : -1; q.blocked = true; q.clampX = p.px + p.nx * sgn * rail; q.clampZ = p.pz + p.nz * sgn * rail; }
+      q.gap = q.s > ravine.gapStart + GAP_LIP && q.s < ravine.gapEnd - GAP_LIP;      // nothing under it here: see rules.gapClearance
+      q.chasm = ravine.index;
+    } else if (a > hw + EDGE_TOLERANCE) {
       if (dropRaw[sd][i] === 1) { q.fall = true; q.surface = 'air'; q.y = terrainHeight(x, z); }
       else if (a > limit) {                                      // natural boundary (bank, rocks, dunes): slide along it
         q.blocked = true; q.surface = 'shoulder';
@@ -245,8 +282,13 @@ function buildTrack() {
     startFinish: { position: [X[0], Y[0], Z[0]], rotationY: yawAt(0), halfWidth: W[0] / 2 },
     waterCrossing: { firstIndex: wet[0], lastIndex: wet[wet.length - 1], sStart: S[wet[0]], sEnd: S[wet[wet.length - 1]], maxDepth: SEA_LEVEL - Math.min(...wet.map(i => Y[i])) },
     exposedEdge: { firstIndex: exposedIdx[0], lastIndex: exposedIdx[exposedIdx.length - 1], sStart: S[exposedIdx[0]], sEnd: S[exposedIdx[exposedIdx.length - 1]] },
+    // the ravines with their broken bridges: [{ s, gap, gapStart, gapEnd, ravineStart, ravineEnd, firstIndex, lastIndex, depth }]
+    chasms,
     boardwalk: { firstIndex: boardIdx[0], lastIndex: boardIdx[boardIdx.length - 1] },
-    rules: { hasBarriers: false, fallStartsBelow: 1.5, respawnDelaySeconds: 1.0, respawnPenaltySeconds: 1.5, respawnSpeedMultiplier: 0.55, gravity: 24, killPlaneY: -60 },
+    // gapClearance: over a bridge's missing middle (query().gap) a dog lower than this above the deck falls;
+    // a dog in mid-jump is higher and carries over
+    rules: { hasBarriers: false, fallStartsBelow: 1.5, respawnDelaySeconds: 1.0, respawnPenaltySeconds: 1.5, respawnSpeedMultiplier: 0.55, gravity: 24, killPlaneY: -60,
+      gapClearance: 0.2 },
     query, pointAt, indexAtS, terrainHeight, naturalHeight: (x, z) => Math.max(-8, natural(x, z)), speedFactor, shorelineZ,
   };
 }

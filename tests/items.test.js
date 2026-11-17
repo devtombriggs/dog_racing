@@ -71,3 +71,25 @@ test('the further back you are, the more likely a box gives a golden bone', () =
     assert.ok(Math.abs(odds.ball + odds.toy + odds.bone + odds.frisbee - 1) < 1e-9);
   }
 });
+
+test('specials: never for the leader, more likely the further back, and a ramming special reaches ahead', async () => {
+  const { specialChance, specialTouches, pheasantFlightMs, SPECIALS, PHEASANT } = await import('../shared/specials.js');
+  assert.equal(specialChance(1, 5), 0, 'first place never gets it');
+  assert.equal(specialChance(1, 1), 0, 'racing solo you are first');
+  const chances = [2, 3, 4, 5].map(p => specialChance(p, 5));
+  assert.ok(chances.every((c, i) => i === 0 || c > chances[i - 1]), `rising with place: ${chances}`);
+  assert.ok(Math.abs(chances[0] - 0.1) < 1e-9 && Math.abs(chances[3] - 0.3) < 1e-9, '2nd 10 %, last 30 %');
+  assert.ok(Math.abs(specialChance(2, 2) - 0.3) < 1e-9, '2nd of two is last');
+  assert.deepEqual(Object.keys(SPECIALS).sort(), ['black_lab', 'gsp', 'pablo', 'ralph', 'second_dog'], 'every dog has one');
+  // Pablo's team runs ahead of him: a dog 7 m in front is hit, one 7 m behind or beside is not
+  const sled = SPECIALS.pablo;
+  assert.ok(specialTouches(sled, [0, 0, 0], 0, [0, 0, 7]));
+  assert.ok(!specialTouches(sled, [0, 0, 0], 0, [0, 0, -7]));
+  assert.ok(!specialTouches(sled, [0, 0, 0], 0, [7, 0, 0]));
+  assert.ok(specialTouches(sled, [0, 0, 0], Math.PI / 2, [7, 0, 0]), 'it reaches the way he faces');
+  assert.ok(!specialTouches(sled, [0, 0, 0], 0, [0, 5, 3]), 'not a dog well above it');
+  assert.ok(!specialTouches(SPECIALS.ralph, [0, 0, 0], 0, [0, 0, 0.5]), 'Ralph flies over: he hits nobody');
+  assert.equal(pheasantFlightMs(0), PHEASANT.minFlightMs);
+  assert.equal(pheasantFlightMs(1e6), PHEASANT.maxFlightMs);
+  assert.ok(pheasantFlightMs(60) > pheasantFlightMs(20));
+});

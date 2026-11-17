@@ -47,17 +47,17 @@ export function createJetPaws({ dog, size = 1 } = {}) {
   const smokeTex = softDot('rgba(160,150,140,0.9)', 'rgba(110,100,95,0.35)');
   owned.push(flameTex, glowTex, smokeTex);
 
-  // cones are built pointing +Y with the tip at the top: flip so the wide end is at the nozzle
-  const coneGeo = new THREE.ConeGeometry(0.5, 1, 14, 1, true).translate(0, -0.5, 0).rotateX(Math.PI);
-  const outerMat = new THREE.MeshBasicMaterial({ ...add, map: flameTex, color: 0xff5a1a, side: THREE.DoubleSide, opacity: 0.95 });
-  const coreMat = new THREE.MeshBasicMaterial({ ...add, map: flameTex, color: 0xfff1b0, side: THREE.DoubleSide, opacity: 1 });
+  // a cone with its wide end at the nozzle (y = 0) and its tip 1 unit out along +Y; the holder turns +Y onto the thrust
+  const coneGeo = new THREE.ConeGeometry(0.5, 1, 14, 1, true).translate(0, 0.5, 0);
+  const outerMat = new THREE.MeshBasicMaterial({ ...add, map: flameTex, color: 0xff5a1a, side: THREE.DoubleSide, opacity: 0.9 });
+  const coreMat = new THREE.MeshBasicMaterial({ ...add, map: flameTex, color: 0xffe9a0, side: THREE.DoubleSide, opacity: 0.85 });
   const glowMat = new THREE.SpriteMaterial({ ...add, map: glowTex, color: 0xffa040, opacity: 0.9 });
   owned.push(coneGeo, outerMat, coreMat, glowMat);
 
   const jets = bones.map((bone, i) => {
     const holder = new THREE.Group();
-    const outer = new THREE.Mesh(coneGeo, outerMat); outer.scale.set(0.26 * size, 1.0 * size, 0.26 * size);
-    const core = new THREE.Mesh(coneGeo, coreMat); core.scale.set(0.12 * size, 0.55 * size, 0.12 * size);
+    const outer = new THREE.Mesh(coneGeo, outerMat); outer.scale.set(0.2 * size, 1.0 * size, 0.2 * size);
+    const core = new THREE.Mesh(coneGeo, coreMat); core.scale.set(0.09 * size, 0.5 * size, 0.09 * size);
     const glow = new THREE.Sprite(glowMat); glow.scale.setScalar(0.55 * size);
     outer.renderOrder = core.renderOrder = glow.renderOrder = 4;
     holder.add(outer, core, glow);
@@ -105,7 +105,7 @@ export function createJetPaws({ dog, size = 1 } = {}) {
       dog.getWorldQuaternion(dogQuat);
       // thrust: down and back from the dog (the dog faces +Z in its own frame)
       thrust.copy(down).multiplyScalar(1).addScaledVector(back, 0.75).normalize().applyQuaternion(dogQuat);
-      flameQuat.setFromUnitVectors(yAxis, thrust.clone().negate());
+      flameQuat.setFromUnitVectors(yAxis, thrust);
       centre.set(0, 0, 0);
       for (const j of jets) {
         j.bone.getWorldPosition(pos);
@@ -116,8 +116,8 @@ export function createJetPaws({ dog, size = 1 } = {}) {
         j.holder.quaternion.copy(flameQuat);
         const flick = 0.82 + 0.18 * Math.sin(t * 47 + j.phase) * Math.sin(t * 31 + j.phase * 2) + 0.08 * Math.random();
         const len = power * flick;
-        j.outer.scale.y = 1.0 * size * len; j.outer.scale.x = j.outer.scale.z = 0.26 * size * (0.85 + 0.15 * flick);
-        j.core.scale.y = 0.55 * size * len;
+        j.outer.scale.y = 1.0 * size * len; j.outer.scale.x = j.outer.scale.z = 0.2 * size * (0.85 + 0.15 * flick);
+        j.core.scale.y = 0.5 * size * len;
         j.glow.scale.setScalar(0.55 * size * (0.8 + 0.3 * flick) * power);
         // sparks from this paw
         sparkCarry += delta * 70 * power;

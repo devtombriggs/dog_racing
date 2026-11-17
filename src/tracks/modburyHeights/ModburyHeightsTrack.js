@@ -1,4 +1,4 @@
-// Modbury Heights — Three.js visuals: terrain, trail, sea, foam, boardwalk, rocks, plants, gulls, sky.
+// Modbury Heights — Three.js visuals: terrain, trail, ravine bridges, sea, foam, boardwalk, rocks, plants, gulls, sky.
 // Everything is generated at runtime from modburyData.js (no model files).
 //
 //   const world = createModburyHeights();
@@ -89,7 +89,10 @@ function buildTrail(group, D) {
       pos.push(x, S.y[i] + dy[k], z); col.push(c[0], c[1], c[2]); uv.push(lat[k] / 6, (r === N ? T.length : S.s[i]) * vRep);
     }
   }
-  for (let r = 0; r < N; r++) for (let k = 0; k < K - 1; k++) { const a = r * K + k, b = a + 1, c = a + K, d = c + 1; idx.push(a, c, b, b, c, d); }
+  for (let r = 0; r < N; r++) {
+    if (T.chasms.some(c => r >= c.firstIndex && r < c.lastIndex)) continue;      // the trail stops at a ravine: a bridge carries on
+    for (let k = 0; k < K - 1; k++) { const a = r * K + k, b = a + 1, c = a + K, d = c + 1; idx.push(a, c, b, b, c, d); }
+  }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
   let up = 0; const nn = g.getAttribute('normal'); for (let i = 3; i < nn.count; i += 7) up += nn.getY(i);
   if (up < 0) { const a = g.index.array; for (let i = 0; i < a.length; i += 3) { const t = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = t; } g.computeVertexNormals(); }
@@ -130,6 +133,87 @@ function buildTrail(group, D) {
     poles.setMatrixAt(pn, o.matrix); poles.setColorAt(pn, ic.set((Math.floor(i / 6) + (sd > 0 ? 1 : 0)) % 2 ? 0xd9372b : 0xffffff)); pn++;
   }
   poles.name = 'Modbury_WaterMarkers'; group.add(poles); D.push(poleG, poleM, poles);
+}
+
+// ---------- the ravine bridges: plank decks reaching in from both sides of each ravine, with the middle missing
+function buildBridges(group, D, animated) {
+  const o = new THREE.Object3D(), ic = new THREE.Color(), r = rng(29);
+  o.rotation.order = 'YXZ';
+  const planks = [], posts = [], rails = [], legs = [], flags = [];
+  for (const c of T.chasms) {
+    const i0 = T.indexAtS(c.s), inland = S.exposed[0][i0] ? -1 : 1;       // the side away from the cliff edge, for the sign
+    for (const [from, to, towardsBreak] of [[c.ravineStart, c.gapStart, 1], [c.gapEnd, c.ravineEnd, -1]]) {
+      const n = Math.max(1, Math.round((to - from) / 0.5));
+      for (let k = 0; k < n; k++) {
+        const s = from + (k + 0.5) * (to - from) / n, fromBreak = towardsBreak > 0 ? to - s : s - from;
+        // the last planks before the break hang down into it
+        planks.push({ p: T.pointAt(s), sag: Math.max(0, 1 - fromBreak / 1.3), dir: towardsBreak });
+      }
+      // rails both sides: a post every couple of metres, two ropes between them
+      const count = Math.max(2, Math.round((to - from) / 2.2) + 1);
+      for (const side of [-1, 1]) {
+        let last = null;
+        for (let k = 0; k < count; k++) {
+          const p = T.pointAt(from + (to - from) * k / (count - 1), side * 1), hw = p.halfWidth;
+          const q = T.pointAt(from + (to - from) * k / (count - 1), side * (hw + 0.1));
+          const atBreak = towardsBreak > 0 ? k === count - 1 : k === 0;
+          posts.push({ q, tall: atBreak });
+          if (atBreak) flags.push({ q, yaw: q.rotationY, phase: r() * 6.28 });
+          if (last) for (const h of [0.55, 1.1]) rails.push({ a: last, b: q, h });
+          last = q;
+        }
+      }
+      // legs down into the ravine under the broken end and half-way along each deck
+      for (const s of [towardsBreak > 0 ? to - 0.5 : from + 0.5, (from + to) / 2]) for (const side of [-1, 1]) {
+        const c0 = T.pointAt(s), q = T.pointAt(s, side * (c0.halfWidth - 0.4)), ground = T.terrainHeight(q.x, q.z);
+        if (q.y - ground > 0.6) legs.push({ q, height: q.y - ground + 0.6 });
+      }
+    }
+    flags.at(-1).sign = { p: T.pointAt(c.ravineStart - 26, inland * (T.pointAt(c.ravineStart - 26).halfWidth + 1.3)), yaw: T.pointAt(c.ravineStart - 26).rotationY };
+  }
+  const wood = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88 });
+  const instanced = (name, geo, list, place, shadow = false) => {
+    const m = new THREE.InstancedMesh(geo, wood, list.length);
+    list.forEach((item, k) => { o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); place(item); o.updateMatrix(); m.setMatrixAt(k, o.matrix); m.setColorAt(k, ic); });
+    m.name = name; m.castShadow = shadow; m.receiveShadow = true; group.add(m); D.push(geo, m);
+  };
+  D.push(wood);
+  instanced('Modbury_BridgePlanks', new THREE.BoxGeometry(1, 0.1, 0.46), planks, ({ p, sag, dir }) => {
+    o.position.set(p.x, p.y + 0.07 - sag * sag * 0.5, p.z); o.rotation.set(dir * sag * 0.55, p.rotationY + (r() - 0.5) * 0.03, (r() - 0.5) * 0.02 * (1 + 6 * sag));
+    o.scale.set(p.halfWidth * 2 + 0.3, 1, 1); const v = 0.6 + r() * 0.22; ic.setRGB(v * 1.12, v * 0.86, v * 0.56);
+  }, true);
+  instanced('Modbury_BridgePosts', new THREE.CylinderGeometry(0.09, 0.11, 1, 7), posts, ({ q, tall }) => {
+    const h = tall ? 3.4 : 1.25; o.position.set(q.x, q.y + h / 2 - 0.1, q.z); o.scale.set(tall ? 1.5 : 1, h, tall ? 1.5 : 1);
+    tall ? ic.setRGB(0.85, 0.2, 0.16) : ic.setRGB(0.5, 0.38, 0.25);            // the posts at the break are red, like the water markers
+  }, true);
+  instanced('Modbury_BridgeRails', new THREE.BoxGeometry(0.07, 0.07, 1), rails, ({ a, b, h }) => {
+    o.position.set((a.x + b.x) / 2, (a.y + b.y) / 2 + h, (a.z + b.z) / 2); o.lookAt(b.x, b.y + h, b.z); o.scale.set(1, 1, Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+    ic.setRGB(0.78, 0.68, 0.48);
+  });
+  instanced('Modbury_BridgeLegs', new THREE.CylinderGeometry(0.2, 0.26, 1, 8), legs, ({ q, height }) => {
+    o.position.set(q.x, q.y - height / 2, q.z); o.scale.set(1, height, 1); ic.setRGB(0.42, 0.32, 0.22);
+  }, true);
+
+  // a red flag on each of the four posts at the break, and a JUMP sign on the way in
+  const flagG = new THREE.BufferGeometry(); flagG.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -0.9, 0, 0, -0.45, -1.4], 3)); flagG.computeVertexNormals();
+  const flagM = new THREE.MeshBasicMaterial({ color: 0xe5352b, side: THREE.DoubleSide });
+  const sc = document.createElement('canvas'); sc.width = 256; sc.height = 128; const sg = sc.getContext('2d');
+  sg.fillStyle = '#f4e7c4'; sg.fillRect(0, 0, 256, 128); sg.strokeStyle = '#d9372b'; sg.lineWidth = 12; sg.strokeRect(6, 6, 244, 116);
+  sg.fillStyle = '#d9372b'; sg.font = 'bold 76px sans-serif'; sg.textAlign = 'center'; sg.textBaseline = 'middle'; sg.fillText('JUMP!', 128, 68);
+  const signT = new THREE.CanvasTexture(sc); signT.colorSpace = THREE.SRGBColorSpace;
+  const signM = new THREE.MeshBasicMaterial({ map: signT, side: THREE.DoubleSide }), signG = new THREE.PlaneGeometry(2.6, 1.3);
+  const signPostG = new THREE.CylinderGeometry(0.1, 0.12, 2.6, 7), signPostM = new THREE.MeshStandardMaterial({ color: 0x8b6a45, roughness: 0.9 });
+  D.push(flagG, flagM, signT, signM, signG, signPostG, signPostM);
+  const flying = [];
+  for (const f of flags) {
+    const flag = new THREE.Mesh(flagG, flagM); flag.position.set(f.q.x, f.q.y + 3.25, f.q.z); flag.rotation.y = f.yaw; flag.name = 'Modbury_BridgeFlag'; group.add(flag);
+    flying.push({ flag, yaw: f.yaw, phase: f.phase });
+    if (f.sign) {
+      const post = new THREE.Mesh(signPostG, signPostM); post.position.set(f.sign.p.x, f.sign.p.y + 1.2, f.sign.p.z); post.castShadow = true; group.add(post);
+      const board = new THREE.Mesh(signG, signM); board.position.set(f.sign.p.x, f.sign.p.y + 2.6, f.sign.p.z); board.rotation.y = f.sign.yaw + Math.PI; board.name = 'Modbury_JumpSign'; group.add(board);
+    }
+  }
+  animated.push(t => { for (const f of flying) f.flag.rotation.y = f.yaw + 0.35 * Math.sin(t * 3.1 + f.phase) + 0.12 * Math.sin(t * 7.3 + f.phase); });
 }
 
 // ---------- sea
@@ -265,7 +349,7 @@ function buildSky(group, D, animated) {
 export function createModburyHeights() {
   const group = new THREE.Group(); group.name = 'ModburyHeights';
   const D = [], animated = [];
-  buildSky(group, D, animated); buildTerrain(group, D); buildTrail(group, D); buildSea(group, D, animated); buildNature(group, D);
+  buildSky(group, D, animated); buildTerrain(group, D); buildTrail(group, D); buildBridges(group, D, animated); buildSea(group, D, animated); buildNature(group, D);
   const hemi = new THREE.HemisphereLight(0xbfdcff, 0xcdb78a, 1.0), sun = new THREE.DirectionalLight(0xfff1d6, 3.4);
   sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 600 }); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.5;
   const lights = new THREE.Group(); lights.name = 'Modbury_Lights'; lights.add(hemi, sun, sun.target); group.add(lights);

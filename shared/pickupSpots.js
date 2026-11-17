@@ -28,6 +28,8 @@ export const PICKUP_PATHS = {
       [MODBURY_HEIGHTS.waterCrossing.sStart - 30, MODBURY_HEIGHTS.waterCrossing.sEnd + 30],
       [MODBURY_HEIGHTS.exposedEdge.sStart - 10, MODBURY_HEIGHTS.exposedEdge.sEnd + 10],
       [MODBURY_HEIGHTS.samples.s[MODBURY_HEIGHTS.boardwalk.firstIndex] - 15, MODBURY_HEIGHTS.samples.s[MODBURY_HEIGHTS.boardwalk.lastIndex] + 15],
+      // nothing to steer for on the run-up to a broken bridge, or on the landing
+      ...MODBURY_HEIGHTS.chasms.map(c => [c.ravineStart - 35, c.ravineEnd + 20]),
     ],
   },
   wendover: {
@@ -186,7 +188,11 @@ const PLAN = {
   // (even: stay near each target where the road allows, so they are spread along the lap)
   frostpeak:       { custom: true },   // see frostpeakPickups(): 4 rows + 3 bones before the cannon, 12 rows + 30 bones on the black run
   modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91],
-                     bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.97], even: true },
+                     bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.97], even: true,
+                     // The Cliff Climb (340 to 960 m) is a long slow pull: more to go for on the way up.
+                     // These are distances round the lap in metres, fitted between the spots above (which
+                     // stay exactly where they were) so that something comes up about every 75 m of the climb.
+                     extra: { rows: [448, 880], bones: [370, 522, 795, 955] } },
 };
 
 /** { mapId: [s, ...] } for box rows and for bones */
@@ -211,6 +217,17 @@ for (const [mapId, plan] of Object.entries(PLAN)) {
   } else {
     BOX_ROW_S[mapId] = pickSpots(path, plan.rows, taken, 0.08, plan.even);
     BONE_S[mapId] = pickSpots(path, plan.bones, taken, 0.08, plan.even);
+    if (plan.extra) {              // placed exactly where asked: it is an error if one is on a hazard or crowds another
+      const place = list => list.map(s => {
+        if (!isClear(path, s) || taken.some(t => lapDistance(s, t, path.length) < MIN_GAP)) {
+          throw new Error(`${mapId}: no room for an extra pickup at ${s} m`);
+        }
+        taken.push(s);
+        return s;
+      });
+      BOX_ROW_S[mapId].push(...place(plan.extra.rows));
+      BONE_S[mapId].push(...place(plan.extra.bones));
+    }
   }
 }
 

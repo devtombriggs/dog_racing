@@ -45,3 +45,42 @@ Treat Road uses `shared/treatRoadData.js` for geometry and `src/tracks/treatRoad
 Modbury Heights is a 3.12 km coastal circuit with a beach start, switchback climb, exposed clifftops, shallow-water crossing and boardwalk return. It uses the same three-lap race and server-controlled checkpoint recovery as Treat Road. Banks and dunes constrain movement; exposed cliff edges trigger falls. Water and soft shoulders slow dogs, swimming stats affect water speed, and climbs use the map's default stamina value until dogs have stamina stats. Water entry is automatic, with floating height and existing stride animations (the dogs have no separate swim clip).
 
 Its shared data is `shared/modburyData.js`, and its on-demand scenery is `src/tracks/modburyHeights/ModburyHeightsTrack.js`, copied from `../modbury_heights/src/tracks/modburyHeights/` with the visual data import redirected to `shared/`. Refresh both when regenerating the source map. Tests cover supported spawns, terrain continuity, water, natural boundaries, cliff recovery, stale movement, and a complete three-lap multiplayer race.
+
+
+## Voice chat
+
+In a multiplayer lobby, the **Voice chat** box on the dog-select screen turns your microphone on; it stays on through the map vote and the race, and **M** mutes and unmutes during the race. Players who leave it off still hear the ones who turned it on. The option is not remembered between visits, so a microphone only comes on because the box was ticked that time.
+
+The players' browsers send their voices straight to each other (`src/voiceChat.js`, WebRTC); the game server only says who has a microphone on and passes their connection messages across within a room (`setVoice`, `voiceSignal` in `server/server.js`).
+
+- Browsers only give a page the microphone on `https` or `localhost`, so a deployment on plain `http` shows "Voice chat needs a secure (https) address".
+- To get through home routers the browsers ask a public address-lookup (STUN) server, by default `stun:stun.l.google.com:19302`. Set `VITE_ICE_SERVERS` (a JSON list) at build time to use your own, add a TURN relay for players whose networks block direct connections, or `[]` for none.
+
+## Special abilities
+
+Each dog has its own special move from a rare Treat Box item: see `../special_abilities/README.md` ("In the game"). Start the server with `ALWAYS_SPECIAL=1` to try them without waiting for the dice.
+
+
+## Course map
+
+Every race shows a map of the course in the bottom-left corner (`src/minimap.js`): the whole lap from above, an arrow for your own dog (pointing the way it faces) and a dot for every other dog, each in its dog's colour. North is fixed. The outline is the racing line in `shared/pickupSpots.js` that the pickups and the wrong-way check already use, so a new course gets its map without extra work. Red ticks mark Modbury's broken bridges.
+
+## Modbury Heights: ravines and broken bridges
+
+Five ravines are cut across the clifftop trail (`CHASMS` in `shared/modburyData.js`), two of them on the exposed cliff edge where the ravine runs right through to the sea. Each is crossed by a railed plank bridge with its middle missing, 6 to 7.5 m wide.
+
+- Run into the break and the dog falls into the ravine and goes back to its last checkpoint, with the usual fall penalty. Jump it and the dog carries over: a jump at a sprint covers about 13 m.
+- The rails stop a dog leaving the bridge by the side; only the break is dangerous.
+- A dog in the middle of its special cannot jump, so the special carries it over.
+- Each bridge is on a straight, at least 50 m after a checkpoint, with a JUMP sign on the way in and red flagged posts at the break. Pickups keep clear of the bridges and their run-ups.
+
+The server decides the fall (`gap` from `query()` and `rules.gapClearance`); the visuals are `buildBridges` in `src/tracks/modburyHeights/ModburyHeightsTrack.js`.
+
+## After the race
+
+When a race ends the whole room goes back to the dog-select lobby together, with the same players, and the next race starts from there as the first one did. Everyone keeps their dog and can change it; the room is listed again so others can join.
+
+- Once the first dog is home the rest have 90 seconds to finish, so a dog left standing cannot hold everyone up. Dogs still running when it ends see "Race Over".
+- When the race is over the finish panel counts down 15 seconds to the lobby. **Back to Lobby** takes everyone there at once (any player can press it); **Main Menu** leaves the room as before.
+
+`FINISH_GRACE_MS` and `LOBBY_RETURN_MS` on the server change the two waits (useful for testing). The server side is "AFTER THE RACE" in `server/server.js`.

@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MAPS, crossedFinishLine, sampleGroundHeight } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
+import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { FROSTPEAK_CANNON, FROSTPEAK_SLALOM, FROSTPEAK_SKI_SLOPE } from '../shared/frostpeakCannon.js';
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
 
@@ -153,7 +154,10 @@ test('Modbury has supported spawns, continuous terrain, water and open cliff edg
     assert.ok(Math.hypot(s.x[j] - s.x[i], s.y[j] - s.y[i], s.z[j] - s.z[i]) < 2.6);
     const q = COAST.query(s.x[i], s.z[i]);
     assert.ok(q.onTrack && !q.blocked);
-    assert.ok(Math.abs(COAST.terrainHeight(s.x[i], s.z[i]) - s.y[i]) < 0.4);
+    // the ground is at the trail everywhere except in a ravine, where a bridge carries the trail over it
+    const ravine = COAST.chasms.find(c => i > c.firstIndex && i < c.lastIndex);
+    if (!ravine) assert.ok(Math.abs(COAST.terrainHeight(s.x[i], s.z[i]) - s.y[i]) < 0.4);
+    assert.equal(Boolean(q.onBridge), COAST.chasms.some(c => s.s[i] >= c.ravineStart && s.s[i] <= c.ravineEnd));
   }
   const water = COAST.pointAt((COAST.waterCrossing.sStart + COAST.waterCrossing.sEnd) / 2);
   const wet = COAST.query(water.x, water.z);
@@ -197,5 +201,77 @@ test('Treat Road catapult bridges a real gap and lands facing the supported road
       previous=p;
     }
     assert.ok(T.launchPoint(pad.duration/2,lateral).y > Math.max(T.pointAt(pad.takeoffS).y,T.pointAt(pad.landingS).y)+20);
+  }
+});
+
+test('Frostpeak solid collision faces point outwards (a dog stuck inside a block can walk out, never in)', async () => {
+  const bytes = await readFile(new URL('../public/models/frostpeak_alpine.glb', import.meta.url));
+  const loader = new GLTFLoader();
+  loader.register(() => ({ name: 'test-textures', loadTexture: () => Promise.resolve(new THREE.Texture()) }));
+  const { scene } = await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), '');
+  scene.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster();
+  const solids = [];
+  scene.traverse(o => { if (o.isMesh && /^Collision_/.test(o.name) && !/Fences|Nets|Track_Surface|Terrain/.test(o.name)) solids.push(o); });
+  assert.ok(solids.some(o => o.name === 'Collision_Slalom'));
+  for (const o of solids) {
+    o.material.side = THREE.DoubleSide;
+    const box = new THREE.Box3().setFromObject(o);
+    // aim at each slalom block / object from outside along x and z, at mid height of a few parts
+    const pos = o.geometry.attributes.position, idx = o.geometry.index;
+    let checked = 0;
+    for (let t = 0; t < idx.count / 3 && checked < 40; t += Math.max(1, Math.floor(idx.count / 3 / 40))) {
+      const p = [0, 1, 2].map(k => new THREE.Vector3().fromBufferAttribute(pos, idx.getX(t * 3 + k)).applyMatrix4(o.matrixWorld));
+      const centre = p[0].clone().add(p[1]).add(p[2]).multiplyScalar(1 / 3);
+      const n = new THREE.Vector3().subVectors(p[1], p[0]).cross(new THREE.Vector3().subVectors(p[2], p[0])); n.y = 0;
+      if (n.lengthSq() < 1e-8) continue;
+      n.normalize();
+      // which way is really outside?  A ray from the face out to open space crosses the rest of the
+      // (closed) mesh an even number of times on the outside, an odd number on the inside.
+      ray.set(centre.clone().addScaledVector(n, 0.01), n); ray.near = 0; ray.far = 200;
+      const crossings = ray.intersectObject(o, false).filter(h => h.distance > 0.02).length;
+      const outside = crossings % 2 === 0 ? n : n.clone().negate();
+      // the face's own normal (from its winding: what the game's exit test reads) must point outside
+      const faceNormal = new THREE.Vector3().subVectors(p[1], p[0]).cross(new THREE.Vector3().subVectors(p[2], p[0])); faceNormal.y = 0;
+      assert.ok(faceNormal.dot(outside) > 0, `${o.name}: a face points inwards`);
+      checked++;
+    }
+    assert.ok(checked > 0 || box.isEmpty(), `${o.name}: nothing checked`);
+  }
+});
+
+test('Modbury ravines: a broken bridge on a straight after every checkpoint run-up, railed, with a break to jump', () => {
+  const T = COAST;
+  assert.equal(T.chasms.length, 5);
+  for (const c of T.chasms) {
+    const mid = T.pointAt(c.s), q = T.query(mid.x, mid.z);
+    assert.ok(q.gap && q.onBridge && q.onTrack, 'the break is in the middle of the bridge');
+    assert.ok(Math.abs(q.y - mid.y) < 0.05, 'the deck is at trail height, break included: a jumping dog lands level');
+    assert.ok(T.terrainHeight(mid.x, mid.z) < mid.y - 10, 'a real drop underneath');
+    assert.ok(c.gap >= 6 && c.gap <= 8, 'a sprinting jump (about 13 m) clears it with room to spare');
+    // planks right up to the break at both ends, and solid trail either side of the ravine
+    for (const sOn of [c.ravineStart + 0.5, c.gapStart - 0.1, c.gapEnd + 0.1, c.ravineEnd - 0.5]) {
+      const p = T.pointAt(sOn), on = T.query(p.x, p.z);
+      assert.ok(on.onBridge && !on.gap, `planks at ${sOn.toFixed(1)}`);
+    }
+    for (const sOff of [c.ravineStart - 1, c.ravineEnd + 1]) {
+      const p = T.pointAt(sOff), off = T.query(p.x, p.z);
+      assert.ok(!off.onBridge && !off.gap);
+      assert.ok(Math.abs(T.terrainHeight(p.x, p.z) - p.y) < 0.4, 'the trail meets the bridge on solid ground');
+    }
+    // rails: no way off the side of the bridge, on either side
+    for (const side of [1, -1]) {
+      const p = T.pointAt(c.ravineStart + 3, side * (mid.halfWidth + 2)), railed = T.query(p.x, p.z);
+      assert.ok(railed.blocked && !railed.fall);
+      assert.ok(Math.abs(T.query(railed.clampX, railed.clampZ).lateral) < mid.halfWidth);
+    }
+    // a fall puts the dog back at the last checkpoint: far enough back to be at full speed again
+    const before = T.checkpoints.filter(cp => cp.s < c.ravineStart).at(-1);
+    assert.ok(c.gapStart - before.s > 45, `run-up of ${(c.gapStart - before.s).toFixed(0)} m`);
+    assert.ok(Math.abs(T.samples.curvature[T.indexAtS(c.s)]) < 0.01, 'on a straight');
+  }
+  // pickups keep clear of the bridges and their run-ups
+  for (const box of TREAT_BOXES_BY_MAP.modbury_heights) {
+    assert.ok(!T.chasms.some(c => box.s > c.ravineStart - 30 && box.s < c.ravineEnd + 15), `box at ${box.s.toFixed(0)}`);
   }
 });
