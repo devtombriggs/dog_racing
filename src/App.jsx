@@ -3,8 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { io } from 'socket.io-client';
-import { MAPS, DEFAULT_MAP, sampleGroundHeight } from '../shared/maps.js';
-import { TREAT_ROAD } from '../shared/treatRoadData.js';
+import { MAPS, DEFAULT_MAP, sampleGroundHeight, PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { prepareHeadLook, applyHeadLook } from './headLook.js';
 import { createRaceNameLabel } from './raceNameLabel.js';
 
@@ -874,10 +873,12 @@ function App() {
     }
 
     const map = MAPS[currentRoom.mapId ?? DEFAULT_MAP];
-    const skyTrack = currentRoom.mapId === 'treat_road' ? TREAT_ROAD : null;
+    const proceduralTrack = PROCEDURAL_TRACKS[currentRoom.mapId] ?? null;
     let proceduralWorld = null;
     let restoreEnvironment = null;
     let fall = null;
+    let launchFlight = null;
+    let launchBoostUntil = 0;
     let respawnRevision = 0;
     let recoveryUntil = 0;
 
@@ -965,7 +966,7 @@ function App() {
     let heightmap = null;
 
     function isTrackSurface(position) {
-      if (skyTrack) return skyTrack.query(position.x, position.z).onTrack;
+      if (proceduralTrack) return proceduralTrack.query(position.x, position.z).onTrack;
       // Fail open if the GLB has no identifiable track surface.
       if (trackMeshes.length === 0) return true;
       const origin = new THREE.Vector3(position.x, position.y + 25, position.z);
@@ -981,9 +982,9 @@ function App() {
     // dog, so inside a tunnel or on the bridge it finds the surface the dog
     // is on, not the roof above or the stream below.
     function groundHeightAt(position, fallback = 0) {
-      if (skyTrack) {
-        const ground = skyTrack.query(position.x, position.z);
-        return ground.onTrack ? ground.y : fallback;
+      if (proceduralTrack) {
+        const ground = proceduralTrack.query(position.x, position.z);
+        return ground.onTrack ? (ground.dogY ?? ground.y) : fallback;
       }
       if (heightmap) {
         // The track ray takes precedence on the bridge; snow uses O(1) sampling.
@@ -1131,14 +1132,17 @@ function App() {
         })
       : Promise.resolve(null);
 
-    if (skyTrack) {
-      import('./tracks/treatRoad/TreatRoadTrack.js').then(({ createTreatRoad }) => {
+    if (proceduralTrack) {
+      const worldRequest = currentRoom.mapId === 'modbury_heights'
+        ? import('./tracks/modburyHeights/ModburyHeightsTrack.js').then(module => module.createModburyHeights)
+        : import('./tracks/treatRoad/TreatRoadTrack.js').then(module => module.createTreatRoad);
+      worldRequest.then(createWorld => {
         if (!isMounted) return;
-        proceduralWorld = createTreatRoad();
+        proceduralWorld = createWorld();
         scene.add(proceduralWorld.group);
         scene.remove(ambientLight, sunlight);
         restoreEnvironment = proceduralWorld.applyEnvironment(scene, renderer);
-        camera.far = 6500;
+        camera.far = 20000;
         camera.updateProjectionMatrix();
         groundY = groundHeightAt(player.position);
         player.position.y = groundY;
@@ -1278,6 +1282,9 @@ function App() {
           dogConfig.scale
         );
 
+        if (currentRoom.mapId === 'modbury_heights') {
+          dog.traverse(object => { if (object.isMesh) object.castShadow = true; });
+        }
         player.add(dog);
         dogModel = dog;
         dogBones = collectBones(dog);
@@ -1424,6 +1431,9 @@ function App() {
             config.scale
           );
 
+          if (currentRoom.mapId === 'modbury_heights') {
+            dog.traverse(object => { if (object.isMesh) object.castShadow = true; });
+          }
           group.add(dog);
           remote.dog = dog;
           remote.bones = collectBones(dog);
@@ -1581,7 +1591,7 @@ function App() {
     );
 
     function handlePlayerFell(data) {
-      if (!skyTrack || data.playerId !== socket.id) return;
+      if (!proceduralTrack || data.playerId !== socket.id) return;
       fall = { position: new THREE.Vector3().fromArray(data.position), startedAt: performance.now() };
       currentSpeed = 0;
       knock.set(0, 0, 0);
@@ -1589,9 +1599,11 @@ function App() {
     }
 
     function handlePlayerRespawned(data) {
-      if (!skyTrack) return;
+      if (!proceduralTrack) return;
       if (data.playerId === socket.id) {
         fall = null;
+        launchFlight = null;
+        launchBoostUntil = 0;
         respawnRevision = data.respawnRevision;
         recoveryUntil = performance.now() + data.penaltySeconds * 1000;
         player.position.fromArray(data.position);
@@ -1618,6 +1630,42 @@ function App() {
         playRemoteAnimation(remote, 'Idle');
       }
     }
+    function handlePlayerLaunched(data) {
+      if (!proceduralTrack?.launch || data.playerId !== socket.id) return;
+      launchFlight = { startedAt: performance.now(), lateral: data.lateral };
+      fall = null;
+      knock.set(0,0,0);
+      isJumping = isLanding = false;
+      jumpHeight = verticalVelocity = 0;
+      playAnimation('Jump');
+      currentAction?.reset();
+    }
+    function handlePlayerLanded(data) {
+      if (!proceduralTrack?.launch) return;
+      if (data.playerId !== socket.id) {
+        const remote = remotePlayers.get(data.playerId);
+        if (remote) {
+          remote.targetPosition.fromArray(data.position);
+          remote.targetRotation = data.rotation;
+          playRemoteAnimation(remote, 'Sprint');
+        }
+        return;
+      }
+      launchFlight = null;
+      respawnRevision = data.respawnRevision;
+      launchBoostUntil = performance.now() + data.boostSeconds * 1000;
+      player.position.fromArray(data.position);
+      player.rotation.set(0,data.rotation,0);
+      travelYaw = data.rotation;
+      groundY = data.position[1];
+      currentSpeed = sprintSpeed * data.speedMultiplier;
+      jumpHeight = verticalVelocity = slope = steer = 0;
+      isJumping = isLanding = false;
+      if (dogModel) dogModel.rotation.set(0,0,0);
+      playAnimation('Sprint');
+    }
+    socket.on('playerLaunched', handlePlayerLaunched);
+    socket.on('playerLanded', handlePlayerLanded);
     socket.on('playerFell', handlePlayerFell);
     socket.on('playerRespawned', handlePlayerRespawned);
 
@@ -1641,6 +1689,12 @@ function App() {
       statScale(stats.agility, STAT_EFFECT.agilityTurn);
     const gripSprint = HANDLING.gripSprint *
       statScale(stats.agility, STAT_EFFECT.agilityGrip);
+    // The supplied coastal map uses 0–1 stats; existing dog stats use 1–10.
+    const coastalStats = {
+      stamina: stats.stamina == null ? 0.5 : THREE.MathUtils.clamp(stats.stamina / 10, 0, 1),
+      swimming: stats.swimming == null ? 0.5 : THREE.MathUtils.clamp(stats.swimming / 10, 0, 1)
+    };
+    const coastalTrack = proceduralTrack?.speedFactor ? proceduralTrack : null;
     const waterSpeed = swimShare(stats.swimming, WATER_SPEED);
     const waterAcceleration = swimShare(stats.swimming, WATER_ACCELERATION);
     const braking = 22;
@@ -1788,7 +1842,7 @@ function App() {
         timer.getDelta(),
         0.05
       );
-      proceduralWorld?.update(performance.now() / 1000);
+      proceduralWorld?.update(performance.now() / 1000, player.position);
 
       const canMove =
         raceGoRef.current &&
@@ -1860,10 +1914,27 @@ function App() {
 
       lastGoState = true;
 
-      if (fall) {
+      const desiredFov = launchFlight ? 94 : performance.now() < launchBoostUntil ? 84 : 75;
+      if (Math.abs(camera.fov - desiredFov) > 0.01) {
+        camera.fov += (desiredFov - camera.fov) * (1 - Math.exp(-8 * delta));
+        camera.updateProjectionMatrix();
+      }
+      if (launchFlight) {
+        const elapsed = (performance.now() - launchFlight.startedAt) / 1000;
+        const point = proceduralTrack.launchPoint(elapsed, launchFlight.lateral);
+        player.position.set(point.x, point.y, point.z);
+        player.rotation.y = point.rotationY;
+        if (dogModel) dogModel.rotation.x = point.pitch;
+        if (dogMixer) dogMixer.update(delta);
+        if (speedDisplayRef.current) speedDisplayRef.current.textContent = (point.speed * 3.6).toFixed(1);
+        if (surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = 'ZOOM!';
+          surfaceDisplayRef.current.style.color = '#62ffe6';
+        }
+      } else if (fall) {
         const elapsed = (performance.now() - fall.startedAt) / 1000;
         player.position.copy(fall.position);
-        player.position.y -= 0.5 * skyTrack.rules.gravity * elapsed * elapsed;
+        player.position.y -= 0.5 * proceduralTrack.rules.gravity * elapsed * elapsed;
         if (dogMixer) dogMixer.update(delta);
         if (speedDisplayRef.current) speedDisplayRef.current.textContent = '0.0';
         if (surfaceDisplayRef.current) {
@@ -1879,11 +1950,14 @@ function App() {
         // In the air the dog is off nothing: that is how the stream is cleared
         offTrack = !isJumping && !isTrackSurface(player.position);
         const inWater = offTrack && isOverWater(player.position);
-        const terrainMultiplier = inWater
+        const coastalGround = coastalTrack?.query(player.position.x, player.position.z);
+        const terrainMultiplier = coastalGround
+          ? coastalTrack.speedFactor(coastalGround, coastalStats)
+          : inWater
           ? waterSpeed
           : offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
         // A climb takes a little off the top speed, a descent gives a little back
-        const hillMultiplier = THREE.MathUtils.clamp(
+        const hillMultiplier = coastalTrack ? 1 : THREE.MathUtils.clamp(
           1 - HANDLING.hillEffect * slope,
           0.8,
           1.08
@@ -1892,7 +1966,8 @@ function App() {
           sprintSpeed *
           terrainMultiplier *
           hillMultiplier *
-          (skyTrack && performance.now() < recoveryUntil ? skyTrack.rules.respawnSpeedMultiplier : 1);
+          (performance.now() < launchBoostUntil ? proceduralTrack.launch.exitSpeedMultiplier : 1) *
+          (proceduralTrack && performance.now() < recoveryUntil ? proceduralTrack.rules.respawnSpeedMultiplier : 1);
         const effectiveAcceleration = acceleration *
           (inWater
             ? waterAcceleration
@@ -2134,6 +2209,18 @@ function App() {
           }
         }
 
+        // Slide along the coastal banks and dunes; exposed cliff edges remain open.
+        let coastalSurface = coastalTrack?.query(player.position.x, player.position.z);
+        if (coastalSurface?.blocked) {
+          player.position.x = coastalSurface.clampX;
+          player.position.z = coastalSurface.clampZ;
+          coastalSurface = coastalTrack.query(player.position.x, player.position.z);
+        }
+        if (coastalSurface) {
+          currentSpeed = Math.min(currentSpeed, sprintSpeed * coastalTrack.speedFactor(coastalSurface, coastalStats)
+            * (performance.now() < recoveryUntil ? coastalTrack.rules.respawnSpeedMultiplier : 1));
+        }
+
         // Recheck at the new location, so the slowdown begins immediately.
         offTrack = !isJumping && !isTrackSurface(player.position);
         const wading = offTrack && isOverWater(player.position);
@@ -2285,10 +2372,16 @@ function App() {
           }
         }
 
-        if (skyTrack && surfaceDisplayRef.current) {
+        if (proceduralTrack && surfaceDisplayRef.current) {
           surfaceDisplayRef.current.textContent = performance.now() < recoveryUntil
             ? 'RECOVERING — REDUCED SPEED'
-            : offTrack ? 'OFF THE EDGE' : 'ON TRACK';
+            : performance.now() < launchBoostUntil ? 'LANDING BOOST!'
+            : offTrack ? 'OFF THE EDGE'
+            : coastalSurface?.movement === 'swim' ? 'SWIMMING'
+            : coastalSurface?.movement === 'wade' ? 'WADING'
+            : coastalSurface?.surface === 'shoulder' ? 'SOFT GROUND — SLOWDOWN' : 'ON TRACK';
+          surfaceDisplayRef.current.style.color = coastalSurface?.inWater ? '#8fd0ff'
+            : offTrack || coastalSurface?.surface === 'shoulder' ? '#ffbc75' : '#9fe49b';
         }
       }
 
@@ -2410,10 +2503,8 @@ function App() {
             delta
         );
 
-      camera.position.lerp(
-        targetPosition,
-        cameraLerp
-      );
+      if (launchFlight) camera.position.copy(targetPosition);
+      else camera.position.lerp(targetPosition, cameraLerp);
 
       const lookTarget =
         player.position.clone();
@@ -2455,6 +2546,8 @@ function App() {
         'playerLeft',
         handlePlayerLeft
       );
+      socket.off('playerLaunched', handlePlayerLaunched);
+      socket.off('playerLanded', handlePlayerLanded);
       socket.off('playerFell', handlePlayerFell);
       socket.off('playerRespawned', handlePlayerRespawned);
       restoreEnvironment?.();
@@ -3018,7 +3111,9 @@ function App() {
           <div>W / ↑ accelerate · S / ↓ brake / reverse</div>
           <div>A / D or ← / → steer</div>
           <div>{MAPS[room?.mapId ?? DEFAULT_MAP].allowJump === false
-            ? 'Stay on the road · falls return you to a checkpoint'
+            ? room?.mapId === 'treat_road'
+              ? 'Cyan pad launches automatically · falls return to checkpoints'
+              : 'Follow the trail · falls return you to a checkpoint'
             : 'Space or scroll down to jump'}</div>
         </div>
       </div>

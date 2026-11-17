@@ -8,7 +8,7 @@
 // THREE.CatmullRomCurve3(points, true, 'catmullrom', 0.5) produces), resampled every ~2 m.
 
 export const TREAT_ROAD_ID = 'treat_road';
-const TARGET_LENGTH = 2900;        // metres along the centreline
+const TARGET_LENGTH = 1600;        // metres along the centreline
 const SAMPLE_STEP = 2;             // metres between centreline samples
 const EDGE_TOLERANCE = 0.25;       // how far past the edge a dog may be and still count as "on"
 const CHECKPOINT_SPACING = 100;    // metres
@@ -61,7 +61,7 @@ function smoothPeriodic(a, sigma) {
 }
 
 function sampleLoop(scale) {
-  const P = CONTROL_POINTS.map(p => [p[0] * scale, p[1] * scale, p[2], p[3]]);
+  const P = CONTROL_POINTS.map(p => [p[0] * scale, p[1] * scale, p[2] * 0.55, p[3]]);
   const { pts, us } = catmullClosed(P, 48);
   const m = pts.length, cum = [0];
   for (let i = 0; i < m; i++) {
@@ -117,6 +117,39 @@ function buildTrack() {
   const wrapIndex = i => ((i % N) + N) % N;
   const indexAtS = s => wrapIndex(Math.round((((s % LENGTH) + LENGTH) % LENGTH) / LENGTH * N));
 
+  // Remove 150 m of the winding climb; the remaining road is half the original lap.
+  const gapStartIndex = SEC.indexOf('C') + 24;
+  const gapEndIndex = gapStartIndex + Math.round(150 / (LENGTH / N));
+  const launch = {
+    gapStart: S[gapStartIndex], gapEnd: S[gapEndIndex],
+    padStart: S[gapStartIndex] - 16, takeoffS: S[gapStartIndex] - 4,
+    landingS: S[gapEndIndex] + 12, duration: 2.2, arcHeight: 30,
+    exitSpeedMultiplier: 1.35, boostSeconds: 1.25
+  };
+  const isGap = s => s > launch.gapStart && s < launch.gapEnd;
+  const isGapSegment = i => i >= gapStartIndex && i < gapEndIndex;
+
+  /** Shared, deterministic catapult arc, with tangents aligned to both pieces of road. */
+  function launchPoint(elapsed, lateral = 0) {
+    const t = Math.max(0, Math.min(1, elapsed / launch.duration));
+    const a = pointAt(launch.takeoffS, lateral), b = pointAt(launch.landingS, lateral);
+    const tangent = Math.hypot(b.x - a.x, b.z - a.z) * 0.55;
+    const h0 = 2*t*t*t - 3*t*t + 1, h1 = t*t*t - 2*t*t + t;
+    const h2 = -2*t*t*t + 3*t*t, h3 = t*t*t - t*t;
+    const dh0 = 6*t*t - 6*t, dh1 = 3*t*t - 4*t + 1;
+    const dh2 = -dh0, dh3 = 3*t*t - 2*t;
+    const ax = Math.sin(a.rotationY)*tangent, az = Math.cos(a.rotationY)*tangent;
+    const bx = Math.sin(b.rotationY)*tangent, bz = Math.cos(b.rotationY)*tangent;
+    const dx = dh0*a.x + dh1*ax + dh2*b.x + dh3*bx;
+    const dz = dh0*a.z + dh1*az + dh2*b.z + dh3*bz;
+    const dy = b.y-a.y + 4*launch.arcHeight*(1-2*t);
+    return { x: h0*a.x+h1*ax+h2*b.x+h3*bx,
+      y: a.y+(b.y-a.y)*t+4*launch.arcHeight*t*(1-t),
+      z: h0*a.z+h1*az+h2*b.z+h3*bz,
+      rotationY: Math.atan2(dx,dz), pitch: -Math.atan2(dy, Math.hypot(dx,dz)),
+      speed: Math.hypot(dx,dy,dz)/launch.duration };
+  }
+
   /** World position for a distance along the lap and a sideways offset (metres, + = left-hand normal). */
   function pointAt(s, lateral = 0) {
     s = ((s % LENGTH) + LENGTH) % LENGTH;
@@ -160,7 +193,7 @@ function buildTrack() {
         };
       }
     }
-    out.onTrack = Math.abs(out.lateral) <= out.halfWidth + EDGE_TOLERANCE && out.distance <= out.halfWidth + EDGE_TOLERANCE + 0.5;
+    out.onTrack = !isGap(out.s) && Math.abs(out.lateral) <= out.halfWidth + EDGE_TOLERANCE && out.distance <= out.halfWidth + EDGE_TOLERANCE + 0.5;
     return out;
   }
 
@@ -170,6 +203,14 @@ function buildTrack() {
     const i = wrapIndex(Math.round(c * N / cpCount));
     checkpoints.push({ index: c, sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] });
   }
+
+  // No checkpoint sits in mid-air or under the launch approach. Landing is a required gate.
+  const roadCheckpoints = checkpoints.filter(cp => cp.s < launch.padStart - 8 || cp.s > launch.landingS + 20);
+  for (const [s, launchLanding] of [[launch.padStart - 8, false], [launch.landingS, true]]) {
+    const p = pointAt(s);
+    roadCheckpoints.push({ s, launchLanding, sampleIndex: p.index, position: [p.x,p.y,p.z], rotationY: p.rotationY, halfWidth: p.halfWidth, section: p.section });
+  }
+  roadCheckpoints.sort((a,b) => a.s-b.s).forEach((cp,index) => { cp.index=index; });
 
   // five dogs, one row, 8 m behind the line
   const gi = wrapIndex(N - 4), spacing = Math.min(2.6, (W[gi] - 3) / 4), startPositions = [];
@@ -181,7 +222,7 @@ function buildTrack() {
   // decorative bone arches ("treat gates"). boost is off for alpha; flip it on later if wanted.
   const firstOf = sec => SEC.indexOf(sec), lastOf = sec => SEC.lastIndexOf(sec);
   const gateIdx = [0, Math.round((firstOf('B') + lastOf('B')) / 2), firstOf('C') + 20, lastOf('C') - 60, firstOf('D') + 10, firstOf('E') + 6, lastOf('E') - 6, Math.round((firstOf('F') + lastOf('F')) / 2)];
-  const gates = gateIdx.map((i, k) => ({ index: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, isStartGate: k === 0, boost: false }));
+  const gates = gateIdx.filter(i => !isGap(S[i])).map((i, k) => ({ index: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, isStartGate: k === 0, boost: false }));
 
   const sections = [];
   for (let i = 0, st = 0; i <= N; i++) {
@@ -193,7 +234,8 @@ function buildTrack() {
     id: TREAT_ROAD_ID, name: 'Treat Road', laps: 3, maxDogs: 5, difficulty: 'hard',
     length: LENGTH, sampleCount: N, sampleSpacing: LENGTH / N, minY, maxY,
     samples: { x: X, y: Y, z: Z, width: W, s: S, tangentX: TX, tangentZ: TZ, normalX: NX, normalZ: NZ, grade: GRADE, curvature: KAPPA, section: SEC },
-    sections, checkpoints, startPositions, gates,
+    sections, checkpoints: roadCheckpoints, startPositions, gates, launch,
+    roadLength: LENGTH - (launch.gapEnd - launch.gapStart),
     startFinish: { position: [X[0], Y[0], Z[0]], rotationY: yawAt(0), halfWidth: W[0] / 2 },
     rules: {
       hasBarriers: false,
@@ -204,7 +246,7 @@ function buildTrack() {
       gravity: 24,
       killPlaneY: minY - 120,
     },
-    query, pointAt, indexAtS,
+    query, pointAt, indexAtS, isGap, isGapSegment, launchPoint,
   };
 }
 

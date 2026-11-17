@@ -2,8 +2,7 @@
 import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
-import { MAPS, DEFAULT_MAP, crossedFinishLine } from '../shared/maps.js';
-import { TREAT_ROAD } from '../shared/treatRoadData.js';
+import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS } from '../shared/maps.js';
 
 const PORT = Number(env.PORT || 3001);
 
@@ -21,22 +20,41 @@ const LOBBY_BROWSER = 'lobby-browser';
 
 const rooms = new Map();
 const playerRooms = new Map();
-const skyRaceStates = new WeakMap();
+const proceduralRaceStates = new WeakMap();
 
 // Recovery is decided by the server; clients only animate the fall. A revision
 // prevents movement packets sent before a respawn from moving the dog back off-road.
-function updateSkyRace(room, player, data) {
-  const state = skyRaceStates.get(player);
+function updateProceduralRace(room, player, data) {
+  const track = PROCEDURAL_TRACKS[room.mapId];
+  const state = proceduralRaceStates.get(player);
   if ((data.respawnRevision ?? 0) !== state.revision) return false;
   const now = Date.now();
+  if (state.launch) {
+    const elapsed = (now - state.launch.startedAt) / 1000;
+    const point = track.launchPoint(elapsed, state.launch.lateral);
+    player.position = [point.x, point.y, point.z];
+    player.rotation = point.rotationY;
+    player.animation = 'Jump';
+    if (elapsed < track.launch.duration) return false;
+    state.launch = null;
+    state.launchLap = player.lap;
+    state.revision += 1;
+    player.animation = 'Sprint';
+    io.to(room.code).emit('playerLanded', {
+      playerId: player.id, position: player.position, rotation: player.rotation,
+      respawnRevision: state.revision, boostSeconds: track.launch.boostSeconds,
+      speedMultiplier: track.launch.exitSpeedMultiplier
+    });
+    return true;
+  }
   if (state.fall) {
     const elapsed = (now - state.fall.startedAt) / 1000;
-    if (elapsed >= TREAT_ROAD.rules.respawnDelaySeconds) {
-      const cp = TREAT_ROAD.checkpoints[player.checkpoint];
+    if (elapsed >= track.rules.respawnDelaySeconds) {
+      const cp = track.checkpoints[player.checkpoint];
       const spread = Math.min(1.6, (cp.halfWidth - 1.2) / 2);
-      const point = TREAT_ROAD.pointAt(cp.s, (2 - state.slot) * spread * 0.5);
+      const point = track.pointAt(cp.s, (2 - state.slot) * spread * 0.5);
       const grid = !state.passedStart && player.lap === 1 && player.checkpoint === 0
-        ? TREAT_ROAD.startPositions[state.slot] : null;
+        ? track.startPositions[state.slot] : null;
       player.position = grid ? [...grid.position] : [point.x, point.y, point.z];
       player.rotation = grid ? grid.rotationY : point.rotationY;
       player.animation = 'Idle';
@@ -45,23 +63,41 @@ function updateSkyRace(room, player, data) {
       io.to(room.code).emit('playerRespawned', {
         playerId: player.id, position: player.position, rotation: player.rotation,
         respawnRevision: state.revision,
-        penaltySeconds: TREAT_ROAD.rules.respawnPenaltySeconds,
-        speedMultiplier: TREAT_ROAD.rules.respawnSpeedMultiplier
+        penaltySeconds: track.rules.respawnPenaltySeconds,
+        speedMultiplier: track.rules.respawnSpeedMultiplier
       });
     } else {
       player.position = [...state.fall.position];
-      player.position[1] -= 0.5 * TREAT_ROAD.rules.gravity * elapsed * elapsed;
+      player.position[1] -= 0.5 * track.rules.gravity * elapsed * elapsed;
     }
     return false;
   }
   const [x, y, z] = data.position;
-  const ground = TREAT_ROAD.query(x, z);
-  if (ground.onTrack && crossedFinishLine(player.position, data.position, MAPS.treat_road.startFinish)) {
+  const ground = track.query(x, z);
+  if (track.launch) {
+    const previous = track.query(player.position[0], player.position[2]);
+    const pad = track.launch;
+    if (previous.onTrack && previous.s >= pad.padStart && previous.s < pad.takeoffS
+      && ground.s >= pad.takeoffS && ground.s <= pad.gapStart + 8
+      && Math.abs(ground.lateral) <= ground.halfWidth
+      && Math.abs(y - ground.y) < 1.2) {
+      const halfWidth = Math.min(ground.halfWidth, track.pointAt(pad.landingS).halfWidth) - 1;
+      state.launch = { startedAt: now, lateral: Math.max(-halfWidth, Math.min(halfWidth, ground.lateral)) };
+      const point = track.launchPoint(0, state.launch.lateral);
+      player.position = [point.x,point.y,point.z]; player.rotation = point.rotationY; player.animation = 'Jump';
+      io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral: state.launch.lateral });
+      return false;
+    }
+  }
+  const position = ground.blocked
+    ? [ground.clampX, ground.dogY ?? ground.y, ground.clampZ]
+    : [...data.position];
+  if (ground.onTrack && crossedFinishLine(player.position, position, MAPS[room.mapId].startFinish)) {
     state.passedStart = true;
   }
-  player.position = [...data.position];
+  player.position = position;
   player.rotation = data.rotation;
-  if (!ground.onTrack || y < ground.y - TREAT_ROAD.rules.fallStartsBelow) {
+  if (!ground.onTrack || (!ground.blocked && y < ground.y - track.rules.fallStartsBelow)) {
     state.fall = { startedAt: now, position: [...player.position] };
     player.animation = 'Jump';
     io.to(room.code).emit('playerFell', {
@@ -221,6 +257,7 @@ function checkRaceProgress(room, player, previousPosition) {
   // Players must visit each checkpoint in order.
   if (player.checkpoint < checkpoints.length) {
     const target = checkpoints[player.checkpoint];
+    if (target.launchLanding && proceduralRaceStates.get(player)?.launchLap !== player.lap) return;
 
     const distance = Math.hypot(
       x - target.x,
@@ -633,8 +670,8 @@ io.on('connection', (socket) => {
       player.checkpoint = 0;
       player.finished = false;
       player.finishTime = null;
-      if (room.mapId === 'treat_road') {
-        skyRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
+      if (MAPS[room.mapId].procedural) {
+        proceduralRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
       }
     });
 
@@ -721,8 +758,8 @@ io.on('connection', (socket) => {
     const previousPosition = [...player.position];
 
     let onRoad = true;
-    if (room.mapId === 'treat_road') {
-      onRoad = updateSkyRace(room, player, data);
+    if (MAPS[room.mapId].procedural) {
+      onRoad = updateProceduralRace(room, player, data);
     } else {
       player.position = [...position];
       player.rotation = rotation;

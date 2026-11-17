@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 import { MAPS } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
+import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 
 // Exercise the real socket handlers in memory, without binding a network port.
 let server;
@@ -216,7 +217,8 @@ for (const [mapId, map] of Object.entries(MAPS)) {
     guest.call('raceLoaded');
     for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
     assert.ok(latest(room.code, 'raceGo'));
-    const move = position => host.call('playerMove', { position, rotation: 0, animation: 'Run' });
+    let revision = 0;
+    const move = position => host.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: revision });
     const finishPoint = distance => map.startFinish.position.map((value, axis) => value + distance * map.startFinish.forward[axis]);
     // Crossing the finish before visiting the route cannot count a lap.
     move(finishPoint(-2)); move(finishPoint(2));
@@ -225,7 +227,20 @@ for (const [mapId, map] of Object.entries(MAPS)) {
       // Skipping ahead cannot advance the required checkpoint.
       const last = map.checkpoints.at(-1);
       move([last.x, last.y ?? 0, last.z]);
-      for (const checkpoint of map.checkpoints) move([checkpoint.x, checkpoint.y ?? 0, checkpoint.z]);
+      for (const checkpoint of map.checkpoints) {
+        if (checkpoint.launchLanding) {
+          const T = TREAT_ROAD;
+          for (const s of [T.launch.padStart + 1, T.launch.takeoffS + 0.1]) {
+            const p=T.pointAt(s); move([p.x,p.y,p.z]);
+          }
+          assert.equal(latest(room.code,'playerLaunched').playerId,host.id);
+          context.mock.timers.tick(T.launch.duration*1000+1);
+          move([checkpoint.x,checkpoint.y,checkpoint.z]);
+          revision=latest(room.code,'playerLanded').respawnRevision;
+          assert.equal(revision,lap);
+        }
+        move([checkpoint.x, checkpoint.y ?? 0, checkpoint.z]);
+      }
       let progress = latest(room.code, 'raceProgress');
       assert.equal(progress.checkpoint, map.checkpoints.length);
       assert.equal(progress.lap, lap);
@@ -283,4 +298,100 @@ test('Treat Road falls, respawns at the last checkpoint, and rejects pre-respawn
   move(TREAT_ROAD.checkpoints[2].position, 1);
   assert.equal(latest(room.code, 'raceProgress').checkpoint, 2);
   host.call('leaveGame'); guest.call('leaveGame');
+});
+
+
+test('Modbury water and banks remain supported; cliff falls recover and reject stale movement', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host = client();
+  const room = host.call('hostGame', { mapId: 'modbury_heights', singlePlayer: true }).room;
+  host.call('selectDog', { dog: 'black_lab' });
+  assert.equal(host.call('startRace').success, true);
+  host.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const move = (position, respawnRevision = 0) => host.call('playerMove', {
+    position, rotation: 0, animation: 'Run', respawnRevision
+  });
+  const wet = COAST.pointAt((COAST.waterCrossing.sStart + COAST.waterCrossing.sEnd) / 2);
+  move([wet.x, COAST.query(wet.x, wet.z).dogY, wet.z]);
+  assert.equal(latest(room.code, 'playerFell'), undefined);
+  const i = Math.floor((COAST.exposedEdge.firstIndex + COAST.exposedEdge.lastIndex) / 2);
+  const sign = COAST.samples.exposed[0][i] ? 1 : -1;
+  const inland = COAST.pointAt(COAST.samples.s[i], -sign * 30);
+  const bank = COAST.query(inland.x, inland.z);
+  move([inland.x, inland.y, inland.z]);
+  assert.equal(latest(room.code, 'playerFell'), undefined);
+  assert.deepEqual(latest(room.code, 'playerMoved').position, [bank.clampX, bank.dogY, bank.clampZ]);
+  const checkpoints = COAST.checkpoints.filter(cp => cp.index > 0 && cp.s < COAST.samples.s[i]);
+  for (const cp of checkpoints) move(cp.position);
+  const cp = checkpoints.at(-1);
+  assert.equal(latest(room.code, 'raceProgress').checkpoint, cp.index);
+  const edge = COAST.pointAt(COAST.samples.s[i], sign * (COAST.samples.width[i] / 2 + 3));
+  move([edge.x, edge.y, edge.z]);
+  assert.equal(latest(room.code, 'playerFell').playerId, host.id);
+  context.mock.timers.tick(500);
+  move(COAST.checkpoints[cp.index + 1].position);
+  assert.equal(latest(room.code, 'raceProgress').checkpoint, cp.index);
+  assert.equal(latest(room.code, 'playerRespawned'), undefined);
+  context.mock.timers.tick(500);
+  move([edge.x, edge.y - 20, edge.z]);
+  const respawn = latest(room.code, 'playerRespawned');
+  assert.equal(respawn.respawnRevision, 1);
+  assert.equal(respawn.penaltySeconds, 1.5);
+  assert.equal(respawn.speedMultiplier, 0.55);
+  assert.ok(Math.hypot(respawn.position[0] - cp.position[0], respawn.position[2] - cp.position[2]) < 3);
+  assert.ok(COAST.query(respawn.position[0], respawn.position[2]).onTrack);
+  move([edge.x, edge.y - 20, edge.z]);
+  assert.deepEqual(latest(room.code, 'playerMoved').position, respawn.position);
+  move(COAST.checkpoints[cp.index + 1].position, 1);
+  assert.equal(latest(room.code, 'raceProgress').checkpoint, cp.index + 1);
+  host.call('leaveGame');
+});
+
+
+test('Treat Road launch is forward-only, required, server-controlled and rejects stale landing packets', context => {
+  context.mock.timers.enable({apis:['setTimeout','Date'],now:1000});
+  const host=client(), guest=client(), T=TREAT_ROAD, pad=T.launch;
+  const room=host.call('hostGame',{mapId:'treat_road'}).room;
+  guest.call('joinGame',{roomCode:room.code});
+  host.call('selectDog',{dog:'gsp'}); guest.call('selectDog',{dog:'pablo'});
+  host.call('startRace'); host.call('raceLoaded'); guest.call('raceLoaded');
+  for(let i=0;i<3;i++) context.mock.timers.tick(1000);
+  const move=(client,position,revision=0)=>client.call('playerMove',{position,rotation:0,animation:'Run',respawnRevision:revision});
+  const at=(client,s,revision=0)=>{const p=T.pointAt(s);move(client,[p.x,p.y,p.z],revision);};
+  const landing=T.checkpoints.find(cp=>cp.launchLanding);
+  for(const cp of T.checkpoints.slice(1,landing.index)) move(host,cp.position);
+  move(host,landing.position);
+  assert.equal(latest(room.code,'raceProgress').checkpoint,landing.index-1,'teleporting to the landing cannot collect it');
+  at(host,pad.takeoffS+1); at(host,pad.takeoffS-1);
+  assert.equal(latest(room.code,'playerLaunched'),undefined,'backward entry does not launch');
+  at(host,pad.padStart+1); at(host,pad.takeoffS+0.1);
+  assert.equal(latest(room.code,'playerLaunched').playerId,host.id);
+  // A second dog can enter independently without cancelling the first flight.
+  at(guest,pad.padStart+1); at(guest,pad.takeoffS+0.1);
+  assert.equal(latest(room.code,'playerLaunched').playerId,guest.id);
+  context.mock.timers.tick(1100);
+  move(host,[0,-999,0]);
+  const middle=T.launchPoint(1.1);
+  const air=latest(room.code,'playerMoved').position;
+  assert.ok(Math.hypot(air[0]-middle.x,air[1]-middle.y,air[2]-middle.z)<0.01);
+  assert.equal(latest(room.code,'playerFell'),undefined);
+  assert.equal(latest(room.code,'raceProgress').checkpoint,landing.index-1);
+  context.mock.timers.tick(1101);
+  move(host,[0,-999,0]);
+  const landed=latest(room.code,'playerLanded');
+  assert.equal(landed.respawnRevision,1);
+  assert.equal(landed.speedMultiplier,1.35);
+  assert.equal(latest(room.code,'raceProgress').checkpoint,landing.index);
+  move(host,[0,-999,0]);
+  assert.deepEqual(latest(room.code,'playerMoved').position,landed.position);
+  move(host,T.checkpoints[landing.index+1].position,1);
+  assert.equal(latest(room.code,'raceProgress').checkpoint,landing.index+1);
+  move(guest,[0,-999,0]);
+  assert.equal(latest(room.code,'playerLanded').playerId,guest.id);
+  // Falling off the gap without a launch still uses normal recovery.
+  const gap=T.pointAt((pad.gapStart+pad.gapEnd)/2);
+  move(host,[gap.x,gap.y,gap.z],1);
+  assert.equal(latest(room.code,'playerFell').playerId,host.id);
+  host.call('leaveGame');guest.call('leaveGame');
 });

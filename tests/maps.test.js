@@ -5,11 +5,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MAPS, crossedFinishLine, sampleGroundHeight } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
+import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 
-test('Treat Road has a continuous elevated road, supported spawns, and open edges', () => {
+test('Treat Road has half as much road, supported spawns, and open edges', () => {
   assert.equal(MAPS.treat_road.startPositions.length, 5);
-  assert.equal(MAPS.treat_road.checkpoints.length, 28);
-  assert.ok(Math.abs(TREAT_ROAD.length - 2900) < 5);
+  assert.equal(MAPS.treat_road.checkpoints.length, TREAT_ROAD.checkpoints.length - 1);
+  assert.ok(Math.abs(TREAT_ROAD.roadLength - 1450) < 5);
   const samples = TREAT_ROAD.samples;
   for (let i = 0; i < TREAT_ROAD.sampleCount; i++) {
     const j = (i + 1) % TREAT_ROAD.sampleCount;
@@ -83,5 +84,67 @@ test('Frostpeak GLB has usable hidden collision geometry and every spawn is on t
   }
   for (const name of ['Collision_Cabins', 'Collision_Trees', 'Collision_Rocks', 'Collision_Fences', 'Collision_Bridge_Rails', 'Collision_Obstacle_Log_01']) {
     assert.ok(gltf.scene.getObjectByName(name)?.isMesh, `${name} exists`);
+  }
+});
+
+
+test('Modbury has supported spawns, continuous terrain, water and open cliff edges', () => {
+  assert.equal(MAPS.modbury_heights.startPositions.length, 5);
+  assert.ok(Math.abs(COAST.length - 3121) < 5);
+  for (const { position } of COAST.startPositions) {
+    const q = COAST.query(position[0], position[2]);
+    assert.ok(q.onTrack && !q.blocked && !q.inWater);
+    assert.ok(Math.abs(q.y - position[1]) < 0.1);
+  }
+  const s = COAST.samples;
+  for (let i = 0; i < COAST.sampleCount; i++) {
+    const j = (i + 1) % COAST.sampleCount;
+    assert.ok(Math.hypot(s.x[j] - s.x[i], s.y[j] - s.y[i], s.z[j] - s.z[i]) < 2.6);
+    const q = COAST.query(s.x[i], s.z[i]);
+    assert.ok(q.onTrack && !q.blocked);
+    assert.ok(Math.abs(COAST.terrainHeight(s.x[i], s.z[i]) - s.y[i]) < 0.4);
+  }
+  const water = COAST.pointAt((COAST.waterCrossing.sStart + COAST.waterCrossing.sEnd) / 2);
+  const wet = COAST.query(water.x, water.z);
+  assert.equal(wet.movement, 'swim');
+  assert.equal(wet.dogY, COAST.seaLevel - 0.42);
+  assert.ok(COAST.speedFactor(wet, { swimming: 1 }) > COAST.speedFactor(wet, { swimming: 0 }));
+  const hill = COAST.pointAt(COAST.sections.find(section => section.id === 'B').sStart + 150);
+  const uphill = COAST.query(hill.x, hill.z);
+  assert.ok(COAST.speedFactor(uphill, { stamina: 1 }) > COAST.speedFactor(uphill, { stamina: 0 }));
+  const i = Math.floor((COAST.exposedEdge.firstIndex + COAST.exposedEdge.lastIndex) / 2);
+  const sign = s.exposed[0][i] ? 1 : -1;
+  const edge = COAST.pointAt(s.s[i], sign * (s.width[i] / 2 + 3));
+  assert.equal(COAST.query(edge.x, edge.z).fall, true);
+  const inland = COAST.pointAt(s.s[i], -sign * 30);
+  const bank = COAST.query(inland.x, inland.z);
+  assert.ok(bank.blocked && !bank.fall);
+});
+
+
+test('Treat Road catapult bridges a real gap and lands facing the supported road', () => {
+  const T = TREAT_ROAD, pad = T.launch;
+  assert.ok(pad.gapEnd - pad.gapStart > 145);
+  assert.ok(T.checkpoints.every(cp => !T.isGap(cp.s)));
+  assert.equal(T.checkpoints.filter(cp => cp.launchLanding).length, 1);
+  for (let s = pad.gapStart + 3; s < pad.gapEnd - 3; s += 2) {
+    const p = T.pointAt(s);
+    assert.equal(T.query(p.x,p.z).onTrack, false);
+  }
+  for (const lateral of [-3,0,3]) {
+    for (const [time,s] of [[0,pad.takeoffS],[pad.duration,pad.landingS]]) {
+      const p = T.launchPoint(time,lateral), road=T.pointAt(s,lateral);
+      assert.ok(Math.hypot(p.x-road.x,p.y-road.y,p.z-road.z)<1e-6);
+      assert.ok(T.query(p.x,p.z).onTrack);
+      assert.ok(Math.abs(Math.sin(p.rotationY-road.rotationY))<1e-6);
+    }
+    let previous=T.launchPoint(0,lateral);
+    for (let time=0.01;time<=pad.duration;time+=0.01) {
+      const p=T.launchPoint(time,lateral);
+      assert.ok(Object.values(p).every(Number.isFinite));
+      assert.ok(Math.hypot(p.x-previous.x,p.y-previous.y,p.z-previous.z)<2);
+      previous=p;
+    }
+    assert.ok(T.launchPoint(pad.duration/2,lateral).y > Math.max(T.pointAt(pad.takeoffS).y,T.pointAt(pad.landingS).y)+20);
   }
 });

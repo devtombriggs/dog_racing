@@ -85,6 +85,7 @@ function ribbon(profile, vRepeat) {
     }
   }
   for (let r = 0; r < N; r++) for (let k = 0; k < K - 1; k++) {
+    if (T.isGapSegment(r)) continue;
     const a = r * K + k, b = a + 1, c = a + K, d = c + 1;
     idx.push(a, b, c, b, d, c);
   }
@@ -182,6 +183,36 @@ function buildGates(group, disposables) {
   }
 }
 
+function buildLauncher(group, disposables, animated) {
+  const pad = new THREE.Group(); pad.name = 'TreatRoad_LaunchPad';
+  const start = T.pointAt((T.launch.padStart + T.launch.takeoffS) / 2);
+  pad.position.set(start.x, start.y + 0.08, start.z); pad.rotation.set(-Math.atan(T.query(start.x,start.z).grade), start.rotationY, 0, 'YXZ');
+  const mat = new THREE.MeshBasicMaterial({ color: 0x36ffe3, toneMapped: false, side: THREE.DoubleSide });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x17466a, emissive: 0x063b45, emissiveIntensity: 1.3 });
+  const base = new THREE.BoxGeometry(start.halfWidth * 2, 0.12, 15);
+  pad.add(new THREE.Mesh(base, dark));
+  const chevron = new THREE.BufferGeometry();
+  chevron.setAttribute('position', new THREE.Float32BufferAttribute([-3,0,0, 0,0,2, 3,0,0, 3,0,-0.7, 0,0,1.3, -3,0,-0.7],3));
+  chevron.setIndex([0,1,5,1,4,5,1,2,4,2,3,4]);
+  for (const z of [-5,-1,3]) { const arrow = new THREE.Mesh(chevron,mat); arrow.position.set(0,0.09,z); pad.add(arrow); }
+  const canvas = document.createElement('canvas'); canvas.width=512; canvas.height=128;
+  const ctx=canvas.getContext('2d'); ctx.fillStyle='#102b48'; ctx.fillRect(0,0,512,128);
+  ctx.font='bold 76px sans-serif'; ctx.textAlign='center'; ctx.fillStyle='#62ffe6'; ctx.fillText('ZOOM!',256,91);
+  const texture=new THREE.CanvasTexture(canvas); texture.colorSpace=THREE.SRGBColorSpace;
+  const signGeo=new THREE.PlaneGeometry(9,2.25), signMat=new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide});
+  const sign=new THREE.Mesh(signGeo,signMat); sign.position.set(0,7,4); sign.rotation.y=Math.PI; pad.add(sign); group.add(pad);
+  // Rings make the flight direction and landing point readable from the approach.
+  const ringGeo=new THREE.TorusGeometry(4,0.16,8,40);
+  for (const t of [0.2,0.4,0.6,0.8]) {
+    const p=T.launchPoint(t*T.launch.duration), ring=new THREE.Mesh(ringGeo,mat);
+    ring.position.set(p.x,p.y+2,p.z); ring.rotation.set(p.pitch,p.rotationY,0,'YXZ'); group.add(ring);
+  }
+  const landing=T.pointAt(T.launch.landingS), landingGeo=new THREE.RingGeometry(2.8,3.2,40);
+  const target=new THREE.Mesh(landingGeo,mat); target.rotation.x=-Math.PI/2; target.position.set(landing.x,landing.y+0.09,landing.z); target.name='TreatRoad_LandingTarget';group.add(target);
+  animated.push(t => { mat.color.setRGB(0.15,0.8+0.2*Math.sin(t*6),0.75); });
+  disposables.push(mat,dark,base,chevron,texture,signGeo,signMat,ringGeo,landingGeo);
+}
+
 function buildTreats(group, disposables, animated) {
   const rnd = rng(7), dummy = new THREE.Object3D();
   const defs = [
@@ -214,7 +245,7 @@ function buildTreats(group, disposables, animated) {
   const jarGeo = new THREE.LatheGeometry([[0, 0], [3.4, 0], [3.9, 0.6], [3.9, 6.2], [3.0, 7.4], [3.0, 8.2]].map(p => new THREE.Vector2(p[0], p[1])), 24);
   const lidGeo = new THREE.CylinderGeometry(3.25, 3.25, 0.9, 24).translate(0, 8.6, 0);
   const fillGeo = boneGeometry(6).scale(1, 1, 0.42), fillMat = new THREE.MeshStandardMaterial({ color: 0xe2a14c, roughness: 0.85 });
-  const jarSpots = [T.indexAtS(60), T.indexAtS(620), T.indexAtS(1250), T.indexAtS(1700), T.indexAtS(2120), T.indexAtS(2600)];
+  const jarSpots = [...[0.02, 0.2, 0.38, 0.58, 0.76, 0.9].map(f => T.indexAtS(T.length * f))];
   const fill = new THREE.InstancedMesh(fillGeo, fillMat, jarSpots.length * 26); let fi = 0;
   jarSpots.forEach((i, n) => {
     const side = n % 2 ? -1 : 1, lat = side * (S.width[i] / 2 + 16 + rnd() * 10), jar = new THREE.Group();
@@ -309,6 +340,7 @@ export function createTreatRoad() {
   buildClouds(group, disposables, animated);
   buildRoad(group, disposables);
   buildGates(group, disposables);
+  buildLauncher(group, disposables, animated);
   buildTreats(group, disposables, animated);
 
   const hemi = new THREE.HemisphereLight(0xd9c2ff, 0xffb27a, 1.7);

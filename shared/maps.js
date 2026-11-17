@@ -1,5 +1,8 @@
 import frostpeak from './frostpeak.json' with { type: 'json' };
 import { TREAT_ROAD } from './treatRoadData.js';
+import { MODBURY_HEIGHTS } from './modburyData.js';
+
+export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS };
 
 const STARTING_GRID = [
   [-4, 0, 4.2],
@@ -52,21 +55,23 @@ export const MAPS = {
     heightmap: { ...frostpeak.heightmap, file: '/models/frostpeak_heightmap.bin' },
     lighting: frostpeak.lighting
   },
-  treat_road: {
-    name: TREAT_ROAD.name,
-    description: '2.9 km sky circuit · no barriers · checkpoint respawns',
+  ...Object.fromEntries(Object.entries(PROCEDURAL_TRACKS).map(([id, track]) => [id, {
+    name: track.name,
+    description: id === 'modbury_heights'
+      ? '3.12 km coastal circuit · clifftops · water crossing'
+      : '1.45 km of sky road · catapult gap · landing boost',
     procedural: true,
     allowJump: false,
-    startPositions: TREAT_ROAD.startPositions,
-    checkpoints: TREAT_ROAD.checkpoints.slice(1).map(({ position, halfWidth, rotationY }) => ({
-      x: position[0], y: position[1], z: position[2], radius: halfWidth + 8,
+    startPositions: track.startPositions,
+    checkpoints: track.checkpoints.slice(1).map(({ position, halfWidth, rotationY, launchLanding }) => ({
+      x: position[0], y: position[1], z: position[2], radius: halfWidth + 8, launchLanding,
       forward: [Math.sin(rotationY), Math.cos(rotationY)]
     })),
     startFinish: {
-      ...TREAT_ROAD.startFinish,
-      forward: [Math.sin(TREAT_ROAD.startFinish.rotationY), 0, Math.cos(TREAT_ROAD.startFinish.rotationY)]
+      ...track.startFinish,
+      forward: [Math.sin(track.startFinish.rotationY), 0, Math.cos(track.startFinish.rotationY)]
     }
-  }
+  }]))
 };
 
 export function crossedFinishLine(previous, current, finish) {
