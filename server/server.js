@@ -215,6 +215,55 @@ function checkItemHits(room, player, previousPosition) {
   }
 }
 
+// Puts everyone on the grid of room.mapId and tells the clients to load the race.
+function startRaceIn(room) {
+  const players = [...room.players.values()];
+
+  // Single player and multiplayer are both supported.
+  if (players.length < 1) {
+    return { success: false, error: 'At least one player is required' };
+  }
+
+  if (!players.every((player) => player.dog && player.ready)) {
+    return { success: false, error: 'Everyone needs to choose a dog first' };
+  }
+
+  clearMapVote(room);
+
+  players.forEach((player, index) => {
+    const start = MAPS[room.mapId].startPositions[index];
+    player.position = [...start.position];
+    player.rotation = start.rotationY;
+    player.animation = 'Idle';
+
+    player.loaded = false;
+    player.lap = 1;
+    player.checkpoint = 0;
+    player.finished = false;
+    player.finishTime = null;
+    if (MAPS[room.mapId].procedural) {
+      proceduralRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
+    }
+  });
+
+  room.startedAt = null;
+  room.status = 'loading';
+  resetItems(room);
+
+  io.to(room.code).emit('raceStarted', {
+    roomCode: room.code,
+    mapId: room.mapId,
+    totalCheckpoints: MAPS[room.mapId].checkpoints.length,
+    players,
+    totalLaps: TOTAL_LAPS
+  });
+
+  updateLobby(room);
+
+  console.log(`Loading race ${room.code}: ${players.length} player(s) on ${room.mapId}`);
+  return { success: true };
+}
+
 function generateRoomCode() {
   let code;
 
@@ -230,10 +279,60 @@ function getRoomData(room) {
     code: room.code,
     hostId: room.hostId,
     status: room.status,
+    singlePlayer: room.singlePlayer === true,
     mapId: room.mapId,
+    // map vote: playerId -> mapId, and how long is left (sent as a duration so clocks need not agree)
+    votes: Object.fromEntries(room.votes ?? []),
+    voteMsLeft: room.status === 'voting' ? Math.max(0, room.voteEndsAt - Date.now()) : null,
     players: [...room.players.values()]
   };
 }
+
+// ---------------------------------
+// MAP VOTE (multiplayer)
+// ---------------------------------
+// When the host presses Next (or a full room has all five dogs picked), everyone votes for a map.
+// The race always starts when the 15 s countdown ends: most votes wins, a tie (say 50/50) is a
+// random pick between the tied maps, and no votes at all picks a random map.
+
+const MAP_VOTE_MS = 15000;
+
+// Automatic only for a full room (all five dogs picked); otherwise the host presses Next.
+function maybeBeginMapVote(room) {
+  if (room.singlePlayer || room.status !== 'lobby' || room.players.size < MAX_PLAYERS) return;
+  if ([...room.players.values()].every((player) => player.dog)) beginMapVote(room);
+}
+
+function beginMapVote(room) {
+  room.status = 'voting';
+  room.votes = new Map();
+  room.voteEndsAt = Date.now() + MAP_VOTE_MS;
+  room.voteTimer = setTimeout(() => finishMapVote(room), MAP_VOTE_MS);
+  room.voteTimer?.unref?.();
+  updateLobby(room);
+}
+
+function clearMapVote(room) {
+  if (room.voteTimer) clearTimeout(room.voteTimer);
+  room.voteTimer = null;
+}
+
+function finishMapVote(room) {
+  if (rooms.get(room.code) !== room || room.status !== 'voting') return;
+  clearMapVote(room);
+  const counts = new Map();
+  for (const [playerId, mapId] of room.votes) {
+    if (room.players.has(playerId)) counts.set(mapId, (counts.get(mapId) ?? 0) + 1);
+  }
+  const most = Math.max(0, ...counts.values());
+  const candidates = most > 0
+    ? [...counts].filter(([, n]) => n === most).map(([mapId]) => mapId)
+    : Object.keys(MAPS);
+  room.mapId = candidates[Math.min(candidates.length - 1, Math.floor(Math.random() * candidates.length))];
+  room.votes = new Map();
+  startRaceIn(room);
+}
+
 
 function getLobbies() {
   return [...rooms.values()]
@@ -483,8 +582,11 @@ function leaveRoom(socket) {
     playerId: socket.id
   });
 
+  room.votes?.delete(socket.id);
+
   if (room.players.size === 0) {
     clearCountdown(room);
+    clearMapVote(room);
     for (const timer of room.treatBoxTimers.values()) clearTimeout(timer);
     rooms.delete(roomCode);
     updateLobbies();
@@ -500,6 +602,8 @@ function leaveRoom(socket) {
   if (room.status === 'loading') {
     beginCountdown(room);
   }
+
+  maybeBeginMapVote(room);
 
   if (
     room.status === 'racing' &&
@@ -554,6 +658,9 @@ io.on('connection', (socket) => {
       startedAt: null,
       countdownTimer: null,
       treatBoxTimers: new Map(),
+      votes: new Map(),
+      voteEndsAt: 0,
+      voteTimer: null,
       hazards: new Map(),
       balls: new Map(),
       nextItemId: 1,
@@ -702,12 +809,49 @@ io.on('connection', (socket) => {
       });
     }
 
-    // Picking a dog is readying up: the host can start once everyone has.
+    // Picking a dog is readying up: once everyone has, the map vote begins.
     player.dog = dog;
     player.hover = null;
     player.ready = true;
     player.loaded = false;
 
+    callback?.({ success: true });
+    updateLobby(room);
+    maybeBeginMapVote(room);
+  });
+
+  // NEXT (host): go to the map vote now; anyone without a dog is given a free one at random
+
+  socket.on('skipToMapVote', (callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || room.status !== 'lobby' || room.singlePlayer) {
+      return callback?.({ success: false, error: 'Not in a lobby' });
+    }
+    if (room.hostId !== socket.id) {
+      return callback?.({ success: false, error: 'Only the host can move everyone on' });
+    }
+    for (const player of room.players.values()) {
+      if (player.dog) continue;
+      const free = DOGS.filter((dog) => ![...room.players.values()].some((other) => other.dog === dog));
+      player.dog = free[Math.floor(Math.random() * free.length)];
+      player.hover = null;
+      player.ready = true;
+    }
+    callback?.({ success: true });
+    beginMapVote(room);
+  });
+
+  // VOTE FOR A MAP
+
+  socket.on('voteMap', (data, callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || room.status !== 'voting' || !room.players.has(socket.id)) {
+      return callback?.({ success: false, error: 'There is no map vote running' });
+    }
+    if (!Object.hasOwn(MAPS, data?.mapId)) {
+      return callback?.({ success: false, error: 'Invalid map selection' });
+    }
+    room.votes.set(socket.id, data.mapId);
     callback?.({ success: true });
     updateLobby(room);
   });
@@ -778,10 +922,9 @@ io.on('connection', (socket) => {
   // START RACE
 
   socket.on('startRace', (callback) => {
-    const roomCode = playerRooms.get(socket.id);
-    const room = rooms.get(roomCode);
+    const room = rooms.get(playerRooms.get(socket.id));
 
-    if (!room || room.status !== 'lobby') {
+    if (!room || (room.status !== 'lobby' && room.status !== 'voting')) {
       return callback?.({
         success: false,
         error: 'Room not available'
@@ -795,62 +938,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    const players = [...room.players.values()];
-
-    // Single player and multiplayer are both supported.
-    if (players.length < 1) {
-      return callback?.({
-        success: false,
-        error: 'At least one player is required'
-      });
-    }
-
-    if (
-      !players.every(
-        (player) => player.dog && player.ready
-      )
-    ) {
-      return callback?.({
-        success: false,
-        error: 'Everyone needs to choose a dog first'
-      });
-    }
-
-    players.forEach((player, index) => {
-      const start = MAPS[room.mapId].startPositions[index];
-      player.position = [...start.position];
-      player.rotation = start.rotationY;
-      player.animation = 'Idle';
-
-      player.loaded = false;
-      player.lap = 1;
-      player.checkpoint = 0;
-      player.finished = false;
-      player.finishTime = null;
-      if (MAPS[room.mapId].procedural) {
-        proceduralRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
-      }
-    });
-
-    room.startedAt = null;
-    room.status = 'loading';
-    resetItems(room);
-
-    callback?.({ success: true });
-
-    io.to(roomCode).emit('raceStarted', {
-      roomCode,
-      mapId: room.mapId,
-      totalCheckpoints: MAPS[room.mapId].checkpoints.length,
-      players,
-      totalLaps: TOTAL_LAPS
-    });
-
-    updateLobby(room);
-
-    console.log(
-      `Loading race ${roomCode}: ${players.length} player(s)`
-    );
+    callback?.(startRaceIn(room));
   });
 
   // CLIENT FINISHED LOADING

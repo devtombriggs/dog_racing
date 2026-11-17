@@ -170,16 +170,19 @@ test('map choice is validated, synchronized, host-only, and keeps chosen dogs', 
   assert.equal(room.mapId, 'frostpeak');
   assert.equal(guest.call('joinGame', { roomCode: room.code }).room.mapId, 'frostpeak');
   host.call('selectDog', { dog: 'gsp' });
-  guest.call('selectDog', { dog: 'ralph' });
-  host.call('setReady', { ready: true });
-  guest.call('setReady', { ready: true });
   assert.equal(guest.call('selectMap', { mapId: 'wendover' }).success, false);
   assert.equal(host.call('selectMap', { mapId: 'missing' }).success, false);
   assert.equal(host.call('selectMap', { mapId: 'wendover' }).success, true);
+  assert.equal(latest(room.code, 'lobbyUpdated').mapId, 'wendover');
+  // two of five picked: still the host's call (Next); dogs are kept
+  guest.call('selectDog', { dog: 'ralph' });
+  assert.equal(latest(room.code, 'lobbyUpdated').status, 'lobby', 'no automatic vote until the room is full');
+  host.call('skipToMapVote');
   const update = latest(room.code, 'lobbyUpdated');
-  assert.equal(update.mapId, 'wendover');
+  assert.equal(update.status, 'voting');
   assert.deepEqual(update.players.map(player => player.dog), ['gsp', 'ralph']);
   assert.ok(update.players.every(player => player.ready));
+  assert.equal(host.call('selectMap', { mapId: 'frostpeak' }).success, false, 'no host map choice during the vote');
   host.call('leaveGame'); guest.call('leaveGame');
 });
 
@@ -614,4 +617,87 @@ test('jumping: a dog in the air still launches off Treat Road\'s pad and can cle
   move(berri, [x, y, z + 6]); move(berri, [x, y, z - 6]);
   assert.deepEqual(latest(room2.code, 'hazardRemoved'), { id: toy.id, hitBy: berri.id });
   tom.call('leaveGame'); berri.call('leaveGame');
+});
+
+test('map vote: a full room starts it on its own, it always runs the full 15 s, most votes wins', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const players = ['A', 'B', 'C', 'D', 'E'].map(() => client());
+  const [a, b, c] = players;
+  const room = a.call('hostGame', { name: 'A' }).room;
+  players.slice(1).forEach((p, i) => p.call('joinGame', { roomCode: room.code, name: 'BCDE'[i] }));
+  const dogs = ['gsp', 'ralph', 'pablo', 'black_lab', 'second_dog'];
+  players.slice(0, 3).forEach((p, i) => p.call('selectDog', { dog: dogs[i] }));
+  assert.equal(latest(room.code, 'lobbyUpdated').status, 'lobby', 'three of five: waiting for the host');
+  assert.equal(a.call('voteMap', { mapId: 'frostpeak' }).success, false, 'no voting before the vote');
+  players.slice(3).forEach((p, i) => p.call('selectDog', { dog: dogs[i + 3] }));
+  const voting = latest(room.code, 'lobbyUpdated');
+  assert.equal(voting.status, 'voting', 'all five dogs picked: the vote starts by itself');
+  assert.equal(voting.voteMsLeft, 15000);
+  assert.deepEqual(lobbies().filter(l => l.code === room.code), [], 'no joining once the vote is on');
+  assert.equal(a.call('voteMap', { mapId: 'nowhere' }).success, false);
+  a.call('voteMap', { mapId: 'frostpeak' }); b.call('voteMap', { mapId: 'treat_road' });
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').votes, { [a.id]: 'frostpeak', [b.id]: 'treat_road' });
+  b.call('voteMap', { mapId: 'frostpeak' });                         // changing your vote is fine
+  c.call('voteMap', { mapId: 'modbury_heights' });
+  players[3].call('voteMap', { mapId: 'wendover' });
+  assert.equal(latest(room.code, 'raceStarted'), undefined);
+  players[4].call('voteMap', { mapId: 'frostpeak' });                // everyone has voted (3 Frostpeak)...
+  assert.equal(latest(room.code, 'raceStarted'), undefined, '...but it waits for the countdown');
+  context.mock.timers.tick(14999);
+  assert.equal(latest(room.code, 'raceStarted'), undefined);
+  context.mock.timers.tick(1);
+  assert.equal(latest(room.code, 'raceStarted').mapId, 'frostpeak', 'most votes wins');
+  context.mock.timers.tick(20000);
+  assert.equal(server.events.filter(e => e.room === room.code && e.event === 'raceStarted').length, 1, 'only started once');
+  for (const p of players) p.call('leaveGame');
+});
+
+test('map vote: the countdown starts the race; ties and no votes are settled at random', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  context.mock.method(Math, 'random', () => 0.99);
+  const run = (votes) => {
+    const a = client(), b = client();
+    const room = a.call('hostGame', { name: 'A' }).room;
+    b.call('joinGame', { roomCode: room.code, name: 'B' });
+    a.call('selectDog', { dog: 'gsp' }); b.call('selectDog', { dog: 'ralph' });
+    a.call('skipToMapVote');
+    votes.forEach((mapId, i) => mapId && [a, b][i].call('voteMap', { mapId }));
+    context.mock.timers.tick(14999);
+    assert.equal(latest(room.code, 'raceStarted'), undefined, 'not before 15 s');
+    context.mock.timers.tick(1);
+    const mapId = latest(room.code, 'raceStarted')?.mapId;
+    a.call('leaveGame'); b.call('leaveGame');
+    return mapId;
+  };
+  assert.equal(run(['treat_road', null]), 'treat_road', 'one vote is enough when time runs out');
+  assert.equal(run([null, null]), Object.keys(MAPS).at(-1), 'no votes: a random map');
+  // 50/50: a random pick between the two tied maps, never a third
+  let roll = 0;
+  context.mock.method(Math, 'random', () => roll);
+  const tie = () => run(['wendover', 'frostpeak']);
+  roll = 0; const low = tie();
+  roll = 0.99; const high = tie();
+  assert.deepEqual([low, high].sort(), ['frostpeak', 'wendover'], 'either tied map can win');
+});
+
+test('Next: the host can move everyone to the map vote; dogless players get a free dog', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const alone = client();
+  const soloRoom = alone.call('hostGame', { name: 'Alone' }).room;
+  alone.call('selectDog', { dog: 'gsp' });
+  assert.equal(latest(soloRoom.code, 'lobbyUpdated').status, 'lobby', 'a host picking a dog alone stays on character select');
+  alone.call('leaveGame');
+  const host = client(), guest = client(), late = client();
+  const room = host.call('hostGame', { name: 'Host' }).room;
+  guest.call('joinGame', { roomCode: room.code, name: 'Guest' }); late.call('joinGame', { roomCode: room.code, name: 'Late' });
+  host.call('selectDog', { dog: 'gsp' });
+  assert.equal(guest.call('skipToMapVote').success, false, 'host only');
+  assert.equal(host.call('skipToMapVote').success, true);
+  const update = latest(room.code, 'lobbyUpdated');
+  assert.equal(update.status, 'voting');
+  const dogs = update.players.map(p => p.dog);
+  assert.ok(dogs.every(Boolean), 'everyone has a dog');
+  assert.equal(new Set(dogs).size, 3, 'no doubles');
+  assert.equal(dogs[0], 'gsp', 'picked dogs are kept');
+  for (const p of [host, guest, late]) p.call('leaveGame');
 });

@@ -87,8 +87,15 @@ function bendiness(path, s) {           // heading change across 30 m of road, r
 
 /** For each target fraction, the straightest clear spot within `window` (share of the lap) of it,
  *  keeping MIN_GAP from spots already taken (taken = s values, extended in place). */
-function pickSpots(path, fractions, taken, window = 0.08) {
-  return fractions.map(f => {
+function pickSpots(path, fractions, taken, window = 0.08, even = false) {
+  return fractions.map(f => (even ? pickNear(path, f, taken, window / 2) : null) ?? pickNear(path, f, taken, window) ?? (() => {
+    throw new Error(`no clear pickup spot near ${(f * 100).toFixed(0)} % of the lap`);
+  })());
+}
+
+// Stay close to the target where possible (keeps pickups evenly spread), else look further
+function pickNear(path, f, taken, window) {
+  {
     const target = path.length * f;
     let best = null, bestScore = Infinity;
     for (let d = -window * path.length; d <= window * path.length; d += 5) {
@@ -98,10 +105,9 @@ function pickSpots(path, fractions, taken, window = 0.08) {
       const score = bendiness(path, s) + bendiness(path, s - 30) + 0.5 * bendiness(path, s + 30) + Math.abs(d) / path.length;
       if (score < bestScore) { bestScore = score; best = s; }
     }
-    if (best === null) throw new Error(`no clear pickup spot near ${(f * 100).toFixed(0)} % of the lap`);
-    taken.push(best);
+    if (best !== null) taken.push(best);
     return best;
-  });
+  }
 }
 
 // Treat Road keeps the rows it has always had (the IDs are in use); every other map is picked.
@@ -121,8 +127,12 @@ const PLAN = {
   //                 box-row targets (3 boxes across)           single-bone targets
   treat_road:      { rows: null,                                bones: [0.08, 0.255, 0.52, 0.71] },
   wendover:        { rows: [0.19, 0.60, 0.72],                  bones: [0.05, 0.31, 0.45, 0.88] },
-  frostpeak:       { rows: [0.08, 0.27, 0.49, 0.64, 0.86],      bones: [0.17, 0.39, 0.56, 0.76, 0.95] },
-  modbury_heights: { rows: [0.06, 0.33, 0.52, 0.66, 0.93],      bones: [0.14, 0.24, 0.43, 0.61, 0.76, 0.87] },
+  // the two long courses get more, so there is always something coming up
+  // (even: stay near each target where the road allows, so they are spread along the lap)
+  frostpeak:       { rows: [0.06, 0.20, 0.34, 0.49, 0.62, 0.76, 0.90],
+                     bones: [0.13, 0.27, 0.41, 0.55, 0.69, 0.83, 0.96], even: true },
+  modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91],
+                     bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.97], even: true },
 };
 
 /** { mapId: [s, ...] } for box rows and for bones */
@@ -139,8 +149,8 @@ for (const [mapId, plan] of Object.entries(PLAN)) {
       return s % path.length;
     });
   } else {
-    BOX_ROW_S[mapId] = pickSpots(path, plan.rows, taken);
-    BONE_S[mapId] = pickSpots(path, plan.bones, taken);
+    BOX_ROW_S[mapId] = pickSpots(path, plan.rows, taken, 0.08, plan.even);
+    BONE_S[mapId] = pickSpots(path, plan.bones, taken, 0.08, plan.even);
   }
 }
 

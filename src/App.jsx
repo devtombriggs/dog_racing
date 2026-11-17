@@ -434,7 +434,6 @@ function App() {
   const surfaceDisplayRef = useRef(null);
 
   const [screen, setScreen] = useState('menu');
-  const [selectedMap, setSelectedMap] = useState(DEFAULT_MAP);
   const [room, setRoom] = useState(null);
 
   const [playerName, setPlayerName] = useState('');
@@ -464,6 +463,16 @@ function App() {
   const [standings, setStandings] = useState([]);
   // The item this player is holding from a Treat Box ('ball' | 'toy' | 'bone' | null)
   const [heldItem, setHeldItem] = useState(null);
+  // Map vote countdown: when it ends (performance clock), and a tick to redraw the seconds
+  const voteDeadlineRef = useRef(0);
+  const [voteSecondsLeft, setVoteSecondsLeft] = useState(15);
+  useEffect(() => {
+    if (screen !== 'mapVote') return undefined;
+    const tick = () => setVoteSecondsLeft(Math.max(0, Math.ceil((voteDeadlineRef.current - performance.now()) / 1000)));
+    tick();
+    const timer = setInterval(tick, 200);
+    return () => clearInterval(timer);
+  }, [screen]);
 
   // ---------------------------------
   // SOCKET CONNECTION
@@ -491,6 +500,11 @@ function App() {
     function handleLobbyUpdated(updatedRoom) {
       roomRef.current = updatedRoom;
       setRoom(updatedRoom);
+      // Everyone has a dog (or the host pressed Next): on to the map vote
+      if (updatedRoom.status === 'voting') {
+        if (updatedRoom.voteMsLeft != null) voteDeadlineRef.current = performance.now() + updatedRoom.voteMsLeft;
+        setScreen(current => (current === 'selection' ? 'mapVote' : current));
+      }
     }
 
     function handleRaceStarted(data) {
@@ -648,7 +662,7 @@ function App() {
 
     socketRef.current.emit(
       'hostGame',
-      { mapId: selectedMap, name: playerName },
+      { name: playerName },
       (response) => {
         if (!response?.success) {
           setError(
@@ -680,7 +694,7 @@ function App() {
 
     socketRef.current.emit(
       'hostGame',
-      { mapId: selectedMap, name: playerName, singlePlayer: true },
+      { name: playerName, singlePlayer: true },
       (response) => {
         if (!response?.success) {
           singlePlayerRef.current = false;
@@ -739,13 +753,6 @@ function App() {
   // MAP AND DOG SELECTION
   // ---------------------------------
 
-  function selectMap(mapId) {
-    setError('');
-    socketRef.current?.emit('selectMap', { mapId }, (response) => {
-      if (!response?.success) setError(response?.error || 'Failed to select map');
-    });
-  }
-
   function selectDog(dogId) {
     setError('');
     setHoveredDog(null);
@@ -769,37 +776,20 @@ function App() {
           return;
         }
 
-        // Normal multiplayer lobby
-        if (!singlePlayerRef.current) {
-          setScreen('lobby');
-          return;
-        }
+        // Multiplayer: stay on character select (the dog can still be changed) until
+        // everyone has picked or the host presses Next; then the map vote takes over
+        if (!singlePlayerRef.current) return;
 
-        // Single player: automatically ready up
+        // Single player: ready up, then choose the map
         socket.emit(
           'setReady',
           { ready: true },
           (readyResponse) => {
             if (!readyResponse?.success) {
-              setError(
-                readyResponse?.error ||
-                'Failed to ready up'
-              );
+              setError(readyResponse?.error || 'Failed to ready up');
               return;
             }
-
-            // Automatically start the race
-            socket.emit(
-              'startRace',
-              (startResponse) => {
-                if (!startResponse?.success) {
-                  setError(
-                    startResponse?.error ||
-                    'Failed to start race'
-                  );
-                }
-              }
-            );
+            setScreen('mapSelect');
           }
         );
       }
@@ -819,44 +809,35 @@ function App() {
     }
   }
 
-  // Hand the dog back (so someone else can take it) and choose again
-  function changeDog() {
+  // ---------------------------------
+  // MAP SELECT / VOTE
+  // ---------------------------------
+
+  // Host only: go to the map vote now (anyone without a dog is given one)
+  function skipToMapVote() {
     setError('');
-
-    socketRef.current.emit(
-      'changeDog',
-      (response) => {
-        if (!response?.success) {
-          setError(
-            response?.error ||
-            'Failed to change dog'
-          );
-          return;
-        }
-
-        setScreen('selection');
-      }
-    );
+    socketRef.current?.emit('skipToMapVote', (response) => {
+      if (!response?.success) setError(response?.error || 'Could not move on to the map vote');
+    });
   }
 
-  // ---------------------------------
-  // START RACE
-  // ---------------------------------
-
-  function startRace() {
+  function voteMap(mapId) {
     setError('');
+    socketRef.current?.emit('voteMap', { mapId }, (response) => {
+      if (!response?.success) setError(response?.error || 'Vote not counted');
+    });
+  }
 
-    socketRef.current.emit(
-      'startRace',
-      (response) => {
-        if (!response?.success) {
-          setError(
-            response?.error ||
-            'Failed to start race'
-          );
-        }
-      }
-    );
+  // Single player: clicking a map starts the race on it
+  function startSoloRace(mapId) {
+    setError('');
+    const socket = socketRef.current;
+    socket?.emit('selectMap', { mapId }, (response) => {
+      if (!response?.success) { setError(response?.error || 'Failed to select map'); return; }
+      socket.emit('startRace', (startResponse) => {
+        if (!startResponse?.success) setError(startResponse?.error || 'Failed to start race');
+      });
+    });
   }
 
   // ---------------------------------
@@ -2739,16 +2720,6 @@ function App() {
             autoComplete="nickname"
             style={{ display: 'block', width: '100%', padding: 12, marginTop: 8, marginBottom: 20, fontSize: 16 }}
           />
-          <label htmlFor="menu-map">Choose map</label>
-          <select
-            id="menu-map"
-            value={selectedMap}
-            onChange={event => setSelectedMap(event.target.value)}
-            style={{ display: 'block', width: '100%', padding: 12, marginTop: 8, fontSize: 16 }}
-          >
-            {Object.entries(MAPS).map(([id, map]) => <option key={id} value={id}>{map.name}</option>)}
-          </select>
-          <p>{MAPS[selectedMap].description}</p>
 
           <p>
             Server:{' '}
@@ -2820,7 +2791,7 @@ function App() {
               <div key={lobby.code} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: 16, marginBottom: 12, background: '#34523b', borderRadius: 8, textAlign: 'left' }}>
                 <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                   <strong>{lobby.hostName}’s lobby</strong>
-                  <div style={{ marginTop: 6 }}>{MAPS[lobby.mapId]?.name ?? lobby.mapId}</div>
+                  <div style={{ marginTop: 6 }}>Picking dogs · map vote next</div>
                   <div style={{ marginTop: 6 }}>{lobby.playerCount}/{lobby.maxPlayers} players{full ? ' · Full' : ''}</div>
                 </div>
                 <button
@@ -2862,6 +2833,9 @@ function App() {
   // ---------------------------------
 
   if (screen === 'selection') {
+    const myDog = room?.players.find(player => player.id === socketId)?.dog ?? null;
+    const multiplayer = !room?.singlePlayer;
+    const waitingFor = room?.players.filter(player => !player.dog).length ?? 0;
     return (
       <main className="character-select">
         <section className="character-select__panel" aria-labelledby="character-select-title">
@@ -2876,8 +2850,8 @@ function App() {
               </p>
             </div>
             <div className="character-select__course">
-              <span>Racing at</span>
-              <strong>{MAPS[room?.mapId ?? DEFAULT_MAP].name}</strong>
+              <span>Next</span>
+              <strong>Map {room?.singlePlayer ? 'select' : 'vote'}</strong>
             </div>
           </header>
 
@@ -2911,7 +2885,9 @@ function App() {
                 <img src={dog.portrait} alt="" width="1280" height="1280" draggable="false" />
                 {takenBy
                   ? <span className="character-card__taken" style={{ borderColor: playerColor(takenBy), color: playerColor(takenBy) }} aria-hidden="true">Taken · {takenBy.name}</span>
-                  : <span className="character-card__action" aria-hidden="true">Select ↗</span>}
+                  : myDog === id
+                    ? <span className="character-card__action character-card__action--mine" aria-hidden="true">Your pick ✓</span>
+                    : <span className="character-card__action" aria-hidden="true">Select ↗</span>}
                 {looking.length > 0 && (
                   <span className="character-card__cursors" aria-hidden="true">
                     {looking.map(player => (
@@ -2943,7 +2919,16 @@ function App() {
 
           <footer className="character-select__footer">
             <button className="character-select__back" onClick={leaveGame}>Leave Game</button>
-            <p>{connected ? 'Select a portrait to continue' : 'Disconnected. Reconnecting to the server…'}</p>
+            <p>
+              {!connected ? 'Disconnected. Reconnecting to the server…'
+                : !multiplayer || !myDog ? 'Select a portrait to continue'
+                  : room?.hostId === socketId
+                    ? `Press Next when everyone is in${waitingFor ? ` (${waitingFor} still picking: they will get a free dog)` : ''}`
+                    : 'Waiting for the host to start the map vote'}
+            </p>
+            {multiplayer && room?.hostId === socketId && (
+              <button className="character-select__next" onClick={skipToMapVote} disabled={!connected}>Next: Map Vote →</button>
+            )}
           </footer>
           {error && <p className="character-select__error" role="alert">{error}</p>}
         </section>
@@ -2952,122 +2937,77 @@ function App() {
   }
 
   // ---------------------------------
-  // MULTIPLAYER LOBBY
+  // MAP SELECT (single player) / MAP VOTE (multiplayer)
   // ---------------------------------
 
-  if (screen === 'lobby') {
-    const myId = socketId;
-
-    const myPlayer =
-      room?.players.find(
-        (p) => p.id === myId
-      );
-
-    const isHost =
-      room?.hostId === myId;
-
-    const stillChoosing =
-      room?.players.filter((player) => !player.dog).length ?? 0;
-
+  if (screen === 'mapSelect' || screen === 'mapVote') {
+    const voting = screen === 'mapVote';
+    const votes = room?.votes ?? {};
+    const myVote = votes[socketId];
+    const voteCount = Object.keys(votes).length;
+    const secondsLeft = voteSecondsLeft;
     return (
-      <div style={pageStyle}>
-        <div style={{ ...panelStyle, maxHeight: '90dvh', overflowY: 'auto' }}>
-          <h2>Game Lobby</h2>
-
-          <p>Hosted by {room?.players.find(player => player.id === room.hostId)?.name}</p>
-
-          <label htmlFor="lobby-map">Map {isHost ? '' : '(chosen by host)'}</label>
-          <select
-            id="lobby-map"
-            value={room?.mapId ?? DEFAULT_MAP}
-            disabled={!isHost}
-            onChange={event => selectMap(event.target.value)}
-            style={{ display: 'block', width: '100%', padding: 12, marginTop: 8, fontSize: 16 }}
-          >
-            {Object.entries(MAPS).map(([id, map]) => <option key={id} value={id}>{map.name}</option>)}
-          </select>
-          <p>{MAPS[room?.mapId ?? DEFAULT_MAP].description}</p>
-          <h3>Players</h3>
-
-          {room?.players.map(
-            (player) => (
-              <div
-                key={player.id}
-                style={{
-                  padding: 12,
-                  marginBottom: 8,
-                  background: '#34523b',
-                  borderRadius: 8
-                }}
-              >
-                <strong>
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      display: 'inline-block',
-                      width: 10,
-                      height: 10,
-                      marginRight: 8,
-                      borderRadius: '50%',
-                      background: playerColor(player)
-                    }}
-                  />
-                  {player.name}
-                  {player.id ===
-                  room.hostId
-                    ? ' (Host)'
-                    : ''}
-                </strong>
-
-                <div>
-                  {DOGS[
-                    player.dog
-                  ]?.name ||
-                    'Choosing a dog…'}
-                </div>
+      <main className="character-select map-select">
+        <section className="character-select__panel" aria-labelledby="map-select-title">
+          <header className="character-select__header">
+            <div>
+              <p className="character-select__eyebrow">Dog Racing / {voting ? 'Map Vote' : 'Map Select'}</p>
+              <h1 id="map-select-title">{voting ? 'Vote for a Map' : 'Choose a Map'}</h1>
+              <p className="character-select__hint">
+                {voting
+                  ? `${voteCount} of ${room?.players.length ?? 0} voted. Most votes wins; a tie is picked at random.`
+                  : 'Click a map to start the race.'}
+              </p>
+            </div>
+            {voting && (
+              <div className="map-select__timer" role="timer" aria-live="polite">
+                <span>Starting in</span>
+                <strong>{secondsLeft}s</strong>
               </div>
-            )
-          )}
+            )}
+          </header>
 
-          <p>
-            {stillChoosing === 0
-              ? isHost
-                ? 'Everyone has picked. Start when you are ready.'
-                : 'Everyone has picked. Waiting for the host to start.'
-              : `Waiting for ${stillChoosing} ${stillChoosing === 1 ? 'player' : 'players'} to choose a dog.`}
-          </p>
+          <div className="map-select__grid" role="group" aria-label={voting ? 'Vote for a map' : 'Choose a map'}>
+            {Object.entries(MAPS).map(([id, map]) => {
+              const voters = (room?.players ?? []).filter(player => votes[player.id] === id);
+              return (
+                <button
+                  key={id}
+                  className={`map-card${myVote === id ? ' map-card--mine' : ''}`}
+                  disabled={!connected}
+                  onClick={() => (voting ? voteMap(id) : startSoloRace(id))}
+                  aria-label={`${map.name}. ${map.description}.${voting ? ` ${voters.length} ${voters.length === 1 ? 'vote' : 'votes'}.` : ''}`}
+                >
+                  <img src={`/maps/${id}.jpg`} alt="" width="640" height="360" draggable="false" />
+                  {voting && voters.length > 0 && (
+                    <span className="map-card__voters" aria-hidden="true">
+                      {voters.map(player => (
+                        <span key={player.id} style={{ background: playerColor(player) }}>
+                          {player.id === socketId ? 'You' : player.name}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                  <span className="map-card__caption">
+                    <strong>{map.name}</strong>
+                    <span>{map.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-          <button
-            style={buttonStyle}
-            onClick={changeDog}
-          >
-            {myPlayer?.dog ? 'Change Dog' : 'Choose Dog'}
-          </button>
-
-          {isHost && (
-            <button
-              style={{ ...buttonStyle, opacity: stillChoosing ? 0.55 : 1, cursor: stillChoosing ? 'default' : 'pointer' }}
-              disabled={stillChoosing > 0}
-              onClick={startRace}
-            >
-              Start Race
-            </button>
-          )}
-
-          <button
-            style={buttonStyle}
-            onClick={leaveGame}
-          >
-            Leave Game
-          </button>
-
-          {error && (
-            <p style={{ color: 'salmon' }}>
-              {error}
+          <footer className="character-select__footer">
+            <button className="character-select__back" onClick={leaveGame}>Leave Game</button>
+            <p>
+              {!connected ? 'Disconnected. Reconnecting to the server…'
+                : !voting ? 'Pick where to race'
+                  : myVote ? `You voted for ${MAPS[myVote].name}. Click another map to change your vote.` : 'Click a map to vote'}
             </p>
-          )}
-        </div>
-      </div>
+          </footer>
+          {error && <p className="character-select__error" role="alert">{error}</p>}
+        </section>
+      </main>
     );
   }
 
