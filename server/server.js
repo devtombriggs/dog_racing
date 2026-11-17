@@ -5,6 +5,8 @@ import { env } from 'node:process';
 import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, BALL, TOY, HIT } from '../shared/items.js';
+import { racingLineAt } from '../shared/pickupSpots.js';
+import { WENDOVER, entersBurrow, woodlandDistanceAt, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 
 const PORT = Number(env.PORT || 3001);
 
@@ -23,6 +25,41 @@ const LOBBY_BROWSER = 'lobby-browser';
 const rooms = new Map();
 const playerRooms = new Map();
 const proceduralRaceStates = new WeakMap();
+const woodlandRaceStates = new WeakMap();
+const woodlandCheckpointDistances = MAPS.wendover.checkpoints.map(cp => woodlandDistanceAt(cp.x, cp.z));
+
+function updateWoodlandRace(room, player, data) {
+  const state = woodlandRaceStates.get(player);
+  if ((data.respawnRevision ?? 0) !== state.revision) return false;
+  if (state.tunnel) {
+    const { tunnel, startedAt } = state.tunnel;
+    if (Date.now() - startedAt < tunnel.duration * 1000) return false;
+    player.position = [...tunnel.exit]; player.rotation = tunnel.exitYaw; player.animation = 'Sprint';
+    // Only checkpoints along this authorised shortcut are credited. No lap or finish is skipped.
+    while (player.checkpoint < woodlandCheckpointDistances.length
+      && woodlandCheckpointDistances[player.checkpoint] < tunnel.exitS) player.checkpoint++;
+    state.tunnel = null; state.revision++;
+    broadcastProgress(room, player);
+    io.to(room.code).emit('playerBurrowExited', {
+      playerId: player.id, position: player.position, rotation: player.rotation,
+      respawnRevision: state.revision, boostSeconds: tunnel.boostSeconds, speedMultiplier: tunnel.speedMultiplier
+    });
+    return false;
+  }
+  if (player.dog === 'ralph') {
+    for (const tunnel of WENDOVER.tunnels) {
+      const key = `${player.lap}:${tunnel.id}`;
+      const required = woodlandCheckpointDistances.filter(s => s < tunnel.entryS).length;
+      if (state.used.has(key) || player.checkpoint !== required || !entersBurrow(player.position,data.position,tunnel)) continue;
+      state.used.add(key); state.tunnel = { tunnel, startedAt: Date.now() };
+      player.position = [...tunnel.entry]; player.rotation = tunnel.entryYaw; player.animation = 'Run';
+      io.to(room.code).emit('playerBurrowEntered', { playerId: player.id, tunnelId: tunnel.id, duration: tunnel.duration });
+      return false;
+    }
+  }
+  player.position = [...data.position]; player.rotation = data.rotation;
+  return true;
+}
 
 // Recovery is decided by the server; clients only animate the fall. A revision
 // prevents movement packets sent before a respawn from moving the dog back off-road.
@@ -241,6 +278,7 @@ function startRaceIn(room) {
     player.checkpoint = 0;
     player.finished = false;
     player.finishTime = null;
+    if (room.mapId === 'wendover') woodlandRaceStates.set(player, { revision: 0, tunnel: null, used: new Set() });
     if (MAPS[room.mapId].procedural) {
       proceduralRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
     }
@@ -262,6 +300,55 @@ function startRaceIn(room) {
 
   console.log(`Loading race ${room.code}: ${players.length} player(s) on ${room.mapId}`);
   return { success: true };
+}
+
+// ---------------------------------
+// RESCUE: back on the track after 5 s lost (off the track, or running the wrong way)
+// ---------------------------------
+
+const RESCUE_PENALTY_SECONDS = 1;
+
+// The last checkpoint passed, on the racing line, facing forwards. Before the first checkpoint
+// of the race that is the dog's own grid slot; on later laps, the finish line.
+function rescuePoint(room, player) {
+  const map = MAPS[room.mapId];
+  let x, z;
+  if (player.checkpoint > 0) {
+    const cp = map.checkpoints[player.checkpoint - 1];
+    x = cp.x; z = cp.z;
+  } else if (player.lap > 1) {
+    [x, , z] = map.startFinish.position;
+  } else {
+    const slot = Math.max(0, [...room.players.keys()].indexOf(player.id));
+    const start = map.startPositions[slot] ?? map.startPositions[0];
+    return { position: [...start.position], rotation: start.rotationY };
+  }
+  const line = racingLineAt(room.mapId, x, z);
+  return line
+    ? { position: [line.x, line.y, line.z], rotation: line.rotationY }
+    : { position: [x, player.position[1], z], rotation: player.rotation };
+}
+
+function rescuePlayer(room, player) {
+  const state = room.mapId === 'wendover' ? woodlandRaceStates.get(player)
+    : MAPS[room.mapId].procedural ? proceduralRaceStates.get(player) : null;
+  if (state && (state.launch || state.fall || state.tunnel)) return false;      // already being handled
+  const { position, rotation } = rescuePoint(room, player);
+  if (room.mapId === 'wendover') {
+    const water = woodlandWaterAt(position[0], position[2]);
+    if (water) position[1] = woodlandDogY(water, player.dog);
+  }
+  player.position = position;
+  player.rotation = rotation;
+  player.animation = 'Idle';
+  if (state) state.revision += 1;                               // older packets from before the move are ignored
+  io.to(room.code).emit('playerRespawned', {
+    playerId: player.id, position, rotation,
+    respawnRevision: state?.revision ?? 0,
+    penaltySeconds: RESCUE_PENALTY_SECONDS,
+    rescued: true
+  });
+  return true;
 }
 
 function generateRoomCode() {
@@ -1006,12 +1093,14 @@ io.on('connection', (socket) => {
     let onRoad = true;
     if (MAPS[room.mapId].procedural) {
       onRoad = updateProceduralRace(room, player, data);
+    } else if (room.mapId === 'wendover') {
+      onRoad = updateWoodlandRace(room, player, data);
     } else {
       player.position = [...position];
       player.rotation = rotation;
     }
 
-    checkItemHits(room, player, previousPosition);
+    if (room.mapId !== 'wendover' || onRoad) checkItemHits(room, player, previousPosition);
 
     if (onRoad) {
       collectTreatBoxes(room, player, previousPosition);
@@ -1033,12 +1122,22 @@ io.on('connection', (socket) => {
 
   // LEAVE GAME
 
+  // Lost for 5 s (the game counts): put the dog back at its last checkpoint
+  socket.on('requestRescue', (callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    const player = room?.players.get(socket.id);
+    if (!room || room.status !== 'racing' || !player || player.finished) {
+      return callback?.({ success: false });
+    }
+    callback?.({ success: rescuePlayer(room, player) });
+  });
+
   // Fire / drop / eat whatever the dog is holding.
   socket.on('useItem', () => {
     const room = rooms.get(playerRooms.get(socket.id));
     if (!room || room.status !== 'racing') return;
     const player = room.players.get(socket.id);
-    if (!player || player.finished || !player.item) return;
+    if (!player || player.finished || !player.item || woodlandRaceStates.get(player)?.tunnel) return;
     useItem(room, player);
   });
 

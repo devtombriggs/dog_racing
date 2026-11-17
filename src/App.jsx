@@ -7,9 +7,10 @@ import { MAPS, DEFAULT_MAP, sampleGroundHeight, PROCEDURAL_TRACKS } from '../sha
 import { prepareHeadLook, applyHeadLook } from './headLook.js';
 import { createTreatBoxes } from './pickups/treatBoxes.js';
 import { createGoldenBones } from './pickups/goldenBones.js';
-import { GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
+import { GOLDEN_BONE_SPOTS, racingLineAt } from '../shared/pickupSpots.js';
 import { createItems } from './pickups/items.js';
 import { ITEM_NAMES } from '../shared/items.js';
+import { WENDOVER, woodlandWaterAt, woodlandSwimMultiplier, woodlandDogY } from '../shared/wendoverData.js';
 
 // ---------------------------------
 // DOG CONFIGURATION
@@ -18,6 +19,69 @@ import { ITEM_NAMES } from '../shared/items.js';
 function ordinal(n) {
   const teen = n % 100 >= 11 && n % 100 <= 13;
   return n + (teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th'));
+}
+
+// Played once when the player's pick is confirmed on character select.
+// Add a dog here when its sound is ready, e.g. greyhound: '/audio/meela_selection.wav'
+const SELECTION_SOUNDS = {
+  gsp: '/audio/pippa_selection.wav',
+};
+const selectionAudio = {};
+
+function playSelectionSound(dogId) {
+  const src = SELECTION_SOUNDS[dogId];
+  if (!src) return;
+  try {
+    selectionAudio[dogId] ??= new Audio(src);
+    const audio = selectionAudio[dogId];
+    audio.currentTime = 0;
+    audio.play().catch(() => { /* autoplay blocked or file missing: stay silent */ });
+  } catch { /* no audio support */ }
+}
+
+// Race audio per map. The countdown clip starts when "3" shows, from COUNTDOWN_OFFSET seconds
+// into the file, so its spoken "3" lands on the 3 on screen (2, 1 and GO follow a second apart).
+// Nudge COUNTDOWN_OFFSET up if the voice is late, down if it is early.
+// Music starts on GO and loops until the player leaves the race.
+const COUNTDOWN_OFFSET = 1.0;
+const RACE_AUDIO = {
+  treat_road: { countdown: '/audio/countdown.mp3', music: '/audio/treat_road.mp3', musicVolume: 0.5 },
+};
+const raceAudio = { countdown: null, music: null };
+
+function stopRaceAudio() {
+  for (const key of ['countdown', 'music']) {
+    try { raceAudio[key]?.pause(); } catch { /* no audio support */ }
+    raceAudio[key] = null;
+  }
+}
+
+// Called while the race loads, so the countdown is ready the moment "3" shows
+function loadRaceAudio(mapId) {
+  stopRaceAudio();
+  const config = RACE_AUDIO[mapId];
+  if (!config) return;
+  try {
+    for (const key of ['countdown', 'music']) {
+      if (!config[key]) continue;
+      const audio = new Audio(config[key]);
+      audio.preload = 'auto';
+      if (key === 'music') {
+        audio.loop = true;
+        audio.volume = config.musicVolume ?? 0.5;
+      }
+      raceAudio[key] = audio;
+    }
+  } catch { /* no audio support */ }
+}
+
+function playRaceAudio(kind) {
+  const audio = raceAudio[kind];
+  if (!audio) return;
+  try {
+    audio.currentTime = kind === 'countdown' ? COUNTDOWN_OFFSET : 0;
+    audio.play().catch(() => { /* autoplay blocked or file missing: stay silent */ });
+  } catch { /* no audio support */ }
 }
 
 const DOGS = {
@@ -432,6 +496,7 @@ function App() {
   const speedDisplayRef = useRef(null);
   const timerDisplayRef = useRef(null);
   const surfaceDisplayRef = useRef(null);
+  const rescueDisplayRef = useRef(null);
 
   const [screen, setScreen] = useState('menu');
   const [room, setRoom] = useState(null);
@@ -464,6 +529,20 @@ function App() {
   // The item this player is holding from a Treat Box ('ball' | 'toy' | 'bone' | null)
   const [heldItem, setHeldItem] = useState(null);
   // Map vote countdown: when it ends (performance clock), and a tick to redraw the seconds
+  // Accessibility mode: the dog runs by itself, Up jumps and Down uses the item
+  const [accessibilityMode, setAccessibilityMode] = useState(() => {
+    try { return localStorage.getItem('dogRacing.accessibilityMode') === '1'; } catch { return false; }
+  });
+  const accessibilityRef = useRef(accessibilityMode);
+  useEffect(() => {
+    accessibilityRef.current = accessibilityMode;
+    try { localStorage.setItem('dogRacing.accessibilityMode', accessibilityMode ? '1' : '0'); } catch { /* storage blocked */ }
+  }, [accessibilityMode]);
+  // Countdown and music stop as soon as the player leaves the race screen
+  useEffect(() => {
+    if (screen !== 'race') stopRaceAudio();
+  }, [screen]);
+  useEffect(() => stopRaceAudio, []);
   const voteDeadlineRef = useRef(0);
   const [voteSecondsLeft, setVoteSecondsLeft] = useState(15);
   useEffect(() => {
@@ -509,6 +588,7 @@ function App() {
 
     function handleRaceStarted(data) {
       console.log('Race loading:', data);
+      loadRaceAudio(data.mapId ?? DEFAULT_MAP);
 
       raceGoRef.current = false;
       raceFinishedRef.current = false;
@@ -536,6 +616,7 @@ function App() {
 
     function handleRaceCountdown(data) {
       console.log('Countdown:', data.number);
+      if (data.number === 3) playRaceAudio('countdown');
       setRacePhase(String(data.number));
     }
 
@@ -544,6 +625,7 @@ function App() {
 
       raceStartRef.current = performance.now();
       raceGoRef.current = true;
+      playRaceAudio('music');
 
       setRacePhase('GO!');
     }
@@ -776,6 +858,8 @@ function App() {
           return;
         }
 
+        playSelectionSound(dogId);
+
         // Multiplayer: stay on character select (the dog can still be changed) until
         // everyone has picked or the host presses Next; then the map vote takes over
         if (!singlePlayerRef.current) return;
@@ -881,6 +965,11 @@ function App() {
     const map = MAPS[currentRoom.mapId ?? DEFAULT_MAP];
     const proceduralTrack = PROCEDURAL_TRACKS[currentRoom.mapId] ?? null;
     let proceduralWorld = null;
+    const woodland = currentRoom.mapId === 'wendover';
+    let woodlandWorld = null, tunnelRide = null, burrowBoostUntil = 0;
+    const burrowOverlay = document.createElement('div');
+    burrowOverlay.className = 'burrow-overlay'; burrowOverlay.hidden = true;
+    burrowOverlay.textContent = 'BURROW BOOST'; container.appendChild(burrowOverlay);
     let restoreEnvironment = null;
     let fall = null;
     let launchFlight = null;
@@ -972,6 +1061,7 @@ function App() {
     let heightmap = null;
 
     function isTrackSurface(position) {
+      if (woodland && woodlandWaterAt(position.x, position.z)) return true;
       if (proceduralTrack) return proceduralTrack.query(position.x, position.z).onTrack;
       // Fail open if the GLB has no identifiable track surface.
       if (trackMeshes.length === 0) return true;
@@ -988,6 +1078,8 @@ function App() {
     // dog, so inside a tunnel or on the bridge it finds the surface the dog
     // is on, not the roof above or the stream below.
     function groundHeightAt(position, fallback = 0) {
+      const pool = woodland && woodlandWaterAt(position.x, position.z);
+      if (pool) return woodlandDogY(pool, localPlayer.dog);
       if (proceduralTrack) {
         const ground = proceduralTrack.query(position.x, position.z);
         return ground.onTrack ? (ground.dogY ?? ground.y) : fallback;
@@ -1155,8 +1247,9 @@ function App() {
         trackLoaded = true;
         notifyRaceLoaded();
       }).catch(error => handleLoadError(map.name, error));
-    } else Promise.all([loader.loadAsync(map.model), heightmapRequest]).then(
-      ([gltf, heights]) => {
+    } else Promise.all([loader.loadAsync(map.model), heightmapRequest,
+      woodland ? import('./tracks/wendover/WendoverWorld.js') : Promise.resolve(null)]).then(
+      ([gltf, heights, woodlandModule]) => {
         if (!isMounted) return;
 
         heightmap = heights;
@@ -1204,6 +1297,7 @@ function App() {
                 })();
           }
         });
+        if (woodlandModule) woodlandWorld = woodlandModule.createWendoverWorld(scene, renderer, gltf.scene);
         console.log('Track collision geometry:', {
           trackMeshes: trackMeshes.map((mesh) => mesh.name),
           obstacleMeshes: obstacleMeshes.map((mesh) => mesh.name)
@@ -1237,6 +1331,9 @@ function App() {
     const items = createItems({ scene, renderer });
     let myItem = null;
     let stunUntil = 0, stunLength = 1;
+    // Lost dogs: seconds off the track / running the wrong way, and whether a rescue is on its way
+    const RESCUE_AFTER = 5;
+    let offTrackFor = 0, wrongWayFor = 0, rescuePending = false, lineCheckTimer = 0, wrongWayNow = false, lineS = null;
 
     const localPlayer =
       currentRoom.players.find(
@@ -1297,7 +1394,7 @@ function App() {
           dogConfig.scale
         );
 
-        if (currentRoom.mapId === 'modbury_heights') {
+        if (woodland || currentRoom.mapId === 'modbury_heights') {
           dog.traverse(object => { if (object.isMesh) object.castShadow = true; });
         }
         player.add(dog);
@@ -1445,7 +1542,7 @@ function App() {
             config.scale
           );
 
-          if (currentRoom.mapId === 'modbury_heights') {
+          if (woodland || currentRoom.mapId === 'modbury_heights') {
             dog.traverse(object => { if (object.isMesh) object.castShadow = true; });
           }
           group.add(dog);
@@ -1608,10 +1705,17 @@ function App() {
     }
 
     function handlePlayerRespawned(data) {
-      if (!proceduralTrack) return;
+      if (!proceduralTrack && !data.rescued) return;
       if (data.playerId === socket.id) {
+        offTrackFor = wrongWayFor = 0;
+        rescuePending = false;
+        wrongWayNow = false;
+        lineS = null;
+        if (rescueDisplayRef.current) rescueDisplayRef.current.hidden = true;
         fall = null;
         launchFlight = null;
+        tunnelRide = null; burrowBoostUntil = 0; burrowOverlay.hidden = true;
+        if (dogModel) dogModel.visible = true;
         launchBoostUntil = 0;
         goldenBones.cancelBoost();
         respawnRevision = data.respawnRevision;
@@ -1630,6 +1734,7 @@ function App() {
       } else {
         const remote = remotePlayers.get(data.playerId);
         if (!remote) return;
+        remote.group.visible = true;
         remote.group.position.fromArray(data.position);
         remote.targetPosition.copy(remote.group.position);
         remote.group.rotation.set(0, data.rotation, 0);
@@ -1707,6 +1812,33 @@ function App() {
       hazardRemoved: handleHazardRemoved, ballThrown: handleBallThrown, ballHit: handleBallHit, playerHit: handlePlayerHit,
     };
     for (const [event, handler] of Object.entries(itemEvents)) socket.on(event, handler);
+    function handleBurrowEntered(data) {
+      if (!woodland) return;
+      if (data.playerId === socket.id) {
+        const tunnel = WENDOVER.tunnels.find(t => t.id === data.tunnelId);
+        if (!tunnel) return;
+        tunnelRide = { tunnel, startedAt: performance.now() };
+        burrowOverlay.hidden = false;
+        currentSpeed = 0; knock.set(0,0,0); goldenBones.cancelBoost();
+        player.position.fromArray(tunnel.entry); player.rotation.y = tunnel.entryYaw;
+        jumpHeight = verticalVelocity = 0; isJumping = isLanding = false;
+        playAnimation('Run');
+      } else {
+        const remote = remotePlayers.get(data.playerId);
+        if (remote) remote.group.visible = false;
+      }
+    }
+    function handleBurrowExited(data) {
+      if (!woodland) return;
+      handlePlayerRespawned({ ...data, rescued: true, penaltySeconds: 0 });
+      if (data.playerId === socket.id) {
+        burrowBoostUntil = performance.now() + data.boostSeconds * 1000;
+        currentSpeed = sprintSpeed * data.speedMultiplier;
+        playAnimation('Sprint');
+      }
+    }
+    socket.on('playerBurrowEntered', handleBurrowEntered);
+    socket.on('playerBurrowExited', handleBurrowExited);
     socket.on('playerLaunched', handlePlayerLaunched);
     socket.on('playerLanded', handlePlayerLanded);
     socket.on('playerFell', handlePlayerFell);
@@ -1769,6 +1901,8 @@ function App() {
         !raceGoRef.current ||
         raceFinishedRef.current ||
         isJumping ||
+        tunnelRide ||
+        (woodland && woodlandWaterAt(player.position.x, player.position.z)?.swimming) ||
         !dogMixer
       ) {
         return;
@@ -1794,10 +1928,15 @@ function App() {
       if (!raceGoRef.current || raceFinishedRef.current) return;
 
       keys[event.code] = true;
-      if (event.code === 'Space' && !event.repeat) tryJump();
-      // Shift (or E) throws the ball, drops the chew toy or eats the golden bone
-      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight' || event.code === 'KeyE')
-        && !event.repeat && myItem) socket.emit('useItem');
+      const accessible = accessibilityRef.current;
+      const jumpKey = event.code === 'Space' ||
+        (accessible && (event.code === 'ArrowUp' || event.code === 'KeyW'));
+      // Shift (or E) throws the ball, drops the chew toy or eats the golden bone;
+      // in accessibility mode Down (or S) does too
+      const itemKey = event.code === 'ShiftLeft' || event.code === 'ShiftRight' || event.code === 'KeyE' ||
+        (accessible && (event.code === 'ArrowDown' || event.code === 'KeyS'));
+      if (jumpKey && !event.repeat) tryJump();
+      if (itemKey && !event.repeat && myItem) socket.emit('useItem');
     }
 
     function handleWheel(event) {
@@ -1888,6 +2027,8 @@ function App() {
         0.05
       );
       proceduralWorld?.update(performance.now() / 1000, player.position);
+      woodlandWorld?.update(performance.now() / 1000, player.position,
+        [player.position, ...[...remotePlayers.values()].filter(r => r.group.visible).map(r => r.group.position)]);
       treatBoxes.update(performance.now() / 1000);
       const itemAnchors = new Map([[socket.id, dogBones.head ?? player]]);
       remotePlayers.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
@@ -1903,7 +2044,7 @@ function App() {
         !raceFinishedRef.current;
 
       // Golden Bones: running through one is the whole pickup, no button needed
-      if (goldenBones.update(delta, player.position, canMove && !fall && !launchFlight) && currentSpeed > 0) {
+      if (goldenBones.update(delta, player.position, canMove && !fall && !launchFlight && !tunnelRide) && currentSpeed > 0) {
         currentSpeed += goldenBones.instantKick(sprintSpeed);
       }
 
@@ -1978,7 +2119,16 @@ function App() {
         camera.fov += (desiredFov - camera.fov) * (1 - Math.exp(-8 * delta));
         camera.updateProjectionMatrix();
       }
-      if (launchFlight) {
+      if (tunnelRide) {
+        const elapsed = (performance.now() - tunnelRide.startedAt) / 1000;
+        if (dogModel) dogModel.visible = elapsed < 0.12;
+        if (dogMixer) dogMixer.update(delta);
+        if (surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = 'RALPH’S BURROW BOOST';
+          surfaceDisplayRef.current.style.color = '#ffc478';
+        }
+        if (speedDisplayRef.current) speedDisplayRef.current.textContent = '»';
+      } else if (launchFlight) {
         const elapsed = (performance.now() - launchFlight.startedAt) / 1000;
         const point = proceduralTrack.launchPoint(elapsed, launchFlight.lateral);
         player.position.set(point.x, point.y, point.z);
@@ -2008,15 +2158,18 @@ function App() {
 
         // In the air the dog is off nothing: that is how the stream is cleared
         offTrack = !isJumping && !isTrackSurface(player.position);
-        const inWater = offTrack && isOverWater(player.position);
+        const woodlandSurface = woodland && woodlandWaterAt(player.position.x, player.position.z);
+        const inWater = !isJumping && (woodlandSurface?.inWater || (offTrack && isOverWater(player.position)));
         const coastalGround = coastalTrack?.query(player.position.x, player.position.z);
-        const terrainMultiplier = coastalGround
+        const terrainMultiplier = inWater && woodlandSurface
+          ? woodlandSwimMultiplier(stats.swimming)
+          : coastalGround
           ? coastalTrack.speedFactor(coastalGround, coastalStats)
           : inWater
           ? waterSpeed
           : offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
         // A climb takes a little off the top speed, a descent gives a little back
-        const hillMultiplier = coastalTrack ? 1 : THREE.MathUtils.clamp(
+        const hillMultiplier = coastalTrack || (inWater && woodlandSurface) ? 1 : THREE.MathUtils.clamp(
           1 - HANDLING.hillEffect * slope,
           0.8,
           1.08
@@ -2025,6 +2178,7 @@ function App() {
           sprintSpeed *
           terrainMultiplier *
           hillMultiplier *
+          (performance.now() < burrowBoostUntil ? 1.3 : 1) *
           (performance.now() < launchBoostUntil ? proceduralTrack.launch.exitSpeedMultiplier : 1) *
           (proceduralTrack && performance.now() < recoveryUntil ? proceduralTrack.rules.respawnSpeedMultiplier : 1) *
           goldenBones.speedMultiplier() *
@@ -2039,7 +2193,12 @@ function App() {
           surfaceDisplayRef.current.style.color = offTrack ? '#ffbc75' : '#9fe49b';
         }
 
-        if (keys.KeyW || keys.ArrowUp) {
+        // Accessibility mode runs the dog for the player; Up and Down are jump and item there
+        const autoRun = accessibilityRef.current;
+        const running = autoRun
+          ? raceGoRef.current && !raceFinishedRef.current
+          : keys.KeyW || keys.ArrowUp;
+        if (running) {
           currentSpeed +=
             effectiveAcceleration * delta;
 
@@ -2047,7 +2206,7 @@ function App() {
             currentSpeed,
             maxSpeed
           );
-        } else if (keys.KeyS || keys.ArrowDown) {
+        } else if (!autoRun && (keys.KeyS || keys.ArrowDown)) {
           currentSpeed -=
             braking * delta;
 
@@ -2205,6 +2364,7 @@ function App() {
         const push = new THREE.Vector3();
 
         remotePlayers.forEach((remote) => {
+          if (!remote.group.visible) return; // Dogs travelling underground cannot be bumped.
           const other = remote.group.position;
           const otherSize = remote.config.size ?? 1;
           const lift = player.position.y - other.y;
@@ -2285,7 +2445,13 @@ function App() {
 
         // Recheck at the new location, so the slowdown begins immediately.
         offTrack = !isJumping && !isTrackSurface(player.position);
-        const wading = offTrack && isOverWater(player.position);
+        const poolNow = woodland && woodlandWaterAt(player.position.x, player.position.z);
+        const swimming = Boolean(poolNow?.swimming) && !isJumping;
+        const wading = !isJumping && (poolNow?.inWater || (offTrack && isOverWater(player.position)));
+        if (poolNow?.inWater && !isJumping) {
+          currentSpeed = Math.min(currentSpeed, sprintSpeed * woodlandSwimMultiplier(stats.swimming)
+            * goldenBones.speedMultiplier() * (performance.now() < stunUntil ? 0.15 : 1));
+        }
         if (offTrack) {
           const offTrackLimit = sprintSpeed *
             (wading ? waterSpeed : OFF_TRACK_SPEED_MULTIPLIER);
@@ -2293,11 +2459,42 @@ function App() {
         }
         if (surfaceDisplayRef.current) {
           surfaceDisplayRef.current.textContent = wading
-            ? 'IN THE WATER — JUMP IT NEXT TIME'
+            ? poolNow ? swimming ? 'SWIMMING' : 'WADING' : 'IN THE WATER — JUMP IT NEXT TIME'
             : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
           surfaceDisplayRef.current.style.color = wading
             ? '#8fd0ff'
             : offTrack ? '#ffbc75' : '#9fe49b';
+        }
+
+        // ---------------------------------
+        // LOST? Off the track or running the wrong way for 5 s: back to the last checkpoint
+        // ---------------------------------
+
+        lineCheckTimer -= delta;
+        if (lineCheckTimer <= 0) {
+          lineCheckTimer = 0.1;
+          const line = racingLineAt(pickupMapId, player.position.x, player.position.z, lineS);
+          lineS = line?.s ?? null;
+          // which way the dog is actually moving (reversing counts), against the way the race goes
+          const moving = Math.abs(currentSpeed) > 2;   // reversing (up to 2.5 m/s) counts too
+          const along = Math.cos(travelYaw - (line?.rotationY ?? travelYaw)) * Math.sign(currentSpeed);
+          wrongWayNow = Boolean(line) && moving && along < -0.4;
+        }
+        offTrackFor = offTrack && !isJumping ? offTrackFor + delta : 0;
+        wrongWayFor = wrongWayNow ? wrongWayFor + delta : 0;
+        const lostFor = Math.max(offTrackFor, wrongWayFor);
+        if (lostFor >= RESCUE_AFTER && !rescuePending) {
+          rescuePending = true;
+          socket.emit('requestRescue', response => {
+            if (!response?.success) { rescuePending = false; offTrackFor = wrongWayFor = 0; }
+          });
+        }
+        if (rescueDisplayRef.current) {
+          const show = lostFor > 1.5 && !rescuePending;
+          rescueDisplayRef.current.hidden = !show;
+          if (show) {
+            rescueDisplayRef.current.textContent = `${wrongWayFor >= offTrackFor ? 'WRONG WAY' : 'OFF TRACK'} — back to your checkpoint in ${Math.ceil(RESCUE_AFTER - lostFor)}`;
+          }
         }
 
         // ---------------------------------
@@ -2385,7 +2582,9 @@ function App() {
           const holding = (name, margin) =>
             currentAnimation === name ? margin : 0;
 
-          if (!isMoving) {
+          if (swimming) {
+            playAnimation('Trot');
+          } else if (!isMoving) {
             playAnimation('Idle');
           } else if (
             pace <
@@ -2408,7 +2607,7 @@ function App() {
         }
 
         if (currentAction) {
-          currentAction.timeScale =
+          currentAction.timeScale = swimming ? (isMoving ? 1.1 : 0.6) :
             gaitTimeScale(
               currentAction,
               currentSpeed,
@@ -2428,12 +2627,21 @@ function App() {
 
           // Nose up the hills and down the far side (not while in the air)
           if (dogModel) {
-            dogModel.rotation.x = isJumping
+            dogModel.rotation.x = swimming ? -0.06 : isJumping
               ? 0
               : -Math.atan(slope);
           }
         }
 
+        if (woodland && surfaceDisplayRef.current) {
+          surfaceDisplayRef.current.textContent = swimming
+            ? localPlayer.dog === 'black_lab' ? 'POPPY’S WATER DASH' : 'SWIMMING'
+            : wading ? 'WADING'
+            : performance.now() < burrowBoostUntil ? 'BURROW EXIT BOOST!'
+            : goldenBones.isBoosting() ? 'GOLDEN BONE BOOST!'
+            : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';
+          surfaceDisplayRef.current.style.color = wading ? '#9de5df' : '#cbe4ae';
+        }
         if (proceduralTrack && surfaceDisplayRef.current) {
           surfaceDisplayRef.current.textContent = performance.now() < recoveryUntil
             ? 'RECOVERING — REDUCED SPEED'
@@ -2509,8 +2717,8 @@ function App() {
           if (
             remote.currentAction
           ) {
-            remote.currentAction.timeScale =
-              gaitTimeScale(
+            remote.currentAction.timeScale = woodland && woodlandWaterAt(remote.group.position.x, remote.group.position.z)?.swimming
+              ? (remote.speed > 0.1 ? 1.1 : 0.6) : gaitTimeScale(
                 remote.currentAction,
                 remote.speed,
                 remote.config
@@ -2610,12 +2818,16 @@ function App() {
       );
       socket.off('treatBoxChanged', handleTreatBoxChanged);
       for (const [event, handler] of Object.entries(itemEvents)) socket.off(event, handler);
+      socket.off('playerBurrowEntered', handleBurrowEntered);
+      socket.off('playerBurrowExited', handleBurrowExited);
       socket.off('playerLaunched', handlePlayerLaunched);
       socket.off('playerLanded', handlePlayerLanded);
       socket.off('playerFell', handlePlayerFell);
       socket.off('playerRespawned', handlePlayerRespawned);
       restoreEnvironment?.();
       proceduralWorld?.dispose();
+      woodlandWorld?.dispose();
+      burrowOverlay.remove();
       treatBoxes.dispose();
       items.dispose();
       goldenBones.dispose();
@@ -2919,6 +3131,17 @@ function App() {
 
           <footer className="character-select__footer">
             <button className="character-select__back" onClick={leaveGame}>Leave Game</button>
+            <label className="character-select__accessibility">
+              <input
+                type="checkbox"
+                checked={accessibilityMode}
+                onChange={(event) => setAccessibilityMode(event.target.checked)}
+              />
+              <span>
+                Accessibility mode
+                <small>Runs for you · ↑ jump · ↓ use item</small>
+              </span>
+            </label>
             <p>
               {!connected ? 'Disconnected. Reconnecting to the server…'
                 : !multiplayer || !myDog ? 'Select a portrait to continue'
@@ -3053,6 +3276,9 @@ function App() {
         </ol>
       )}
 
+      {/* Lost: off the track or the wrong way, counting down to the rescue */}
+      <div ref={rescueDisplayRef} className="race-rescue" role="status" hidden />
+
       {/* Race HUD */}
       <div style={hudStyle}>
         <div
@@ -3156,9 +3382,20 @@ function App() {
           ON TRACK
         </div>
         <div style={{ fontSize: 11, marginTop: 14, color: '#b4c9b5', lineHeight: 1.6 }}>
-          <div>W / ↑ accelerate · S / ↓ brake / reverse</div>
-          <div>A / D or ← / → steer</div>
-          <div>Space or scroll down to jump · Shift to use an item</div>
+          {accessibilityMode ? (
+            <>
+              <div>Accessibility mode: your dog runs by itself</div>
+              <div>A / D or ← / → steer</div>
+              <div>↑ to jump · ↓ to use an item</div>
+            </>
+          ) : (
+            <>
+              <div>W / ↑ accelerate · S / ↓ brake / reverse</div>
+              <div>A / D or ← / → steer</div>
+              <div>Space or scroll down to jump · Shift to use an item</div>
+            </>
+          )}
+          {room?.mapId === 'wendover' && <div>Amber burrows boost Ralph · Poppy swims fastest</div>}
           {room?.mapId === 'treat_road' && <div>Cyan pad launches automatically · falls return to checkpoints</div>}
           {room?.mapId === 'modbury_heights' && <div>Follow the trail · falls return you to a checkpoint</div>}
         </div>

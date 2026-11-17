@@ -36,7 +36,7 @@ export const DEFAULT_MAP = 'wendover';
 export const MAPS = {
   wendover: {
     name: 'Wendover Woods',
-    description: '1.47 km woodland circuit',
+    description: '1.47 km woodland adventure · Ralph’s burrows · Poppy’s swimming sections',
     model: '/models/wendover_woods.glb',
     startPositions: STARTING_GRID.map(position => ({ position, rotationY: START_ROTATION })),
     checkpoints: CHECKPOINTS,

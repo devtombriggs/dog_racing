@@ -5,6 +5,7 @@ import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 import { TREAT_BOXES, TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { forwardOf } from '../shared/items.js';
+import { racingLineAt } from '../shared/pickupSpots.js';
 
 // Exercise the real socket handlers in memory, without binding a network port.
 let server;
@@ -700,4 +701,110 @@ test('Next: the host can move everyone to the map vote; dogless players get a fr
   assert.equal(new Set(dogs).size, 3, 'no doubles');
   assert.equal(dogs[0], 'gsp', 'picked dogs are kept');
   for (const p of [host, guest, late]) p.call('leaveGame');
+});
+
+test('rescue: a lost dog goes back to its last checkpoint on the racing line, facing forwards', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host = client();
+  const room = host.call('hostGame', { mapId: 'wendover', singlePlayer: true }).room;
+  host.call('selectDog', { dog: 'gsp' }); host.call('startRace'); host.call('raceLoaded');
+  assert.equal(host.call('requestRescue').success, false, 'not before GO');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const map = MAPS.wendover, move = p => host.call('playerMove', { position: p, rotation: 0, animation: 'Run', respawnRevision: latest(room.code, 'playerRespawned')?.respawnRevision ?? 0 });
+
+  // before the first checkpoint: back to the grid slot
+  move([30, 0, 60]);
+  assert.equal(host.call('requestRescue').success, true);
+  let back = latest(room.code, 'playerRespawned');
+  assert.deepEqual(back.position, map.startPositions[0].position);
+  assert.equal(back.rotation, map.startPositions[0].rotationY);
+  assert.equal(back.rescued, true);
+
+  // after two checkpoints: back to the second, on the line, facing along the course
+  move([map.checkpoints[0].x, 0, map.checkpoints[0].z]); move([map.checkpoints[1].x, 0, map.checkpoints[1].z]);
+  move([map.checkpoints[1].x + 40, 0, map.checkpoints[1].z + 40]);   // wandered off into the woods
+  host.call('requestRescue');
+  back = latest(room.code, 'playerRespawned');
+  const cp = map.checkpoints[1], line = racingLineAt('wendover', cp.x, cp.z);
+  assert.ok(Math.hypot(back.position[0] - cp.x, back.position[2] - cp.z) < 6, 'at the checkpoint');
+  assert.equal(back.rotation, line.rotationY, 'facing the way the race goes');
+  const ahead = racingLineAt('wendover', back.position[0] + Math.sin(back.rotation) * 20, back.position[2] + Math.cos(back.rotation) * 20);
+  assert.ok(ahead.s > line.s, '20 m in that direction is further round the lap');
+  host.call('leaveGame');
+});
+
+test('rescue on a generated track bumps the move revision so stale packets are ignored', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host = client(), T = TREAT_ROAD;
+  const room = host.call('hostGame', { mapId: 'treat_road', singlePlayer: true }).room;
+  host.call('selectDog', { dog: 'gsp' }); host.call('startRace'); host.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const p = T.pointAt(60);
+  host.call('playerMove', { position: [p.x, p.y, p.z], rotation: Math.PI, animation: 'Run', respawnRevision: 0 });
+  host.call('requestRescue');
+  const back = latest(room.code, 'playerRespawned');
+  assert.equal(back.respawnRevision, 1);
+  const q = T.pointAt(80);
+  host.call('playerMove', { position: [q.x, q.y, q.z], rotation: 0, animation: 'Run', respawnRevision: 0 });
+  assert.equal(room.code && latest(room.code, 'playerRespawned').respawnRevision, 1, 'old-revision move ignored');
+  host.call('leaveGame');
+});
+
+// Wendover's shortcuts transport only Ralph, credit only the skipped part of the
+// lap, and use revisions just like rescues to discard packets still in flight.
+test('Wendover: Ralph can use all four burrows on all three laps without breaking checkpoints', async context => {
+  const { WENDOVER: W, woodlandDistanceAt } = await import('../shared/wendoverData.js');
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host=client(), room=host.call('hostGame',{mapId:'wendover',singlePlayer:true}).room;
+  host.call('selectDog',{dog:'ralph'});host.call('startRace');host.call('raceLoaded');
+  for(let i=0;i<3;i++)context.mock.timers.tick(1000);
+  const map=MAPS.wendover,cps=map.checkpoints.map(c=>({...c,s:woodlandDistanceAt(c.x,c.z)}));
+  let revision=0;
+  const move=(position,rev=revision)=>host.call('playerMove',{position,rotation:0,animation:'Run',respawnRevision:rev});
+  const approach=(t,d)=>t.entry.map((v,i)=>v+d*(i===0?Math.sin(t.entryYaw):i===2?Math.cos(t.entryYaw):0));
+  for(let lap=1;lap<=3;lap++) {
+    let cp=0;
+    for(const t of W.tunnels) {
+      while(cp<cps.length&&cps[cp].s<t.entryS){const c=cps[cp++];move([c.x,0,c.z]);}
+      move(approach(t,-1));move(approach(t,.1));
+      assert.equal(latest(room.code,'playerBurrowEntered').tunnelId,t.id);
+      assert.equal(host.call('requestRescue').success,false,'rescue cannot interrupt a burrow');
+      context.mock.timers.tick(1099);move(t.exit);
+      assert.deepEqual(latest(room.code,'playerMoved').position,t.entry,'cannot escape before transit completes');
+      context.mock.timers.tick(1);move(t.entry);
+      const exit=latest(room.code,'playerBurrowExited');
+      assert.deepEqual(exit.position,t.exit);assert.equal(exit.rotation,t.exitYaw);assert.equal(exit.respawnRevision,++revision);
+      move(approach(t,-1),revision-1);
+      assert.deepEqual(latest(room.code,'playerMoved').position,t.exit,'stale entrance packets cannot pull the dog back');
+      while(cp<cps.length&&cps[cp].s<t.exitS)cp++;
+      assert.equal(latest(room.code,'raceProgress').checkpoint,cp);
+      assert.equal(latest(room.code,'raceProgress').lap,lap);
+      const count=server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowEntered').length;
+      move(approach(t,-1));move(approach(t,.1));
+      assert.equal(server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowEntered').length,count,'one use per lap');
+      move(t.exit);
+    }
+    while(cp<cps.length){const c=cps[cp++];move([c.x,0,c.z]);}
+    const finish=d=>map.startFinish.position.map((v,i)=>v+d*map.startFinish.forward[i]);
+    move(finish(-2));move(finish(2));
+    assert.equal(latest(room.code,'raceProgress').finished,lap===3);
+  }
+  assert.equal(server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowExited').length,12);
+  host.call('leaveGame');
+});
+
+test('Wendover burrows reject other dogs and Ralph with missing earlier checkpoints', async context => {
+  const { WENDOVER: W }=await import('../shared/wendoverData.js');
+  context.mock.timers.enable({apis:['setTimeout','Date'],now:1000});
+  for(const dog of ['gsp','second_dog','black_lab','pablo','ralph']) {
+    const host=client(),room=host.call('hostGame',{mapId:'wendover',singlePlayer:true}).room;
+    host.call('selectDog',{dog});host.call('startRace');host.call('raceLoaded');
+    for(let i=0;i<3;i++)context.mock.timers.tick(1000);
+    const move=p=>host.call('playerMove',{position:p,rotation:0,animation:'Run',respawnRevision:0});
+    if(dog!=='ralph'){const cp=MAPS.wendover.checkpoints[0];move([cp.x,0,cp.z]);}
+    const t=W.tunnels[0];
+    for(const d of [-1,.1])move(t.entry.map((v,i)=>v+d*(i===0?Math.sin(t.entryYaw):i===2?Math.cos(t.entryYaw):0)));
+    assert.equal(latest(room.code,'playerBurrowEntered'),undefined);
+    host.call('leaveGame');
+  }
 });

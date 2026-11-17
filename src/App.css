@@ -182,3 +182,24 @@
     border-right-color: var(--border);
   }
 }
+
+.burrow-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 16;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  color: #ffe0a6;
+  font: 900 24px/1.3 system-ui, sans-serif;
+  letter-spacing: .18em;
+  text-shadow: 0 2px 12px #000;
+  background: radial-gradient(ellipse, #302a19b0 0%, #0c1710ef 85%);
+  animation: burrow-pulse 1.1s ease-in-out;
+}
+.burrow-overlay[hidden] { display: none; }
+@keyframes burrow-pulse {
+  0% { opacity: 0; }
+  20%, 80% { opacity: 1; }
+  100% { opacity: .75; }
+}

@@ -4,6 +4,8 @@
 // Each map gets a "path": its lap length, pointAt(s, lateral) on the racing line, and the stretches
 // pickups must keep clear of (jumps, tunnels, water, bridges, ice...).  Spots are then picked near
 // target fractions of the lap, on the straightest clear stretch nearby.
+import { WENDOVER } from './wendoverData.js';
+import { polylinePath } from './polylinePath.js';
 import frostpeak from './frostpeak.json' with { type: 'json' };
 import wendover from './wendoverPath.json' with { type: 'json' };
 import { TREAT_ROAD } from './treatRoadData.js';
@@ -12,29 +14,6 @@ import { MODBURY_HEIGHTS } from './modburyData.js';
 const START_CLEAR = 60;        // metres either side of the start/finish line kept clear
 const MIN_GAP = 70;            // metres between any two pickup spots
 
-/** A closed polyline [[x, y, z, halfWidth?], ...] in driving order, starting at the start line. */
-function polylinePath(points, defaultHalfWidth) {
-  const n = points.length, S = [0];
-  for (let i = 1; i <= n; i++) {
-    const a = points[i - 1], b = points[i % n];
-    S.push(S[i - 1] + Math.hypot(b[0] - a[0], b[2] - a[2]));
-  }
-  const length = S[n];
-  function pointAt(s, lateral = 0) {
-    s = ((s % length) + length) % length;
-    let i = 0;
-    while (i < n - 1 && S[i + 1] <= s) i++;
-    const a = points[i], b = points[(i + 1) % n], t = (s - S[i]) / ((S[i + 1] - S[i]) || 1);
-    const tx = b[0] - a[0], tz = b[2] - a[2], tl = Math.hypot(tx, tz) || 1;
-    const nx = -tz / tl, nz = tx / tl;     // left-hand normal, as on the procedural tracks
-    const hw = (a[3] ?? defaultHalfWidth) + ((b[3] ?? defaultHalfWidth) - (a[3] ?? defaultHalfWidth)) * t;
-    return {
-      x: a[0] + tx * t + nx * lateral, y: a[1] + (b[1] - a[1]) * t, z: a[2] + tz * t + nz * lateral,
-      rotationY: Math.atan2(tx, tz), halfWidth: hw,
-    };
-  }
-  return { length, pointAt };
-}
 
 const around = (s, pad) => [s - pad, s + pad];
 
@@ -53,7 +32,11 @@ export const PICKUP_PATHS = {
   },
   wendover: {
     ...polylinePath(wendover.points, wendover.halfWidth),
-    hazards: wendover.hazards.map(h => h.range),
+    hazards: [
+      ...wendover.hazards.map(h => h.range),
+      ...WENDOVER.pools.map(p => [p.sStart - 8, p.sEnd + 8]),
+      ...WENDOVER.tunnels.flatMap(t => [around(t.entryS, 12), around(t.exitS, 16)])
+    ],
   },
   frostpeak: {
     ...polylinePath(frostpeak.centerline.points.map(([x, y, z, hw]) => [x, y, z, hw])),
@@ -162,3 +145,42 @@ export const GOLDEN_BONE_SPOTS = Object.fromEntries(Object.entries(BONE_S).map((
     return { s, x: p.x, y: p.y, z: p.z };
   })];
 }));
+
+// ---------------------------------
+// Where on the racing line is (x, z)?  Used to tell which way the race goes there (wrong-way
+// check) and to put a lost dog back on the line facing forwards.
+// ---------------------------------
+const LINE_STEP = 4;               // metres between samples
+const lineSamples = {};
+
+function samplesFor(mapId) {
+  if (!lineSamples[mapId]) {
+    const path = PICKUP_PATHS[mapId], list = [];
+    for (let s = 0; s < path.length; s += LINE_STEP) list.push({ s, ...path.pointAt(s) });
+    lineSamples[mapId] = list;
+  }
+  return lineSamples[mapId];
+}
+
+/** The nearest point on the racing line to (x, z): { s, x, y, z, rotationY, halfWidth, distance }.
+ *  hintS (where the dog was last time) keeps the answer on the same stretch where the course
+ *  doubles back on itself; the whole lap is searched if that stretch is not close by. */
+export function racingLineAt(mapId, x, z, hintS = null) {
+  const path = PICKUP_PATHS[mapId];
+  if (!path) return null;
+  const samples = samplesFor(mapId);
+  const nearest = (list) => {
+    let best = null, bestD = Infinity;
+    for (const p of list) {
+      const d = (p.x - x) ** 2 + (p.z - z) ** 2;
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best && { ...best, distance: Math.sqrt(bestD) };
+  };
+  if (hintS !== null) {
+    const window = samples.filter(p => lapDistance(p.s, hintS, path.length) <= 80);
+    const local = nearest(window);
+    if (local && local.distance <= local.halfWidth + 25) return local;
+  }
+  return nearest(samples);
+}
