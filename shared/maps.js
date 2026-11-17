@@ -61,7 +61,6 @@ export const MAPS = {
       ? '3.12 km coastal circuit · clifftops · water crossing'
       : '1.45 km of sky road · catapult gap · landing boost',
     procedural: true,
-    allowJump: false,
     startPositions: track.startPositions,
     checkpoints: track.checkpoints.slice(1).map(({ position, halfWidth, rotationY, launchLanding }) => ({
       x: position[0], y: position[1], z: position[2], radius: halfWidth + 8, launchLanding,

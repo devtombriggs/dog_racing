@@ -3,6 +3,8 @@ import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
 import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS } from '../shared/maps.js';
+import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox } from '../shared/treatBoxes.js';
+import { rollItem, forwardOf, ballPositionAt, distanceToSegment, BALL, TOY, HIT } from '../shared/items.js';
 
 const PORT = Number(env.PORT || 3001);
 
@@ -80,7 +82,7 @@ function updateProceduralRace(room, player, data) {
     if (previous.onTrack && previous.s >= pad.padStart && previous.s < pad.takeoffS
       && ground.s >= pad.takeoffS && ground.s <= pad.gapStart + 8
       && Math.abs(ground.lateral) <= ground.halfWidth
-      && Math.abs(y - ground.y) < 1.2) {
+      && y > ground.y - 1.2 && y < ground.y + 2.5) {   // a dog jumping across the pad still launches
       const halfWidth = Math.min(ground.halfWidth, track.pointAt(pad.landingS).halfWidth) - 1;
       state.launch = { startedAt: now, lateral: Math.max(-halfWidth, Math.min(halfWidth, ground.lateral)) };
       const point = track.launchPoint(0, state.launch.lateral);
@@ -106,6 +108,111 @@ function updateProceduralRace(room, player, data) {
     return false;
   }
   return true;
+}
+
+function collectTreatBoxes(room, player, previousPosition) {
+  for (const box of TREAT_BOXES_BY_MAP[room.mapId] ?? []) {
+    if (room.treatBoxTimers.has(box.id) || !touchesTreatBox(previousPosition, player.position, box)) continue;
+    io.to(room.code).emit('treatBoxChanged', { id: box.id, visible: false });
+    grantItem(room, player);
+    const timer = setTimeout(() => {
+      if (rooms.get(room.code) !== room) return;
+      room.treatBoxTimers.delete(box.id);
+      io.to(room.code).emit('treatBoxChanged', { id: box.id, visible: true });
+    }, TREAT_BOX_RESPAWN_MS);
+    room.treatBoxTimers.set(box.id, timer);
+  }
+}
+
+// ---------------------------------
+// ITEMS (tennis ball, chew toy, golden bone)
+// ---------------------------------
+
+// One item at a time: a box taken while holding one gives nothing.
+function grantItem(room, player) {
+  if (player.item) return;
+  const standings = raceStandings(room);
+  const place = standings.find((entry) => entry.playerId === player.id)?.place ?? 1;
+  player.item = rollItem(place, standings.length);
+  io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item });
+}
+
+function resetItems(room) {
+  room.hazards = new Map();
+  room.balls = new Map();
+  room.nextItemId = 1;
+  for (const player of room.players.values()) {
+    player.item = null;
+    player.hitImmuneUntil = 0;
+  }
+}
+
+function useItem(room, player) {
+  const item = player.item;
+  player.item = null;
+  io.to(room.code).emit('itemChanged', { playerId: player.id, item: null });
+  const forward = forwardOf(player.rotation);
+  const [x, y, z] = player.position;
+  if (item === 'bone') {
+    io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+  } else if (item === 'toy') {
+    if (room.hazards.size >= TOY.maxPerRoom) {
+      const oldest = room.hazards.keys().next().value;
+      room.hazards.delete(oldest);
+      io.to(room.code).emit('hazardRemoved', { id: oldest });
+    }
+    const hazard = {
+      id: `toy-${room.nextItemId++}`, owner: player.id, placedAt: Date.now(),
+      position: [x - forward[0] * TOY.dropBehind, y, z - forward[2] * TOY.dropBehind], rotationY: player.rotation
+    };
+    room.hazards.set(hazard.id, hazard);
+    io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+    io.to(room.code).emit('hazardPlaced', { id: hazard.id, owner: hazard.owner, position: hazard.position, rotationY: hazard.rotationY });
+  } else if (item === 'ball') {
+    const ball = {
+      id: `ball-${room.nextItemId++}`, owner: player.id, firedAt: Date.now(),
+      origin: [x + forward[0] * BALL.launchAhead, y + BALL.height, z + forward[2] * BALL.launchAhead], direction: forward
+    };
+    room.balls.set(ball.id, ball);
+    io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+    io.to(room.code).emit('ballThrown', { id: ball.id, owner: ball.owner, origin: ball.origin, direction: ball.direction });
+  }
+}
+
+function hitPlayer(room, player, by, item) {
+  player.hitImmuneUntil = Date.now() + HIT.immuneMs;
+  io.to(room.code).emit('playerHit', {
+    playerId: player.id, by, item, stunMs: item === 'toy' ? HIT.toyStunMs : HIT.ballStunMs
+  });
+}
+
+// Checked on each of the dog's own moves: did a ball or a dropped toy get it?
+function checkItemHits(room, player, previousPosition) {
+  const now = Date.now();
+  for (const ball of room.balls.values()) {
+    const age = (now - ball.firedAt) / 1000;
+    if (age > BALL.duration) { room.balls.delete(ball.id); continue; }
+    if (ball.owner === player.id || now < player.hitImmuneUntil) continue;
+    const from = ballPositionAt(ball, Math.max(0, age - 0.12)), to = ballPositionAt(ball, age);
+    if (Math.abs(player.position[1] + 1 - ball.origin[1]) <= 3
+      && distanceToSegment(player.position, from, to) <= BALL.radius) {
+      room.balls.delete(ball.id);
+      io.to(room.code).emit('ballHit', { id: ball.id, playerId: player.id, position: to });
+      hitPlayer(room, player, ball.owner, 'ball');
+    }
+  }
+  // A chew toy is gone once any dog runs into it; a dog still recovering from a hit is not
+  // knocked over again, but the toy goes all the same.
+  for (const hazard of room.hazards.values()) {
+    if (hazard.owner === player.id && now - hazard.placedAt < TOY.ownerGraceMs) continue;
+    const above = player.position[1] - hazard.position[1];
+    if (above > TOY.jumpClear || above < -2) continue;              // jumped clean over it
+    if (distanceToSegment(hazard.position, previousPosition, player.position) <= TOY.radius) {
+      room.hazards.delete(hazard.id);
+      io.to(room.code).emit('hazardRemoved', { id: hazard.id, hitBy: player.id });
+      if (Date.now() >= player.hitImmuneUntil) hitPlayer(room, player, hazard.owner, 'toy');
+    }
+  }
 }
 
 function generateRoomCode() {
@@ -180,7 +287,9 @@ function createPlayer(socketId, name, slot = 0) {
     lap: 1,
     checkpoint: 0,
     finished: false,
-    finishTime: null
+    finishTime: null,
+    item: null,
+    hitImmuneUntil: 0
   };
 }
 
@@ -201,6 +310,44 @@ function broadcastProgress(room, player) {
     'raceProgress',
     getRaceProgress(room, player)
   );
+  broadcastStandings(room);
+}
+
+// Race order for the on-screen board: finished dogs in finishing order, then
+// most laps, most checkpoints, and finally whoever is nearest their next
+// checkpoint (or the finish line on the last stretch), so an overtake shows
+// straight away rather than at the next checkpoint.
+const STANDINGS_INTERVAL_MS = 250;
+
+function raceStandings(room) {
+  const map = MAPS[room.mapId];
+  const toGo = (player) => {
+    const target = player.checkpoint < map.checkpoints.length
+      ? map.checkpoints[player.checkpoint]
+      : { x: map.startFinish.position[0], z: map.startFinish.position[2] };
+    return Math.hypot(player.position[0] - target.x, player.position[2] - target.z);
+  };
+  return [...room.players.values()]
+    .map((player) => ({ player, toGo: player.finished ? 0 : toGo(player) }))
+    .sort((a, b) =>
+      (Number(b.player.finished) - Number(a.player.finished))
+      || (a.player.finished ? a.player.finishTime - b.player.finishTime : 0)
+      || (b.player.lap - a.player.lap)
+      || (b.player.checkpoint - a.player.checkpoint)
+      || (a.toGo - b.toGo)
+      || (a.player.slot - b.player.slot))
+    .map(({ player }, index) => ({
+      playerId: player.id,
+      name: player.name,
+      dog: player.dog,
+      place: index + 1,
+      finished: player.finished
+    }));
+}
+
+function broadcastStandings(room) {
+  room.standingsSentAt = Date.now();
+  io.to(room.code).emit('raceStandings', { standings: raceStandings(room) });
 }
 
 function beginCountdown(room) {
@@ -228,6 +375,7 @@ function beginCountdown(room) {
       io.to(room.code).emit('raceGo', {
         startedAt: room.startedAt
       });
+      broadcastStandings(room);
 
       updateLobby(room);
 
@@ -337,6 +485,7 @@ function leaveRoom(socket) {
 
   if (room.players.size === 0) {
     clearCountdown(room);
+    for (const timer of room.treatBoxTimers.values()) clearTimeout(timer);
     rooms.delete(roomCode);
     updateLobbies();
 
@@ -359,6 +508,10 @@ function leaveRoom(socket) {
     )
   ) {
     room.status = 'finished';
+  }
+
+  if (room.status === 'racing' || room.status === 'finished') {
+    broadcastStandings(room);
   }
 
   updateLobby(room);
@@ -400,6 +553,10 @@ io.on('connection', (socket) => {
       mapId,
       startedAt: null,
       countdownTimer: null,
+      treatBoxTimers: new Map(),
+      hazards: new Map(),
+      balls: new Map(),
+      nextItemId: 1,
       players: new Map([[socket.id, player]])
     };
 
@@ -677,6 +834,7 @@ io.on('connection', (socket) => {
 
     room.startedAt = null;
     room.status = 'loading';
+    resetItems(room);
 
     callback?.({ success: true });
 
@@ -765,9 +923,16 @@ io.on('connection', (socket) => {
       player.rotation = rotation;
     }
 
+    checkItemHits(room, player, previousPosition);
+
     if (onRoad) {
+      collectTreatBoxes(room, player, previousPosition);
       if (validAnimations.includes(data.animation)) player.animation = data.animation;
       checkRaceProgress(room, player, previousPosition);
+    }
+
+    if (Date.now() - (room.standingsSentAt ?? 0) >= STANDINGS_INTERVAL_MS) {
+      broadcastStandings(room);
     }
 
     socket.to(roomCode).emit('playerMoved', {
@@ -779,6 +944,15 @@ io.on('connection', (socket) => {
   });
 
   // LEAVE GAME
+
+  // Fire / drop / eat whatever the dog is holding.
+  socket.on('useItem', () => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || room.status !== 'racing') return;
+    const player = room.players.get(socket.id);
+    if (!player || player.finished || !player.item) return;
+    useItem(room, player);
+  });
 
   socket.on('leaveGame', (callback) => {
     leaveRoom(socket);

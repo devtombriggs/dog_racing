@@ -5,11 +5,20 @@ import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { io } from 'socket.io-client';
 import { MAPS, DEFAULT_MAP, sampleGroundHeight, PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { prepareHeadLook, applyHeadLook } from './headLook.js';
-import { createRaceNameLabel } from './raceNameLabel.js';
+import { createTreatBoxes } from './pickups/treatBoxes.js';
+import { createGoldenBones } from './pickups/goldenBones.js';
+import { GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
+import { createItems } from './pickups/items.js';
+import { ITEM_NAMES } from '../shared/items.js';
 
 // ---------------------------------
 // DOG CONFIGURATION
 // ---------------------------------
+
+function ordinal(n) {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  return n + (teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th'));
+}
 
 const DOGS = {
   gsp: {
@@ -451,6 +460,11 @@ function App() {
   const [finishTime, setFinishTime] =
     useState(null);
 
+  // Race order for the board at the top left: [{ playerId, name, dog, place, finished }]
+  const [standings, setStandings] = useState([]);
+  // The item this player is holding from a Treat Box ('ball' | 'toy' | 'bone' | null)
+  const [heldItem, setHeldItem] = useState(null);
+
   // ---------------------------------
   // SOCKET CONNECTION
   // ---------------------------------
@@ -491,6 +505,8 @@ function App() {
       setLap(1);
       setCheckpoint(0);
       setFinishTime(null);
+      setStandings([]);
+      setHeldItem(null);
 
       const updatedRoom = {
         ...roomRef.current,
@@ -537,6 +553,10 @@ function App() {
       }
     }
 
+    function handleRaceStandings(data) {
+      if (Array.isArray(data?.standings)) setStandings(data.standings);
+    }
+
     function handlePlayerFinished(data) {
       if (data.playerId === socket.id) {
         console.log(
@@ -580,6 +600,8 @@ function App() {
       handlePlayerFinished
     );
 
+    socket.on('raceStandings', handleRaceStandings);
+
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
@@ -589,6 +611,7 @@ function App() {
       socket.off('raceGo', handleRaceGo);
       socket.off('raceProgress', handleRaceProgress);
       socket.off('playerFinished', handlePlayerFinished);
+      socket.off('raceStandings', handleRaceStandings);
 
       socket.disconnect();
       socketRef.current = null;
@@ -854,6 +877,8 @@ function App() {
     setError('');
     setRacePhase('');
     setFinishTime(null);
+    setStandings([]);
+    setHeldItem(null);
     setScreen('menu');
   }
 
@@ -1222,12 +1247,21 @@ function App() {
     const player = new THREE.Group();
     scene.add(player);
 
+    // Pickups on every map: Treat Boxes (the server says when one is taken) and Golden Bones
+    // (speed boosts, local to this player). Spots come from shared/pickupSpots.js.
+    const pickupMapId = currentRoom.mapId ?? DEFAULT_MAP;
+    const treatBoxes = createTreatBoxes({ scene, mapId: pickupMapId });
+    const goldenBones = createGoldenBones({ scene, renderer, placements: GOLDEN_BONE_SPOTS[pickupMapId] ?? [] });
+    // Items from the boxes: held above heads, thrown balls, dropped chew toys (the server decides)
+    const items = createItems({ scene, renderer });
+    let myItem = null;
+    let stunUntil = 0, stunLength = 1;
+
     const localPlayer =
       currentRoom.players.find(
         (p) => p.id === socket.id
       );
 
-    const localNameLabel = createRaceNameLabel(container, localPlayer?.name || 'Player', true);
 
     if (localPlayer) {
       player.position.fromArray(
@@ -1387,7 +1421,6 @@ function App() {
 
       const remote = {
         group,
-        nameLabel: createRaceNameLabel(container, data.name || 'Player'),
         targetPosition:
           new THREE.Vector3().fromArray(
             data.position
@@ -1487,12 +1520,6 @@ function App() {
       spawnRemotePlayer
     );
 
-    function updateNameLabels() {
-      camera.updateMatrixWorld();
-      localNameLabel.update(dogBones.head, camera);
-      remotePlayers.forEach(remote => remote.nameLabel.update(remote.bones.head, camera));
-    }
-
     function handlePlayerMoved(data) {
       const remote = remotePlayers.get(
         data.playerId
@@ -1574,7 +1601,7 @@ function App() {
       if (!remote) return;
 
       scene.remove(remote.group);
-      remote.nameLabel.dispose();
+      items.setHeld(data.playerId, null);
       remotePlayers.delete(
         data.playerId
       );
@@ -1594,6 +1621,7 @@ function App() {
       if (!proceduralTrack || data.playerId !== socket.id) return;
       fall = { position: new THREE.Vector3().fromArray(data.position), startedAt: performance.now() };
       currentSpeed = 0;
+      goldenBones.cancelBoost();
       knock.set(0, 0, 0);
       playAnimation('Jump');
     }
@@ -1604,6 +1632,7 @@ function App() {
         fall = null;
         launchFlight = null;
         launchBoostUntil = 0;
+        goldenBones.cancelBoost();
         respawnRevision = data.respawnRevision;
         recoveryUntil = performance.now() + data.penaltySeconds * 1000;
         player.position.fromArray(data.position);
@@ -1664,6 +1693,39 @@ function App() {
       if (dogModel) dogModel.rotation.set(0,0,0);
       playAnimation('Sprint');
     }
+    function handleTreatBoxChanged({ id, visible }) {
+      treatBoxes.setVisible(id, visible);
+    }
+    socket.on('treatBoxChanged', handleTreatBoxChanged);
+
+    // ---------------------------------
+    // ITEMS
+    // ---------------------------------
+    function handleItemChanged({ playerId, item }) {
+      items.setHeld(playerId, item);
+      if (playerId === socket.id) { myItem = item; setHeldItem(item); }
+    }
+    function handleItemUsed({ playerId, item }) {
+      if (playerId !== socket.id || item !== 'bone') return;
+      goldenBones.startBoost();
+      if (currentSpeed > 0) currentSpeed += goldenBones.instantKick(sprintSpeed);
+    }
+    function handleHazardPlaced(data) { items.placeHazard(data); }
+    function handleHazardRemoved(data) { items.removeHazard(data.id, !!data.hitBy); }
+    function handleBallThrown(data) { items.throwBall(data); }
+    function handleBallHit(data) { items.removeBall(data.id, data.position); }
+    function handlePlayerHit({ playerId, stunMs }) {
+      if (playerId !== socket.id) return;
+      stunLength = stunMs;
+      stunUntil = performance.now() + stunMs;
+      currentSpeed *= 0.15;
+      goldenBones.cancelBoost();
+    }
+    const itemEvents = {
+      itemChanged: handleItemChanged, itemUsed: handleItemUsed, hazardPlaced: handleHazardPlaced,
+      hazardRemoved: handleHazardRemoved, ballThrown: handleBallThrown, ballHit: handleBallHit, playerHit: handlePlayerHit,
+    };
+    for (const [event, handler] of Object.entries(itemEvents)) socket.on(event, handler);
     socket.on('playerLaunched', handlePlayerLaunched);
     socket.on('playerLanded', handlePlayerLanded);
     socket.on('playerFell', handlePlayerFell);
@@ -1718,12 +1780,11 @@ function App() {
     const keys = {};
     const controlKeys = new Set([
       'KeyW', 'KeyA', 'KeyS', 'KeyD',
-      'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space'
+      'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'KeyE', 'ShiftLeft', 'ShiftRight'
     ]);
 
     function tryJump() {
       if (
-        map.allowJump === false ||
         !raceGoRef.current ||
         raceFinishedRef.current ||
         isJumping ||
@@ -1753,6 +1814,9 @@ function App() {
 
       keys[event.code] = true;
       if (event.code === 'Space' && !event.repeat) tryJump();
+      // Shift (or E) throws the ball, drops the chew toy or eats the golden bone
+      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight' || event.code === 'KeyE')
+        && !event.repeat && myItem) socket.emit('useItem');
     }
 
     function handleWheel(event) {
@@ -1843,10 +1907,24 @@ function App() {
         0.05
       );
       proceduralWorld?.update(performance.now() / 1000, player.position);
+      treatBoxes.update(performance.now() / 1000);
+      const itemAnchors = new Map([[socket.id, dogBones.head ?? player]]);
+      remotePlayers.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
+      items.update(delta, itemAnchors);
+      // knocked over by a ball or a chew toy: a couple of spins on the spot
+      if (dogModel) {
+        const stunLeft = stunUntil - performance.now();
+        dogModel.rotation.y = stunLeft > 0 ? (1 - stunLeft / stunLength) * Math.PI * 4 : 0;
+      }
 
       const canMove =
         raceGoRef.current &&
         !raceFinishedRef.current;
+
+      // Golden Bones: running through one is the whole pickup, no button needed
+      if (goldenBones.update(delta, player.position, canMove && !fall && !launchFlight) && currentSpeed > 0) {
+        currentSpeed += goldenBones.instantKick(sprintSpeed);
+      }
 
       // ---------------------------------
       // RACE TIMER
@@ -1903,7 +1981,6 @@ function App() {
           }
         );
 
-        updateNameLabels();
         renderer.render(
           scene,
           camera
@@ -1914,7 +1991,8 @@ function App() {
 
       lastGoState = true;
 
-      const desiredFov = launchFlight ? 94 : performance.now() < launchBoostUntil ? 84 : 75;
+      const desiredFov = launchFlight ? 94
+        : performance.now() < launchBoostUntil || goldenBones.isBoosting() ? 84 : 75;
       if (Math.abs(camera.fov - desiredFov) > 0.01) {
         camera.fov += (desiredFov - camera.fov) * (1 - Math.exp(-8 * delta));
         camera.updateProjectionMatrix();
@@ -1967,8 +2045,11 @@ function App() {
           terrainMultiplier *
           hillMultiplier *
           (performance.now() < launchBoostUntil ? proceduralTrack.launch.exitSpeedMultiplier : 1) *
-          (proceduralTrack && performance.now() < recoveryUntil ? proceduralTrack.rules.respawnSpeedMultiplier : 1);
+          (proceduralTrack && performance.now() < recoveryUntil ? proceduralTrack.rules.respawnSpeedMultiplier : 1) *
+          goldenBones.speedMultiplier() *
+          (performance.now() < stunUntil ? 0.15 : 1);
         const effectiveAcceleration = acceleration *
+          goldenBones.accelerationMultiplier() *
           (inWater
             ? waterAcceleration
             : offTrack ? OFF_TRACK_ACCELERATION_MULTIPLIER : 1);
@@ -2376,6 +2457,7 @@ function App() {
           surfaceDisplayRef.current.textContent = performance.now() < recoveryUntil
             ? 'RECOVERING — REDUCED SPEED'
             : performance.now() < launchBoostUntil ? 'LANDING BOOST!'
+            : goldenBones.isBoosting() ? 'GOLDEN BONE BOOST!'
             : offTrack ? 'OFF THE EDGE'
             : coastalSurface?.movement === 'swim' ? 'SWIMMING'
             : coastalSurface?.movement === 'wade' ? 'WADING'
@@ -2516,7 +2598,6 @@ function App() {
         lookTarget
       );
 
-      updateNameLabels();
       renderer.render(
         scene,
         camera
@@ -2546,12 +2627,17 @@ function App() {
         'playerLeft',
         handlePlayerLeft
       );
+      socket.off('treatBoxChanged', handleTreatBoxChanged);
+      for (const [event, handler] of Object.entries(itemEvents)) socket.off(event, handler);
       socket.off('playerLaunched', handlePlayerLaunched);
       socket.off('playerLanded', handlePlayerLanded);
       socket.off('playerFell', handlePlayerFell);
       socket.off('playerRespawned', handlePlayerRespawned);
       restoreEnvironment?.();
       proceduralWorld?.dispose();
+      treatBoxes.dispose();
+      items.dispose();
+      goldenBones.dispose();
 
       window.removeEventListener(
         'keydown',
@@ -2566,8 +2652,6 @@ function App() {
       renderer.domElement.removeEventListener('wheel', handleWheel);
 
       timer.disconnect();
-      localNameLabel.dispose();
-      remotePlayers.forEach(remote => remote.nameLabel.dispose());
 
       if (
         renderer.domElement.parentNode ===
@@ -3010,6 +3094,25 @@ function App() {
         }}
       />
 
+      {/* Race order, top left: slides rows into place when someone overtakes */}
+      {standings.length > 0 && (
+        <ol className="race-standings" aria-label="Race positions" style={{ height: standings.length * 38 - 4 }}>
+          {standings.map(entry => (
+            <li
+              key={entry.playerId}
+              className={`race-standings__row${entry.playerId === socketId ? ' race-standings__row--you' : ''}`}
+              style={{ transform: `translateY(${(entry.place - 1) * 38}px)` }}
+            >
+              <span className="race-standings__place">{ordinal(entry.place)}</span>
+              <span className="race-standings__name">
+                {entry.name} — {DOGS[entry.dog]?.displayName ?? 'Dog'}
+              </span>
+              {entry.finished && <span className="race-standings__flag" aria-label="finished">🏁</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+
       {/* Race HUD */}
       <div style={hudStyle}>
         <div
@@ -3031,6 +3134,11 @@ function App() {
           }}
         >
           LAP {lap}/{TOTAL_LAPS}
+        </div>
+
+        <div style={{ fontSize: 12, color: '#b4c9b5', marginBottom: 3 }}>ITEM</div>
+        <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 12, color: heldItem ? '#ffd257' : '#6f8573' }}>
+          {heldItem ? `${ITEM_NAMES[heldItem]} · press Shift` : 'None: run through a box'}
         </div>
 
         <div
@@ -3110,11 +3218,9 @@ function App() {
         <div style={{ fontSize: 11, marginTop: 14, color: '#b4c9b5', lineHeight: 1.6 }}>
           <div>W / ↑ accelerate · S / ↓ brake / reverse</div>
           <div>A / D or ← / → steer</div>
-          <div>{MAPS[room?.mapId ?? DEFAULT_MAP].allowJump === false
-            ? room?.mapId === 'treat_road'
-              ? 'Cyan pad launches automatically · falls return to checkpoints'
-              : 'Follow the trail · falls return you to a checkpoint'
-            : 'Space or scroll down to jump'}</div>
+          <div>Space or scroll down to jump · Shift to use an item</div>
+          {room?.mapId === 'treat_road' && <div>Cyan pad launches automatically · falls return to checkpoints</div>}
+          {room?.mapId === 'modbury_heights' && <div>Follow the trail · falls return you to a checkpoint</div>}
         </div>
       </div>
 

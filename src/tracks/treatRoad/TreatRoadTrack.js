@@ -1,5 +1,6 @@
 // Treat Road — Three.js visuals (road, glow edges, bone bridge, gates, floating treats, clouds, sky).
 // Everything is generated at runtime from treatRoadData.js; there is no model file to load.
+// (Treat Boxes and Golden Bones are added for every map by src/pickups/, not here.)
 //
 //   const treatRoad = createTreatRoad();
 //   scene.add(treatRoad.group);
