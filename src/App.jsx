@@ -14,7 +14,7 @@ import { createVoiceChat } from './voiceChat.js';
 import { createMinimap } from './minimap.js';
 import { ITEM_NAMES } from '../shared/items.js';
 import { SPECIALS, SPECIAL_ITEM } from '../shared/specials.js';
-import { WENDOVER, woodlandWaterAt, woodlandPlankAt, woodlandSwimMultiplier, woodlandDogY } from '../shared/wendoverData.js';
+import { WENDOVER, woodlandWaterAt, woodlandPlankAt, woodlandSwimMultiplier, woodlandDogY, woodlandBogAt, BOG_SPEED } from '../shared/wendoverData.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 
 // ---------------------------------
@@ -44,13 +44,15 @@ function playSelectionSound(dogId) {
   } catch { /* no audio support */ }
 }
 
-// Race audio per map. The countdown clip starts when "3" shows, from COUNTDOWN_OFFSET seconds
-// into the file, so its spoken "3" lands on the 3 on screen (2, 1 and GO follow a second apart).
-// Nudge COUNTDOWN_OFFSET up if the voice is late, down if it is early.
-// Music starts on GO and loops until the player leaves the race.
+// Race audio. Every map has the same "3, 2, 1, GO" countdown: the clip starts when "3" shows, from
+// COUNTDOWN_OFFSET seconds into the file, so its spoken "3" lands on the 3 on screen (2, 1 and GO
+// follow a second apart).  The server sends each number to everyone in the race at once, so all the
+// players hear it together.  Nudge COUNTDOWN_OFFSET up if the voice is late, down if it is early.
+// Music is per map (only Treat Road has any so far): it starts on GO and loops until the player leaves the race.
 const COUNTDOWN_OFFSET = 1.0;
+const COUNTDOWN_AUDIO = '/audio/countdown.mp3';
 const RACE_AUDIO = {
-  treat_road: { countdown: '/audio/countdown.mp3', music: '/audio/treat_road.mp3', musicVolume: 0.5 },
+  treat_road: { music: '/audio/treat_road.mp3', musicVolume: 0.5 },
 };
 const raceAudio = { countdown: null, music: null };
 
@@ -64,8 +66,7 @@ function stopRaceAudio() {
 // Called while the race loads, so the countdown is ready the moment "3" shows
 function loadRaceAudio(mapId) {
   stopRaceAudio();
-  const config = RACE_AUDIO[mapId];
-  if (!config) return;
+  const config = { countdown: COUNTDOWN_AUDIO, ...RACE_AUDIO[mapId] };
   try {
     for (const key of ['countdown', 'music']) {
       if (!config[key]) continue;
@@ -209,7 +210,9 @@ const HANDLING = {
   gripSprint: 5,        // ...and flat out: lower = more drift through a turn
   lean: 0.2,            // body roll into a turn (radians)
   bend: 0.07,           // how far the spine, neck and tail curve into a turn
-  fullSteerSpeed: 4,    // below this speed the dog turns less (it cannot spin standing still)
+  fullSteerSpeed: 4,    // below this speed the dog turns less...
+  pivotSteer: 0.6,      // ...but never less than this share: it can turn on the spot, so a dog stuck
+                        // nose-first against something can turn away without having to move forward
   // Which stride is used at which speed.  These follow a real dog: walk to
   // about 1.5 m/s, trot to about 2.8, canter to about 4.5, then gallop
   // (multiplied by the dogs' scale of 3)
@@ -1160,6 +1163,11 @@ function App() {
     const OFF_TRACK_ACCELERATION_MULTIPLIER = 0.6;
     const DOG_COLLISION_RADIUS = 0.65;
     let offTrack = false;
+    // A jump that starts on the road is free in the air (that is how the stream is cleared).  A jump
+    // that starts off the road is not: otherwise hopping along beside the road dodges the off-track
+    // slowdown, and with it every slow stretch (the pools, the hay bales) can be skipped round the side.
+    let jumpedFromOffTrack = false;
+    let inBog = false;             // on the boggy bank beside a Wendover pool (shared/wendoverData.js)
     let heightmap = null;
 
     function isTrackSurface(position) {
@@ -2088,6 +2096,7 @@ function App() {
 
       isJumping = true;
       isLanding = false;
+      jumpedFromOffTrack = offTrack || inBog;
       const steepHop = steepRun && slope < STEEP_JUMP.below;
       verticalVelocity = steepHop ? STEEP_JUMP.force : jumpForce;
       jumpGravity = steepHop ? STEEP_JUMP.gravity : gravity;
@@ -2350,14 +2359,18 @@ function App() {
         const special = specials.physics(socket.id);
 
         // In the air the dog is off nothing: that is how the stream is cleared
-        offTrack = !isJumping && !isTrackSurface(player.position);
+        offTrack = !(isJumping && !jumpedFromOffTrack) && !isTrackSurface(player.position);
         const woodlandSurface = woodland && woodlandWaterAt(player.position.x, player.position.z, player.position.y);
+        // the bog beside a pool: slower than swimming, and no hopping out of it (a jump from the road sails over)
+        inBog = Boolean(woodland && !(isJumping && !jumpedFromOffTrack) && woodlandBogAt(player.position.x, player.position.z));
         const inWater = !isJumping && (woodlandSurface?.inWater || (offTrack && isOverWater(player.position)));
         const coastalGround = coastalTrack?.query(player.position.x, player.position.z);
         const terrainMultiplier = inWater && woodlandSurface
           ? woodlandSwimMultiplier(stats.swimming)
           : coastalGround
           ? coastalTrack.speedFactor(coastalGround, coastalStats)
+          : inBog
+          ? BOG_SPEED
           : inWater
           ? waterSpeed
           : offTrack ? OFF_TRACK_SPEED_MULTIPLIER : 1;
@@ -2486,10 +2499,11 @@ function App() {
           effort
         );
 
+        // (standing still or stuck against something, left and right still turn the dog on the spot)
         player.rotation.y +=
           turnRate *
           steer *
-          steeringFactor *
+          Math.max(steeringFactor, HANDLING.pivotSteer) *
           delta;
 
         // Poppy's wave steers itself: it follows the road, wandering from side to side, so it only
@@ -2655,7 +2669,7 @@ function App() {
         }
 
         // Recheck at the new location, so the slowdown begins immediately.
-        offTrack = !isJumping && !isTrackSurface(player.position);
+        offTrack = !(isJumping && !jumpedFromOffTrack) && !isTrackSurface(player.position);
         const poolNow = woodland && woodlandWaterAt(player.position.x, player.position.z, player.position.y);
         const swimming = Boolean(poolNow?.swimming) && !isJumping;
         const wading = !isJumping && (poolNow?.inWater || (offTrack && isOverWater(player.position)));
@@ -2663,6 +2677,8 @@ function App() {
           currentSpeed = Math.min(currentSpeed, sprintSpeed * woodlandSwimMultiplier(stats.swimming)
             * goldenBones.speedMultiplier() * (performance.now() < stunUntil ? 0.15 : 1));
         }
+        inBog = Boolean(woodland && !(isJumping && !jumpedFromOffTrack) && woodlandBogAt(player.position.x, player.position.z));
+        if (inBog) currentSpeed = Math.min(currentSpeed, sprintSpeed * BOG_SPEED);
         if (offTrack) {
           const offTrackLimit = sprintSpeed *
             (wading ? waterSpeed : OFF_TRACK_SPEED_MULTIPLIER);
@@ -2691,7 +2707,7 @@ function App() {
           const along = Math.cos(travelYaw - (line?.rotationY ?? travelYaw)) * Math.sign(currentSpeed);
           wrongWayNow = Boolean(line) && moving && along < -0.4;
         }
-        offTrackFor = offTrack && !isJumping ? offTrackFor + delta : 0;
+        offTrackFor = offTrack ? offTrackFor + delta : 0;      // (hopping about off the road counts as lost too)
         wrongWayFor = wrongWayNow ? wrongWayFor + delta : 0;
         const lostFor = Math.max(offTrackFor, wrongWayFor);
         if (lostFor >= RESCUE_AFTER && !rescuePending) {
@@ -2717,6 +2733,7 @@ function App() {
           // anything on the road; when they go out he drops and lands in his stride
           isJumping = true;
           isLanding = false;
+          jumpedFromOffTrack = false;          // flying is flying, wherever he took off
           verticalVelocity = 0;
           jumpGravity = gravity;
           jumpHeight += (special.flyHeight - jumpHeight) * (1 - Math.exp(-4 * delta));
@@ -2807,7 +2824,8 @@ function App() {
           if (swimming) {
             playAnimation('Trot');
           } else if (!isMoving) {
-            playAnimation('Idle');
+            // turning on the spot: it steps round rather than swivelling like a statue
+            playAnimation(Math.abs(steer) > 0.3 ? 'Walk' : 'Idle');
           } else if (
             pace <
             HANDLING.walkBelow + holding('Walk', 0.5)
@@ -2861,6 +2879,7 @@ function App() {
             : swimming
             ? localPlayer.dog === 'black_lab' ? 'POPPY’S WATER DASH' : 'SWIMMING'
             : wading ? 'WADING'
+            : inBog ? 'BOG — SWIM OR TAKE THE PLANK'
             : performance.now() < burrowBoostUntil ? 'BURROW EXIT BOOST!'
             : goldenBones.isBoosting() ? 'GOLDEN BONE BOOST!'
             : offTrack ? 'OFF TRACK — SLOWDOWN' : 'ON TRACK';

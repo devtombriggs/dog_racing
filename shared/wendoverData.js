@@ -51,12 +51,30 @@ export function woodlandWaterAt(x,z,y=null) {
   return null;
 }
 
-// Share of a dog's own top speed it keeps in the water, from its swim stat: Poppy (10) is faster
-// in the water than she is on land; the weak swimmers (Meela and Ralph, 4) crawl at under half.
-//   10 -> 1.35   6 -> 0.62   5 -> 0.51   4 -> 0.45
+// The banks beside each pool are bog: reeds and deep mud, slower going than the worst swimmer's
+// swim, so the water cannot be dodged by running (or hopping) round the side of it.  The ways
+// across are the swim and the tightrope plank.  BOG_WIDTH is how far the bog reaches from the
+// water's edge on each side; going out round that as well is a longer, slower trip than swimming.
+export const BOG_WIDTH = 14;
+export const BOG_SPEED = 0.3;          // share of top speed in the bog (the weakest swimmers keep 0.45 in the water)
+
+/** The pool whose boggy bank (x, z) is on, or null. */
+export function woodlandBogAt(x,z) {
+  for (const pool of WENDOVER.pools) {
+    const { along, side }=poolLocal(pool,x,z);
+    if (Math.abs(along)<=pool.halfLength && Math.abs(side)>pool.halfWidth && Math.abs(side)<=pool.halfWidth+BOG_WIDTH) return pool;
+  }
+  return null;
+}
+
+// Share of a dog's own top speed it keeps in the water, from its swim stat: Poppy (10) is a touch
+// faster in the water than she is on land; the weak swimmers (Meela and Ralph, 4) crawl at under half.
+//   10 -> 1.05   6 -> 0.62   5 -> 0.51   4 -> 0.45
+// The best a swimmer can do is SWIM_BEST: Poppy was 1.35 before and ran away with every pool.
+const SWIM_BEST=1.05;
 export function woodlandSwimMultiplier(swimming=4) {
   const skill=Math.max(0,Math.min(1,(swimming-4)/6));
-  return 0.45+0.9*skill**1.5;
+  return Math.min(SWIM_BEST,0.45+0.9*skill**1.5);
 }
 
 export function entersBurrow(previous,current,tunnel) {

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MAPS } from '../shared/maps.js';
-import { WENDOVER as W, woodlandWaterAt, woodlandPlankAt, plankTopY, woodlandSwimMultiplier, woodlandDogY, entersBurrow } from '../shared/wendoverData.js';
+import { WENDOVER as W, woodlandWaterAt, woodlandPlankAt, plankTopY, woodlandSwimMultiplier, woodlandDogY, entersBurrow, woodlandBogAt, BOG_WIDTH, BOG_SPEED } from '../shared/wendoverData.js';
 
 function poolPoint(pool, along, side=0) {
   const a=pool.rotationY;
@@ -37,7 +37,7 @@ test('Wendover pools have smooth walk-in banks, deep swimming and dry exits', ()
       previous=water.groundY;
     }
   }
-  assert.ok(woodlandSwimMultiplier(10)/woodlandSwimMultiplier(4)>2.4,'Poppy gets a substantial swimming advantage');
+  assert.ok(woodlandSwimMultiplier(10)/woodlandSwimMultiplier(4)>2.3,'Poppy gets a substantial swimming advantage');
   assert.equal(woodlandSwimMultiplier(1),woodlandSwimMultiplier(4));
 });
 
@@ -106,9 +106,10 @@ test('each pool has one really thin tightrope plank: dry on top, back in the wat
   }
 });
 
-test('water speed follows the swim stat: Poppy is faster in the water than on land, Meela and Ralph crawl', () => {
+test('water speed follows the swim stat: Poppy is a touch faster in the water than on land, Meela and Ralph crawl', () => {
   const poppy = woodlandSwimMultiplier(10), pippa = woodlandSwimMultiplier(6), pablo = woodlandSwimMultiplier(5), meela = woodlandSwimMultiplier(4);
-  assert.ok(poppy > 1.3, 'Poppy speeds up in the water');
+  assert.ok(Math.abs(poppy - 1.05) < 1e-9, 'Poppy speeds up a little in the water: 105 % of her land speed');
+  assert.ok(Math.abs(pippa - 0.62) < 0.01 && Math.abs(pablo - 0.51) < 0.01, 'the others are as they were');
   assert.ok(poppy > pippa && pippa > pablo && pablo > meela);
   assert.ok(meela < 0.5 && meela > 0.4, 'weak swimmers keep under half their speed (Meela pays for her land speed here)');
 });
@@ -177,5 +178,32 @@ test('Wendover GLB: a walkable plank top across every pool', async () => {
       const hit = ray.intersectObject(plank, false)[0];
       assert.ok(hit && Math.abs(hit.point.y - plankTopY(pool, along)) < 0.05, `the game stands a dog on the plank top (${pool.id} at ${along})`);
     }
+  }
+});
+
+test('the banks beside every pool are bog: no way round the water that beats swimming it', () => {
+  assert.ok(BOG_SPEED < woodlandSwimMultiplier(4), 'the bog is slower than the weakest swimmer in the water');
+  for (const pool of W.pools) {
+    const mid = (pool.sStart + pool.sEnd) / 2, edge = pool.halfWidth;
+    for (const side of [1, -1]) {
+      for (const s of [pool.sStart + 3, mid, pool.sEnd - 3]) {
+        for (const out of [edge + 0.5, edge + BOG_WIDTH / 2, edge + BOG_WIDTH - 0.5]) {
+          const p = W.pointAt(s, side * out);
+          assert.equal(woodlandBogAt(p.x, p.z)?.id, pool.id, `${pool.id}: bog ${out.toFixed(1)} m out at s=${s.toFixed(0)}`);
+          assert.equal(woodlandWaterAt(p.x, p.z), null, 'bog is not water');
+        }
+        const beyond = W.pointAt(s, side * (edge + BOG_WIDTH + 2));
+        assert.equal(woodlandBogAt(beyond.x, beyond.z), null, 'firm ground beyond the bog');
+      }
+    }
+    // the water itself, the plank and the road before and after the pool are not bog
+    for (const s of [pool.sStart - 6, mid, pool.sEnd + 6]) {
+      const p = W.pointAt(s);
+      assert.equal(woodlandBogAt(p.x, p.z), null);
+    }
+    // right round the outside of the bog at off-track speed (half) is still a slower trip than the
+    // weakest swimmer's swim, even with a free running jump (13 m at full speed) to start it
+    const length = pool.halfLength * 2, round = length + 2 * (pool.halfWidth + BOG_WIDTH);
+    assert.ok((round - 13) / 0.5 + 13 > length / woodlandSwimMultiplier(4) * 1.2, `${pool.id}: going right round is at least a fifth slower`);
   }
 });
