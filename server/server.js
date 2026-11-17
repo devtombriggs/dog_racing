@@ -1452,7 +1452,11 @@ io.on('connection', (socket) => {
 
   // VOICE CHAT: the players' browsers talk to each other directly; the server only says who has a
   // microphone on and passes their connection set-up messages across, within one room.
+  // Switched off for now: the server ignores both messages unless it is started with VOICE_CHAT=1
+  // (and the game only shows the option when built with VITE_VOICE_CHAT=1).
+  const voiceChatOn = () => env.VOICE_CHAT === '1';
   socket.on('setVoice', (data) => {
+    if (!voiceChatOn()) return;
     const room = rooms.get(playerRooms.get(socket.id));
     const player = room?.players.get(socket.id);
     if (!player || room.singlePlayer) return;
@@ -1461,6 +1465,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('voiceSignal', (data) => {
+    if (!voiceChatOn()) return;
     const room = rooms.get(playerRooms.get(socket.id));
     if (!room || typeof data?.to !== 'string' || data.to === socket.id || !room.players.has(data.to)) return;
     if (data.signal === null || typeof data.signal !== 'object') return;

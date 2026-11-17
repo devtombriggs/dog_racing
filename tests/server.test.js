@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
+import { env } from 'node:process';
 import { MAPS } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
@@ -1015,12 +1016,19 @@ test('specials: not for the leader; pheasants land on every other dog, Ralph fli
   for (const p of [tom, berri, sam]) p.call('leaveGame');
 });
 
-test('voice chat: the room hears who has a microphone on; connection messages only pass between players in the same room', () => {
+test('voice chat: off unless the server is started with it; then messages only pass between players in the same room', context => {
   const tom = client(), berri = client(), stranger = client();
   const room = tom.call('hostGame', { name: 'Tom' }).room;
   berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
   stranger.call('hostGame', { name: 'Elsewhere' });
   assert.equal(room.players[0].voice, false, 'off until asked for');
+  // switched off (the default): the server says nothing and passes nothing on
+  const quiet = server.events.length;
+  tom.call('setVoice', { enabled: true });
+  tom.call('voiceSignal', { to: berri.id, signal: { description: { type: 'offer', sdp: 'x' } } });
+  assert.equal(server.events.length, quiet, 'ignored while voice chat is off');
+  env.VOICE_CHAT = '1';
+  context.after(() => { delete env.VOICE_CHAT; });
   tom.call('setVoice', { enabled: true });
   assert.deepEqual(latest(room.code, 'voiceChanged'), { playerId: tom.id, enabled: true });
   const joined = client().call('joinGame', { roomCode: room.code, name: 'Late' });

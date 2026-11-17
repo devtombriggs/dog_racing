@@ -47,9 +47,11 @@ Modbury Heights is a 3.12 km coastal circuit with a beach start, switchback clim
 Its shared data is `shared/modburyData.js`, and its on-demand scenery is `src/tracks/modburyHeights/ModburyHeightsTrack.js`, copied from `../modbury_heights/src/tracks/modburyHeights/` with the visual data import redirected to `shared/`. Refresh both when regenerating the source map. Tests cover supported spawns, terrain continuity, water, natural boundaries, cliff recovery, stale movement, and a complete three-lap multiplayer race.
 
 
-## Voice chat
+## Voice chat (switched off for now)
 
-In a multiplayer lobby, the **Voice chat** box on the dog-select screen turns your microphone on; it stays on through the map vote and the race, and **M** mutes and unmutes during the race. Players who leave it off still hear the ones who turned it on. The option is not remembered between visits, so a microphone only comes on because the box was ticked that time.
+Voice chat is built but **off by default**: the lobby shows no option, no microphone is asked for, no connections are made between players, and the server ignores the voice messages. To bring it back, build the game with `VITE_VOICE_CHAT=1` and start the server with `VOICE_CHAT=1`. Before doing that for a public server, note that hosted rooms are listed for anyone to join, and everyone in a room is in its voice chat.
+
+When it is on: in a multiplayer lobby, the **Voice chat** box on the dog-select screen turns your microphone on; it stays on through the map vote and the race, and **M** mutes and unmutes during the race. Players who leave it off still hear the ones who turned it on. The option is not remembered between visits, so a microphone only comes on because the box was ticked that time.
 
 The players' browsers send their voices straight to each other (`src/voiceChat.js`, WebRTC); the game server only says who has a microphone on and passes their connection messages across within a room (`setVoice`, `voiceSignal` in `server/server.js`).
 

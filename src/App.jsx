@@ -340,6 +340,10 @@ const SERVER_URL =
   import.meta.env.VITE_SERVER_URL ||
   window.location.origin;
 
+// Voice chat is switched off for now: no option in the lobby, no microphone, no connections between
+// players.  Build with VITE_VOICE_CHAT=1 (and start the server with VOICE_CHAT=1) to bring it back.
+const VOICE_CHAT = import.meta.env.VITE_VOICE_CHAT === '1';
+
 // ---------------------------------
 // ANIMATION HELPERS
 // ---------------------------------
@@ -563,7 +567,7 @@ function App() {
   const [voiceStatus, setVoiceStatus] = useState({ enabled: false, muted: false, error: null, connected: 0 });
   const [voiceMap, setVoiceMap] = useState({});          // "room:playerId" -> has a microphone on (as the server tells it)
   const voiceRef = useRef(null);
-  const inVoiceRoom = Boolean(room && !room.singlePlayer && connected);
+  const inVoiceRoom = Boolean(VOICE_CHAT && room && !room.singlePlayer && connected);
   const voiceRoomCode = room?.code ?? null;
   useEffect(() => {
     voiceRef.current?.setEnabled(voiceEnabled && inVoiceRoom);
@@ -742,9 +746,9 @@ function App() {
     socket.on('disconnect', handleDisconnect);
 
     // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
-    const voice = createVoiceChat({ socket, onChange: setVoiceStatus });
+    const voice = VOICE_CHAT ? createVoiceChat({ socket, onChange: setVoiceStatus }) : null;
     voiceRef.current = voice;
-    const handleVoiceSignal = message => voice.handleSignal(message);
+    const handleVoiceSignal = message => voice?.handleSignal(message);
     const handleVoiceChanged = ({ playerId, enabled }) => {
       const key = `${roomRef.current?.code ?? null}:${playerId}`;
       setVoiceMap(map => ({ ...map, [key]: enabled }));
@@ -797,7 +801,7 @@ function App() {
       socket.off('raceStandings', handleRaceStandings);
       socket.off('voiceSignal', handleVoiceSignal);
       socket.off('voiceChanged', handleVoiceChanged);
-      voice.dispose();
+      voice?.dispose();
       voiceRef.current = null;
 
       socket.disconnect();
@@ -3380,7 +3384,7 @@ function App() {
                 <small>Runs for you · ↑ jump · ↓ use item</small>
               </span>
             </label>
-            {multiplayer && (
+            {VOICE_CHAT && multiplayer && (
               <label className="character-select__accessibility">
                 <input
                   type="checkbox"
@@ -3662,7 +3666,7 @@ function App() {
               <div>Space or scroll down to jump · Shift to use an item</div>
             </>
           )}
-          {room && !room.singlePlayer && (
+          {VOICE_CHAT && room && !room.singlePlayer && (
             <div style={{ color: voiceStatus.enabled && !voiceStatus.muted ? '#9fe49b' : '#b4c9b5' }}>
               {voiceStatus.error ? `Voice chat: ${voiceStatus.error}`
                 : !voiceStatus.enabled ? 'Voice chat: your microphone is off'
