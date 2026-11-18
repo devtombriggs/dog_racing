@@ -1926,3 +1926,28 @@ test('Ralph on his rocket paws is still fired by the cannon and thrown by the ca
     for (const s of sockets) s.call('leaveGame');
   }
 });
+
+test('split screen: a single-player room with a second seat that only the page which made it can take; computer dogs fill the rest', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const one = client(), two = client(), stranger = client(), key = 'the-key-only-this-page-has';
+  const room = one.call('hostGame', { name: 'Player 1', local: true, localKey: key }).room;
+  assert.deepEqual([room.singlePlayer, room.local], [true, true]);
+  assert.equal(room.localKey, undefined, 'the key is not sent back');
+  assert.equal(stranger.call('joinGame', { roomCode: room.code }).success, false, 'not without the key');
+  assert.equal(stranger.call('joinGame', { roomCode: room.code, localKey: 'another-key-altogether' }).success, false);
+  assert.equal(two.call('joinGame', { roomCode: room.code, name: 'Player 2', localKey: key }).success, true);
+  assert.equal(stranger.call('joinGame', { roomCode: room.code, localKey: key }).success, false, 'two seats, no more');
+  one.call('selectDog', { dog: 'kombu' }); one.call('setReady', { ready: true });
+  assert.equal(two.call('selectDog', { dog: 'kombu' }).success, false, 'one of each dog');
+  two.call('selectDog', { dog: 'ralph' }); two.call('setReady', { ready: true });
+  one.call('setBots', { count: 4 });                       // (more than there is room for)
+  one.call('selectMap', { mapId: 'farmyard' });
+  assert.equal(two.call('startRace').success, false, 'player 1 starts it');
+  assert.equal(one.call('startRace').success, true);
+  const start = latest(room.code, 'raceStarted');
+  assert.deepEqual(start.players.map(p => Boolean(p.bot)), [false, false, true, true, true], 'two players and three computer dogs');
+  // an ordinary single-player room still has one seat
+  const solo = client().call('hostGame', { singlePlayer: true }).room;
+  assert.equal(two.call('joinGame', { roomCode: solo.code, localKey: key }).success, false);
+  for (const p of [one, two]) p.call('leaveGame');
+});

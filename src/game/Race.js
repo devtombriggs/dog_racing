@@ -137,7 +137,8 @@ export class Race {
     this.input = new PlayerInput({
       element: renderer.domElement,
       racing: () => session.raceGo && !session.raceFinished,
-      accessible: () => session.state.accessibilityMode,
+      accessible: () => session.state.accessibilityMode && !session.device,
+      device: session.device,
       onJump: () => this.local.tryJump(),
       onUseItem: () => { if (this.myItem) socket.emit('useItem'); }
     });

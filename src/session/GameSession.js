@@ -46,6 +46,12 @@ function rememberedVoice() {
 export class GameSession {
   socket = null;
   voice = null;
+  // Split screen: the second player on this computer has a session of their own (`guest: true`), made
+  // and run by the first player's.  It makes no sound of its own, has no voice chat and no seat to come
+  // back to.  `device` is what this player drives with: { type: 'keyboard' } or { type: 'pad', index }
+  // (null: any, as when playing alone).
+  guest = false;
+  device = null;
 
   // The race clock, read every frame by the race: not part of `state`, so changing it redraws nothing
   raceGo = false;
@@ -55,7 +61,7 @@ export class GameSession {
   singlePlayer = false;
 
   state = {
-    screen: 'menu',          // 'menu' | 'join' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
+    screen: 'menu',          // 'menu' | 'join' | 'localJoin' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
     raceNumber: 0,           // counts the races this visit: each one gets a fresh race screen
     notice: '',              // a passing word about someone else ("Berri lost connection"), shown for a few seconds
     room: null,
@@ -66,6 +72,8 @@ export class GameSession {
     socketId: null,
     error: '',
     hoveredDog: null,
+    // split screen: the second player's session, while a local game is on (see startLocalGame)
+    local: null,
     connected: false,
     lap: 1,
     checkpoint: 0,
@@ -94,7 +102,8 @@ export class GameSession {
   #events = null;
   #muteKeyOn = false;
 
-  constructor() {
+  constructor({ guest = false } = {}) {
+    this.guest = guest;
     // Off unless the player turns it on.  (The key was renamed so that browsers which had remembered it
     // as on start with it off again.)
     try { this.state.accessibilityMode = localStorage.getItem(ACCESSIBILITY_KEY) === '1'; } catch { /* storage blocked */ }
@@ -134,7 +143,7 @@ export class GameSession {
     const now = this.state;
 
     // Countdown and music stop as soon as the player leaves the race screen
-    if (now.screen !== previous.screen && now.screen !== 'race') gameAudio.stopRace();
+    if (now.screen !== previous.screen && now.screen !== 'race' && !this.guest) gameAudio.stopRace();
 
     if (!this.voice) return;
     const inVoiceRoom = this.#inVoiceRoom;
@@ -171,10 +180,12 @@ export class GameSession {
   #resumed(response) {
     if (!response?.success) {
       // nothing held: if this game thought it was in a room (the connection dropped for too long), it is not any more
-      if (this.state.room) this.set({ ...NO_RACE, room: null, screen: 'menu', error: 'Connection lost: you were away too long to rejoin' });
+      if (this.state.room) { this.#endLocal(); this.set({ ...NO_RACE, room: null, screen: 'menu', error: 'Connection lost: you were away too long to rejoin' }); }
       return;
     }
     const { room, race, playerId } = response;
+    // (a split-screen game does not outlast a refresh: the other half's player is gone)
+    if (room.local) { this.socket.emit('leaveGame'); this.#endLocal(); this.set({ ...NO_RACE, room: null, screen: 'menu' }); return; }
     this.singlePlayer = room.singlePlayer === true;
     this.#resetRaceClock();
     if (!race) {
@@ -243,7 +254,7 @@ export class GameSession {
     this.socket = socket;
 
     // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
-    const voice = VOICE_CHAT ? createVoiceChat({
+    const voice = VOICE_CHAT && !this.guest ? createVoiceChat({
       socket,
       selfId: () => this.state.socketId ?? socket.id,
       onChange: (voiceStatus) => {
@@ -260,7 +271,7 @@ export class GameSession {
         this.set({ connected: true, socketId: socket.id });
         // Say who this browser is.  After a refresh, or a dropped connection, the server may still be
         // holding this player's seat: then they are straight back in their room, on the same dog.
-        socket.emit('resume', { token: seatToken() }, response => this.#resumed(response));
+        if (!this.guest) socket.emit('resume', { token: seatToken() }, response => this.#resumed(response));
       },
 
       disconnect: () => {
@@ -294,7 +305,7 @@ export class GameSession {
       raceStarted: (data) => {
         console.log('Race loading:', data);
         const mapId = data.mapId ?? DEFAULT_MAP;
-        gameAudio.loadRace(mapId);
+        if (!this.guest) gameAudio.loadRace(mapId);
         this.#resetRaceClock();
 
         this.set({
@@ -312,7 +323,7 @@ export class GameSession {
 
       raceCountdown: (data) => {
         console.log('Countdown:', data.number);
-        if (data.number === 3) gameAudio.playRace('countdown');
+        if (data.number === 3 && !this.guest) gameAudio.playRace('countdown');
         this.set({ racePhase: String(data.number) });
       },
 
@@ -320,7 +331,7 @@ export class GameSession {
         console.log('GO!');
         this.raceStart = performance.now();
         this.raceGo = true;
-        gameAudio.playRace('music');
+        if (!this.guest) gameAudio.playRace('music');
         this.set({ racePhase: 'GO!' });
       },
 
@@ -384,7 +395,8 @@ export class GameSession {
     this.voice?.dispose();
     this.voice = null;
     this.#listenForMuteKey(false);
-    gameAudio.stopRace();
+    if (!this.guest) gameAudio.stopRace();
+    this.#endLocal();
     socket.disconnect();
     this.socket = null;
   }
@@ -423,6 +435,10 @@ export class GameSession {
   setVoiceEnabled = (voiceEnabled) => {
     this.set({ voiceEnabled });
     try { sessionStorage.setItem(VOICE_KEY, voiceEnabled ? '1' : '0'); } catch { /* storage blocked */ }
+  };
+
+  openLocalJoinScreen = () => {
+    this.set({ error: '', screen: 'localJoin' });
   };
 
   openJoinScreen = () => {
@@ -473,6 +489,77 @@ export class GameSession {
       this.set({ room: response.room, screen: 'selection' });
     });
   };
+
+  // ---------------------------------
+  // SPLIT SCREEN: two players at this computer, each with half the screen and their own controls
+  // ---------------------------------
+  // The server sees an ordinary private game with two players: this session is the first, and it makes
+  // a second session (the guest) on a connection of its own for the other.  The first player's session
+  // runs the menus; each half of the race screen is drawn from its own session.
+  //   devices: [player 1's, player 2's], each { type: 'keyboard' } or { type: 'pad', index }
+
+  startLocalGame = (devices) => {
+    this.set({ error: '' });
+    if (!this.socket?.connected) { this.set({ error: 'Not connected to server' }); return; }
+    const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+    this.singlePlayer = true;
+    this.socket.emit('hostGame', { name: this.state.playerName || 'Player 1', local: true, localKey: key }, (response) => {
+      if (!response?.success) {
+        this.singlePlayer = false;
+        this.set({ error: response?.error || 'Failed to create the game' });
+        return;
+      }
+      const guest = new GameSession({ guest: true });
+      guest.singlePlayer = true;
+      guest.device = devices[1];
+      this.device = devices[0];
+      this.set({ room: response.room, local: { guest } });
+      guest.connect();
+      const failed = (error) => { this.leaveGame(); this.set({ error }); };
+      const timer = setTimeout(() => failed('Could not connect the second player'), 8000);
+      guest.socket.once('connect', () => {
+        guest.socket.emit('joinGame', { roomCode: response.room.code, name: 'Player 2', localKey: key }, (joined) => {
+          clearTimeout(timer);
+          if (this.state.local?.guest !== guest) return;          // (left in the meantime)
+          if (!joined?.success) { failed(joined?.error || 'Could not add the second player'); return; }
+          guest.set({ room: joined.room });
+          this.set({ screen: 'selection' });
+        });
+      });
+    });
+  };
+
+  // Split screen, character select: player 0 or 1 takes a dog.  When the second has, on to the map.
+  pickLocalDog = (index, dogId, picked) => {
+    const guest = this.state.local?.guest, socket = index === 0 ? this.socket : guest?.socket;
+    this.set({ error: '', hoveredDog: null });
+    if (!socket?.connected) { this.set({ error: 'Not connected to server' }); return; }
+    socket.emit('selectDog', { dog: dogId }, (response) => {
+      if (!response?.success) { this.set({ error: response?.error || 'Failed to select dog' }); return; }
+      gameAudio.playSelection(dogId);
+      socket.emit('setReady', { ready: true }, (ready) => {
+        if (!ready?.success) { this.set({ error: ready?.error || 'Failed to ready up' }); return; }
+        picked?.();
+        if (index === 1) this.set({ screen: 'mapSelect' });
+      });
+    });
+  };
+
+  // Split screen, back at character select: both dogs go back, to be picked again in turn
+  freeLocalDogs = () => {
+    this.socket?.emit('changeDog');
+    this.state.local?.guest.socket?.emit('changeDog');
+  };
+
+  // The local game is over (left, or the connection went): the second player's session goes with it
+  #endLocal() {
+    const guest = this.state.local?.guest;
+    this.device = null;
+    if (!guest) return;
+    this.state = { ...this.state, local: null };
+    guest.socket?.emit('leaveGame');
+    guest.disconnect();
+  }
 
   // ---------------------------------
   // JOIN GAME
@@ -598,6 +685,7 @@ export class GameSession {
   };
 
   leaveGame = () => {
+    this.#endLocal();
     this.singlePlayer = false;
     this.#resetRaceClock();
     this.socket?.emit('leaveGame');

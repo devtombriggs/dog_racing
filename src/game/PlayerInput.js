@@ -35,7 +35,10 @@ export class PlayerInput {
   // element: the race canvas (scrolling down over it jumps)
   // racing(): the race is on and this player has not finished
   // accessible(): accessibility mode is on (Up jumps, Down uses the item)
-  constructor({ element, racing, accessible, onJump, onUseItem }) {
+  // device: what this player drives with: { type: 'keyboard' } or { type: 'pad', index } (split screen).
+  //         Left out, it is the keyboard and whichever controller is plugged in.
+  constructor({ element, racing, accessible, onJump, onUseItem, device = null }) {
+    this.device = device;
     this.keys = {};
     this.pad = readPad(null);        // what the controller is asking for, as of the last update()
     this.element = element;
@@ -44,8 +47,9 @@ export class PlayerInput {
     this.onJump = onJump;
     this.onUseItem = onUseItem;
 
-    element.addEventListener('wheel', this.#onWheel, { passive: false });
     window.addEventListener('blur', this.clear);
+    if (device?.type === 'pad') return;                 // (a controller's player has no keys)
+    element.addEventListener('wheel', this.#onWheel, { passive: false });
     window.addEventListener('keydown', this.#onKeyDown);
     window.addEventListener('keyup', this.#onKeyUp);
   }
@@ -61,7 +65,10 @@ export class PlayerInput {
   // Once a frame: read the controller (a browser has to be asked; it sends no events for buttons)
   update() {
     const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? [...navigator.getGamepads()] : [];
-    const next = readPad(pads.find(pad => pad?.connected && pad.mapping === 'standard') ?? pads.find(pad => pad?.connected) ?? null);
+    const mine = this.device?.type === 'keyboard' ? null
+      : this.device?.type === 'pad' ? pads.find(pad => pad?.index === this.device.index) ?? null
+        : pads.find(pad => pad?.connected && pad.mapping === 'standard') ?? pads.find(pad => pad?.connected) ?? null;
+    const next = readPad(mine);
     const racing = this.racing();
     if (racing && next.jump && !this.pad.jump) this.onJump();
     if (racing && next.item && !this.pad.item) this.onUseItem();

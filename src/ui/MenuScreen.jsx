@@ -1,8 +1,13 @@
+import { useState } from 'react';
 import { pageStyle, panelStyle, buttonStyle } from './styles.js';
 
-// The first screen: your name, and how you want to play
+// The first screen: your name, and how you want to play.
+//   Single Player
+//   Multiplayer  ->  Online (host a game, or join one)  or  Local (two players, split screen)
 export function MenuScreen({ session, state }) {
   const { playerName, connected, error } = state;
+  const [multiplayer, setMultiplayer] = useState(false);
+  const heading = { margin: '18px 0 4px', fontSize: 13, letterSpacing: 1, color: '#b4c9b5', textTransform: 'uppercase' };
 
   return (
     <div style={pageStyle}>
@@ -26,29 +31,22 @@ export function MenuScreen({ session, state }) {
             : 'Disconnected'}
         </p>
 
-        <button
-          style={buttonStyle}
-          disabled={!connected}
-          onClick={session.startSinglePlayer}
-        >
-          Single Player
-        </button>
-
-        <button
-          style={buttonStyle}
-          disabled={!connected}
-          onClick={session.hostGame}
-        >
-          Host Game
-        </button>
-
-        <button
-          style={buttonStyle}
-          disabled={!connected}
-          onClick={session.openJoinScreen}
-        >
-          Join Game
-        </button>
+        {!multiplayer ? (
+          <>
+            <button style={buttonStyle} disabled={!connected} onClick={session.startSinglePlayer}>Single Player</button>
+            <button style={buttonStyle} disabled={!connected} onClick={() => setMultiplayer(true)}>Multiplayer</button>
+          </>
+        ) : (
+          <>
+            <p style={heading}>Online</p>
+            <button style={buttonStyle} disabled={!connected} onClick={session.hostGame}>Host Game</button>
+            <button style={buttonStyle} disabled={!connected} onClick={session.openJoinScreen}>Join Game</button>
+            <p style={heading}>Local</p>
+            <button style={buttonStyle} disabled={!connected} onClick={session.openLocalJoinScreen}>Split Screen (2 players)</button>
+            <p style={{ margin: '4px 0 14px', fontSize: 13, color: '#b4c9b5' }}>Two players on this screen: a keyboard and a controller, or two controllers</p>
+            <button style={{ ...buttonStyle, background: '#3d5a45', color: 'white' }} onClick={() => setMultiplayer(false)}>← Back</button>
+          </>
+        )}
 
         {error && (
           <p style={{ color: 'salmon' }}>

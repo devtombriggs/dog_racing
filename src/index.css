@@ -712,3 +712,22 @@ html, body, #root {
   color: #ffd257;
   font-weight: bold;
 }
+
+/* ---------------------------------
+   SPLIT SCREEN: two race screens side by side
+   --------------------------------- */
+.split-race { display: flex; width: 100vw; height: 100vh; background: #0b1510; }
+.split-race__waiting { width: 50vw; display: grid; place-items: center; color: #b4c9b5; font: 600 18px Arial, sans-serif; }
+.race-half { contain: layout; }                                  /* (anything fixed inside stays in its half) */
+.race-half--right { border-left: 3px solid #0b1510; box-sizing: border-box; }
+.race-half__player {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 11; pointer-events: none;
+  padding: 4px 12px; border-radius: 999px; background: rgba(10, 25, 15, 0.82); color: #ffd257;
+  font: 700 12px Arial, sans-serif; letter-spacing: 1.5px;
+}
+/* each half is narrow: the panels are smaller so the road stays in view */
+/* (the controls are on the join screen and in the README: no room for them here) */
+.race-half .race-hud__hints { display: none; }
+.race-half .race-hud { transform: scale(0.78); transform-origin: top right; top: 10px !important; right: 10px !important; }
+.race-half .race-standings { transform: scale(0.78); transform-origin: top left; }
+.race-half canvas[aria-label="Course map"] { transform: scale(0.7); transform-origin: bottom left; }

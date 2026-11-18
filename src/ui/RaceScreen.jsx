@@ -8,7 +8,8 @@ import { ResultsPanel } from './race/ResultsPanel.jsx';
 
 // The race: the 3D view with the course map, race order, HUD, countdown and results over it.
 // The race itself is game/Race.js; this gives it somewhere to draw and shows what the session says.
-export function RaceScreen({ session, state }) {
+// split: 'left' or 'right' when this is one half of a split screen (two players at one computer)
+export function RaceScreen({ session, state, split = null }) {
   const containerRef = useRef(null);
   const minimapRef = useRef(null);
   const speedRef = useRef(null);
@@ -36,8 +37,9 @@ export function RaceScreen({ session, state }) {
 
   return (
     <div
+      className={split ? `race-half race-half--${split}` : undefined}
       style={{
-        width: '100vw',
+        width: split ? '50vw' : '100vw',
         height: '100vh',
         position: 'relative',
         overflow: 'hidden',
@@ -68,10 +70,11 @@ export function RaceScreen({ session, state }) {
         ? <div className="race-incoming" role="alert">FIREWORK INCOMING!</div>
         : state.frisbeesIncoming.length > 0 && <div className="race-incoming" role="alert">FRISBEE INCOMING!</div>}
 
-      <HudPanel state={state} speedRef={speedRef} timerRef={timerRef} surfaceRef={surfaceRef} />
+      {split && <div className="race-half__player">PLAYER {split === 'left' ? 1 : 2}</div>}
+      <HudPanel state={state} speedRef={speedRef} timerRef={timerRef} surfaceRef={surfaceRef} device={session.device} />
       <CountdownOverlay racePhase={state.racePhase} />
       <ResultsPanel session={session} finishTime={state.finishTime} lobbyReturnAt={state.lobbyReturnAt}
-        raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} />
+        raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} buttons={split !== 'right'} />
     </div>
   );
 }

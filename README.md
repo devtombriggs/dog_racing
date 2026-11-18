@@ -72,6 +72,12 @@ A controller works in the race beside the keyboard, laid out like an Xbox 360 pa
 
 The menus, dog select and map screens still need a mouse or keyboard.
 
+## Split screen (two players at one computer)
+
+Menu: **Multiplayer → Local → Split Screen**. Player 1 presses Enter on the keyboard or A on a controller, then player 2 does the same on a different one; what each pressed is what they drive with, so it needs a keyboard and a controller, or two controllers. Player 1 has the left half of the screen, player 2 the right. They pick dogs in turn, player 1 picks the map or a Grand Prix, and computer dogs fill the other three places.
+
+How it works: the server sees a single-player room with a second seat (`local: true`; only the page that made the room has the key to that seat). The first player's `GameSession` makes a second one (`guest: true`) on a connection of its own (`startLocalGame`), and the race screen is two `RaceScreen`s side by side, one per session (`SplitRace` in `src/App.jsx`), so each half is a whole game of its own: the map is loaded and drawn twice. `PlayerInput` takes the player's `device`. Only the first session makes the countdown and music. A split-screen game does not survive a page refresh. Menus still need the mouse.
+
 ## Voice chat
 
 Voice chat is **on**. Nobody's microphone comes on unless they tick the box, and single-player games have no voice chat. To take it out, build the game with `VITE_VOICE_CHAT=0` and start the server with `VOICE_CHAT=0`. On a public server, note that hosted rooms are listed for anyone to join, and everyone in a room is in its voice chat.

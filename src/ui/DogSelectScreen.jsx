@@ -1,10 +1,19 @@
+import { useEffect, useState } from 'react';
 import { DOGS, STAT_LABELS, playerColor } from '../config/dogs.js';
 import { VOICE_CHAT } from '../config/env.js';
 import { BotSettings } from './BotSettings.jsx';
 
 // Character select: one of each dog per race, and everyone can see who is looking at what
 export function DogSelectScreen({ session, state }) {
-  const { room, socketId, hoveredDog, connected, accessibilityMode, voiceEnabled, voiceStatus, error } = state;
+  const { room, hoveredDog, connected, accessibilityMode, voiceEnabled, voiceStatus, error, local } = state;
+
+  // Split screen: player 1 picks, then player 2 (each time the screen is come back to, both pick again)
+  const [turn, setTurn] = useState(0);
+  useEffect(() => { if (local) session.freeLocalDogs(); }, [local, session]);
+  const picker = local && turn === 1 ? room?.players.find(player => player.id !== state.socketId && !player.bot) : null;
+  // (whose screen this is just now: in split screen, the player whose turn it is)
+  const socketId = picker?.id ?? state.socketId;
+  const pick = id => (local ? session.pickLocalDog(turn, id, () => setTurn(1)) : session.selectDog(id));
 
   const myDog = room?.players.find(player => player.id === socketId)?.dog ?? null;
   const multiplayer = !room?.singlePlayer;
@@ -15,9 +24,10 @@ export function DogSelectScreen({ session, state }) {
         <header className="character-select__header">
           <div>
             <p className="character-select__eyebrow">Dog Racing / Character Select</p>
-            <h1 id="character-select-title">Choose Your Dog</h1>
+            <h1 id="character-select-title">{local ? `Player ${turn + 1}: Choose Your Dog` : 'Choose Your Dog'}</h1>
             <p className="character-select__hint">
-              {!room || room.players.length < 2
+              {local ? (turn === 0 ? 'Player 1 picks first, then player 2. You race on the left half of the screen.' : 'Player 2: your turn. You race on the right half of the screen.')
+                : !room || room.players.length < 2
                 ? 'Pick your partner. Own the track.'
                 : `One of each dog per race. ${room.players.filter(player => player.dog).length} of ${room.players.length} players have picked.`}
             </p>
@@ -53,7 +63,7 @@ export function DogSelectScreen({ session, state }) {
               onBlur={() => session.hoverDog(null)}
               aria-label={`${dog.name}. ${takenBy ? `Taken by ${takenBy.name}. ` : ''}${STAT_LABELS.map(([key, label]) => `${label} ${dog.stats[key]} out of 10`).join(', ')}`}
               disabled={!connected || Boolean(takenBy)}
-              onClick={() => session.selectDog(id)}
+              onClick={() => pick(id)}
             >
               <img src={dog.portrait} alt="" width="1280" height="1280" draggable="false" />
               {takenBy
@@ -92,7 +102,7 @@ export function DogSelectScreen({ session, state }) {
 
         <footer className="character-select__footer">
           <button className="character-select__back" onClick={session.leaveGame}>Leave Game</button>
-          <label className="character-select__accessibility">
+          {!local && <label className="character-select__accessibility">
             <input
               type="checkbox"
               checked={accessibilityMode}
@@ -102,8 +112,8 @@ export function DogSelectScreen({ session, state }) {
               Accessibility mode
               <small>Runs for you · ↑ jump · ↓ use item</small>
             </span>
-          </label>
-          <BotSettings session={session} room={room} canChange={connected && room?.hostId === socketId} />
+          </label>}
+          <BotSettings session={session} room={room} canChange={connected && room?.hostId === state.socketId} />
           {VOICE_CHAT && multiplayer && (
             <label className="character-select__accessibility">
               <input

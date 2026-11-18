@@ -8,11 +8,13 @@ import { hudStyle } from '../styles.js';
 // The panel at the top right: lap, item, speed, time, the ground under the dog and the controls.
 // The speed, time and ground readouts are written straight to the page by the race, every frame,
 // through the three refs.
-export function HudPanel({ state, speedRef, timerRef, surfaceRef }) {
+// device: in split screen, what this player drives with (the hints are for that)
+export function HudPanel({ state, speedRef, timerRef, surfaceRef, device = null }) {
+  const press = device?.type === 'pad' ? 'press X' : 'press Shift';
   const { room, socketId, lap, heldItem, checkpoint, totalCheckpoints, accessibilityMode, voiceStatus } = state;
 
   return (
-    <div style={hudStyle}>
+    <div style={hudStyle} className="race-hud">
       <div
         style={{
           fontSize: 12,
@@ -41,8 +43,8 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef }) {
           <img src="/icons/special.png" alt="" style={{ width: 30, height: 30, verticalAlign: 'middle', marginRight: 6 }} />
         )}
         {heldItem === SPECIAL_ITEM
-          ? `${SPECIALS[room?.players.find(p => p.id === socketId)?.dog]?.name ?? 'Special'} · press Shift`
-          : heldItem ? `${ITEM_NAMES[heldItem]} · press Shift` : 'None: run through a box'}
+          ? `${SPECIALS[room?.players.find(p => p.id === socketId)?.dog]?.name ?? 'Special'} · ${press}`
+          : heldItem ? `${ITEM_NAMES[heldItem]} · ${press}` : 'None: run through a box'}
       </div>
 
       <div
@@ -119,8 +121,10 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef }) {
       >
         ON TRACK
       </div>
-      <div style={{ fontSize: 11, marginTop: 14, color: '#b4c9b5', lineHeight: 1.6 }}>
-        {accessibilityMode ? (
+      <div className="race-hud__hints" style={{ fontSize: 11, marginTop: 14, color: '#b4c9b5', lineHeight: 1.6 }}>
+        {device?.type === 'pad' ? (
+          <div>RT go · LT brake · stick steer · A jump · X use an item</div>
+        ) : accessibilityMode && !device ? (
           <>
             <div>Accessibility mode: your dog runs by itself</div>
             <div>A / D or ← / → steer</div>
@@ -133,7 +137,7 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef }) {
             <div>Space or scroll down to jump · Shift to use an item</div>
           </>
         )}
-        <div>Controller: RT go · LT brake · stick steer · A jump · X use an item</div>
+        {!device && <div>Controller: RT go · LT brake · stick steer · A jump · X use an item</div>}
         {VOICE_CHAT && room && !room.singlePlayer && (
           <div style={{ color: voiceStatus.enabled && !voiceStatus.muted ? '#9fe49b' : '#b4c9b5' }}>
             {voiceStatus.error ? `Voice chat: ${voiceStatus.error}`

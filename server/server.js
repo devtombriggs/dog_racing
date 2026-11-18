@@ -950,6 +950,8 @@ function getRoomData(room) {
     hostId: room.hostId,
     status: room.status,
     singlePlayer: room.singlePlayer === true,
+    // split screen: two players at one computer (a single-player room with a second seat)
+    local: room.local === true,
     // computer-controlled dogs: how many the host has asked for, and how good
     bots: room.bots,
     grandPrix: grandPrixInfo(room),
@@ -1704,14 +1706,19 @@ io.on('connection', (socket) => {
 
     const roomCode = generateRoomCode();
     const player = createPlayer(playerId, playerName(data?.name, 'Host'));
+    const localKey = data?.local === true && typeof data.localKey === 'string' && data.localKey.length >= 16 && data.localKey.length <= 64 ? data.localKey : null;
 
     const room = {
       code: roomCode,
       hostId: playerId,
       status: 'lobby',
-      singlePlayer: data?.singlePlayer === true,
+      // (split screen is a single-player room with one more seat, for the other half of the same screen:
+      // only the page that made the room has the key to it)
+      singlePlayer: data?.singlePlayer === true || localKey !== null,
+      local: localKey !== null,
+      localKey,
       // computer-controlled dogs: enough to fill the grid
-      bots: { count: data?.singlePlayer === true ? SOLO_BOTS : ROOM_BOTS, level: 'medium' },
+      bots: { count: localKey !== null ? Math.min(SOLO_BOTS, MAX_PLAYERS - 2) : data?.singlePlayer === true ? SOLO_BOTS : ROOM_BOTS, level: 'medium' },
       botTimer: null,
       grandPrix: null,         // the Grand Prix being run: { id, round, points }
       mapId,
@@ -1764,7 +1771,8 @@ io.on('connection', (socket) => {
       });
     }
 
-    if (room.singlePlayer && room.hostId !== playerId) {
+    const secondSeat = room.local && room.players.size < 2 && data?.localKey === room.localKey;      // the other half of a split screen
+    if (room.singlePlayer && room.hostId !== playerId && !secondSeat) {
       return callback({ success: false, error: 'This is a single-player game' });
     }
 
