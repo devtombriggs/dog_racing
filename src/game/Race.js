@@ -1,0 +1,460 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/Addons.js';
+import { MAPS, DEFAULT_MAP, PROCEDURAL_TRACKS } from '../../shared/maps.js';
+import { GOLDEN_BONE_SPOTS } from '../../shared/pickupSpots.js';
+import { WENDOVER } from '../../shared/wendoverData.js';
+import { createTreatBoxes } from '../pickups/treatBoxes.js';
+import { createGoldenBones } from '../pickups/goldenBones.js';
+import { createItems } from '../pickups/items.js';
+import { createSpecials } from '../abilities/specials.js';
+import { createMinimap } from '../minimap.js';
+import { formatTime } from '../utils/format.js';
+import { RaceScene } from './RaceScene.js';
+import { TrackWorld } from './TrackWorld.js';
+import { ChaseCamera } from './ChaseCamera.js';
+import { PlayerInput } from './PlayerInput.js';
+import { RescueWatch } from './RescueWatch.js';
+import { LocalDog } from './dogs/LocalDog.js';
+import { RemoteDog } from './dogs/RemoteDog.js';
+
+const NETWORK_INTERVAL = 0.05;     // seconds between telling the server where the dog is
+
+// One race, from the loading screen to leaving it: builds the 3D view, the map, the dogs and the
+// pickups, listens to what the server says happens, and runs the frame loop.
+//
+// The parts:  stage (RaceScene)  world (TrackWorld)  local (LocalDog)  remotes (RemoteDog by player id)
+//             chaseCamera  input  rescue  hud  and the pickups, items, specials and minimap.
+export class Race {
+  // container: the element to draw in.  minimapCanvas: the course map's canvas.
+  // session: the GameSession (the socket, the room, the race clock).  hud: the RaceHud to write to.
+  constructor({ container, minimapCanvas, session, hud }) {
+    this.session = session;
+    this.socket = session.socket;
+    this.hud = hud;
+
+    const room = session.state.room;
+    const mapId = this.mapId = room.mapId ?? DEFAULT_MAP;
+    const socket = this.socket;
+
+    this.stage = new RaceScene(container, MAPS[mapId]);
+    const { scene, renderer } = this.stage;
+    this.loader = new GLTFLoader();
+
+    this.burrowOverlay = document.createElement('div');
+    this.burrowOverlay.className = 'burrow-overlay';
+    this.burrowOverlay.hidden = true;
+    this.burrowOverlay.textContent = 'BURROW BOOST';
+    container.appendChild(this.burrowOverlay);
+
+    // ---------------------------------
+    // DOGS AND MAP
+    // ---------------------------------
+
+    this.localPlayer = room.players.find((p) => p.id === socket.id);
+    this.local = new LocalDog(this, this.localPlayer);
+    this.remotes = new Map();
+    this.world = new TrackWorld({ mapId, stage: this.stage, dogId: this.local.dogId, dogSize: this.local.size });
+
+    // ---------------------------------
+    // PICKUPS, ITEMS AND SPECIALS
+    // ---------------------------------
+
+    // Pickups on every map: Treat Boxes (the server says when one is taken) and Golden Bones
+    // (speed boosts, local to this player). Spots come from shared/pickupSpots.js.
+    this.treatBoxes = createTreatBoxes({ scene, mapId });
+    this.goldenBones = createGoldenBones({ scene, renderer, placements: GOLDEN_BONE_SPOTS[mapId] ?? [] });
+    // Items from the boxes: held above heads, thrown balls, dropped chew toys (the server decides)
+    this.items = createItems({ scene, renderer });
+    // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
+    this.specials = createSpecials({
+      scene,
+      resolve: id => (id === socket.id ? this.local.group : this.remotes.get(id)?.group ?? null)
+    });
+    // The course map, bottom left: the whole lap from above with a dot for every dog (src/minimap.js)
+    this.minimap = createMinimap({
+      canvas: minimapCanvas, mapId,
+      marks: (PROCEDURAL_TRACKS[mapId]?.chasms ?? []).map(chasm => chasm.s)    // Modbury's broken bridges
+    });
+    this.myItem = null;
+    this.rescue = new RescueWatch({ mapId, socket, hud });
+
+    // ---------------------------------
+    // LOADING
+    // ---------------------------------
+
+    this.world.load(this.loader).then(() => {
+      if (this.#disposed) return;
+      this.local.standOnGround();
+      this.#trackLoaded = true;
+      this.#notifyLoaded();
+    }).catch(error => this.#loadFailed(MAPS[mapId].name, error));
+
+    this.local.load(this.loader, {
+      castShadow: this.world.castsShadows,
+      wanted: () => !this.#disposed,
+      onLoaded: () => {
+        this.specials.register(socket.id, this.local.specialsEntry);
+        this.#dogLoaded = true;
+        this.#notifyLoaded();
+      },
+      onError: error => this.#loadFailed('dog model', error)
+    });
+
+    // Spawn players already in the race
+    room.players.forEach(player => this.#spawnRemote(player));
+
+    // ---------------------------------
+    // CONTROLS AND CAMERA
+    // ---------------------------------
+
+    this.#events = this.#serverEvents();
+    for (const [event, handler] of Object.entries(this.#events)) socket.on(event, handler);
+
+    this.input = new PlayerInput({
+      element: renderer.domElement,
+      racing: () => session.raceGo && !session.raceFinished,
+      accessible: () => session.state.accessibilityMode,
+      onJump: () => this.local.tryJump(),
+      onUseItem: () => { if (this.myItem) socket.emit('useItem'); }
+    });
+
+    this.chaseCamera = new ChaseCamera(this.stage.camera, this.local.group, this.local.config);
+
+    // ---------------------------------
+    // GAME LOOP
+    // ---------------------------------
+
+    this.#timer = new THREE.Timer();
+    this.#timer.connect(document);
+    this.#frame();
+  }
+
+  #disposed = false;
+  #trackLoaded = false;
+  #dogLoaded = false;
+  #remoteModelsPending = 0;
+  #readySent = false;
+  #events = null;
+  #timer = null;
+  #animationId = 0;
+  #networkTimer = 0;
+  #wasRacing = false;
+  #goBannerCleared = false;
+
+  // ---------------------------------
+  // MODEL LOADING
+  // ---------------------------------
+
+  // Tell the server once everything is on screen: the countdown starts when every player has
+  #notifyLoaded() {
+    if (this.#disposed || this.#readySent || !this.#trackLoaded || !this.#dogLoaded || this.#remoteModelsPending > 0) {
+      return;
+    }
+
+    this.#readySent = true;
+    console.log('All models loaded. Ready for countdown.');
+    this.socket.emit('raceLoaded');
+  }
+
+  #loadFailed(name, error) {
+    if (this.#disposed) return;       // the race was left while it loaded: nothing to report
+    console.error(`Failed to load ${name}:`, error);
+    this.session.set({ racePhase: `Failed to load ${name}` });
+  }
+
+  #spawnRemote(data) {
+    if (data.id === this.socket.id || this.remotes.has(data.id)) return;
+
+    const remote = new RemoteDog(data, this.stage.scene);
+    this.remotes.set(data.id, remote);
+    this.#remoteModelsPending += 1;
+
+    remote.load(this.loader, {
+      castShadow: this.world.castsShadows,
+      wanted: () => !this.#disposed && this.remotes.has(data.id),
+      onLoaded: () => {
+        this.specials.register(data.id, remote.specialsEntry);
+        this.#remoteModelsPending -= 1;
+        this.#notifyLoaded();
+      },
+      onError: error => this.#loadFailed('remote dog', error)
+    });
+  }
+
+  // ---------------------------------
+  // NEWS FROM THE SERVER
+  // ---------------------------------
+
+  #serverEvents() {
+    const { socket, local, remotes, world, items, goldenBones, specials, treatBoxes, session } = this;
+    const mine = id => id === socket.id;
+
+    const playerRespawned = (data) => {
+      if (!world.proceduralTrack && !data.rescued) return;
+      if (mine(data.playerId)) local.respawned(data);
+      else remotes.get(data.playerId)?.respawned(data);
+    };
+
+    const frisbeeEnded = ({ id, position }) => {
+      items.removeFrisbee(id, position);
+      session.update('frisbeesIncoming', list => list.filter(f => f !== id));
+    };
+
+    return {
+      // ---------------------------------
+      // OTHER PLAYERS
+      // ---------------------------------
+
+      playerMoved: (data) => {
+        // (a dog in the middle of its special keeps the special's own clips)
+        remotes.get(data.playerId)?.moved(data, specials.animating(data.playerId));
+      },
+
+      playerLeft: (data) => {
+        const remote = remotes.get(data.playerId);
+        if (!remote) return;
+
+        this.stage.scene.remove(remote.group);
+        specials.unregister(data.playerId);
+        items.setHeld(data.playerId, null);
+        remotes.delete(data.playerId);
+      },
+
+      // ---------------------------------
+      // FALLS, RESCUES, THE CANNON AND THE BURROWS
+      // ---------------------------------
+
+      playerFell: (data) => {
+        if (!world.proceduralTrack || !mine(data.playerId)) return;
+        local.fell(data);
+      },
+
+      playerRespawned,
+
+      playerLaunched: (data) => {
+        if (!world.launchTrack || !mine(data.playerId)) return;
+        local.launched(data);
+      },
+
+      playerLanded: (data) => {
+        if (!world.launchTrack) return;
+        if (mine(data.playerId)) local.landed(data);
+        else remotes.get(data.playerId)?.landed(data);
+      },
+
+      playerBurrowEntered: (data) => {
+        if (!world.woodland) return;
+        if (mine(data.playerId)) {
+          const tunnel = WENDOVER.tunnels.find(t => t.id === data.tunnelId);
+          if (tunnel) local.enteredBurrow(tunnel);
+        } else {
+          remotes.get(data.playerId)?.hide();
+        }
+      },
+
+      playerBurrowExited: (data) => {
+        if (!world.woodland) return;
+        playerRespawned({ ...data, rescued: true, penaltySeconds: 0 });
+        if (mine(data.playerId)) local.leftBurrow(data);
+      },
+
+      // ---------------------------------
+      // PICKUPS
+      // ---------------------------------
+
+      treatBoxChanged: ({ id, visible }) => treatBoxes.setVisible(id, visible),
+
+      // A golden bone on the road went: pop it here too.  If it was us and our game had not already
+      // counted it (the server saw it first), boost now.
+      goldenBoneTaken: ({ index, playerId }) => {
+        const stillShowing = goldenBones.take(index);
+        if (!mine(playerId)) { goldenBones.showBoost(playerId); return; }
+        if (stillShowing) {
+          goldenBones.startBoost();
+          local.boneKick();
+        }
+      },
+
+      goldenBoneRespawned: ({ index }) => goldenBones.respawn(index),
+
+      // ---------------------------------
+      // ITEMS
+      // ---------------------------------
+
+      itemChanged: ({ playerId, item }) => {
+        items.setHeld(playerId, item);
+        if (mine(playerId)) { this.myItem = item; session.set({ heldItem: item }); }
+      },
+
+      itemUsed: ({ playerId, item }) => {
+        if (item !== 'bone') return;
+        if (!mine(playerId)) { goldenBones.showBoost(playerId); return; }   // their golden trail
+        goldenBones.startBoost();
+        local.boneKick();
+      },
+
+      hazardPlaced: (data) => items.placeHazard(data),
+      hazardRemoved: (data) => items.removeHazard(data.id, !!data.hitBy),
+      ballThrown: (data) => items.throwBall(data),
+      ballHit: (data) => items.removeBall(data.id, data.position),
+
+      playerHit: ({ playerId, stunMs }) => {
+        if (!mine(playerId)) { goldenBones.stopBoost(playerId); return; }
+        local.hit(stunMs);
+      },
+
+      // Red frisbee: the server flies it; we draw it, and warn the dog it is chasing
+      frisbeeThrown: (data) => {
+        items.throwFrisbee(data);
+        if (mine(data.target)) session.update('frisbeesIncoming', list => [...list, data.id]);
+      },
+
+      frisbeesMoved: ({ frisbees }) => items.moveFrisbees(frisbees),
+
+      // someone overtook the thrower: the frisbee is after a different dog now
+      frisbeeTarget: ({ id, target }) => {
+        session.update('frisbeesIncoming', list => (mine(target) ? [...new Set([...list, id])] : list.filter(f => f !== id)));
+      },
+
+      frisbeeHit: frisbeeEnded,
+      frisbeeGone: frisbeeEnded,
+
+      // ---------------------------------
+      // SPECIAL ABILITIES: the server says when one starts, who it knocks over and when it ends
+      // ---------------------------------
+
+      specialStarted: (data) => {
+        specials.start(data.playerId, data);
+        if (mine(data.playerId)) local.specialStarted();
+      },
+
+      specialHit: ({ playerId }) => specials.hit(playerId),
+      specialEnded: ({ playerId, reason }) => specials.end(playerId, reason),
+      pheasantLanded: ({ owner, playerId, hit }) => specials.pheasantLanded(owner, playerId, hit)
+    };
+  }
+
+  // ---------------------------------
+  // GAME LOOP
+  // ---------------------------------
+
+  #frame = () => {
+    this.#animationId = requestAnimationFrame(this.#frame);
+
+    const { session, socket, hud, world, local, remotes, goldenBones, specials } = this;
+    const player = local.group;
+
+    this.#timer.update();
+    const delta = Math.min(this.#timer.getDelta(), 0.05);
+    const seconds = performance.now() / 1000;
+    const visibleRemotes = () => [...remotes.values()].filter(remote => remote.visible);
+
+    // (the third number is the time since GO: the farm's tractor, animals and sails are placed by it,
+    // exactly where the server has them)
+    world.update(seconds, player.position,
+      session.raceStart !== null ? (performance.now() - session.raceStart) / 1000 : 0,
+      () => [player.position, ...visibleRemotes().map(remote => remote.position)]);
+    this.treatBoxes.update(seconds);
+    this.minimap.draw([
+      { x: player.position.x, z: player.position.z, rotation: player.rotation.y, color: local.config.accent, me: true },
+      ...visibleRemotes().map(remote => ({ x: remote.position.x, z: remote.position.z, color: remote.config.accent }))
+    ]);
+    const itemAnchors = new Map([[socket.id, local.bones.head ?? player]]);
+    remotes.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
+    this.items.update(delta, itemAnchors, world.ballGround);
+    local.spinIfStunned();
+
+    const canMove = session.raceGo && !session.raceFinished;
+
+    // Golden Bones: running through one is the whole pickup, no button needed.  Your own boost starts
+    // at once; the server tells everyone (you included) which bone went, so it vanishes for all.
+    const otherDogs = new Map();
+    remotes.forEach((remote, id) => otherDogs.set(id, remote.position));
+    if (goldenBones.update(delta, player.position, canMove && !local.carried, otherDogs)) local.boneKick();
+
+    // ---------------------------------
+    // RACE TIMER
+    // ---------------------------------
+
+    if (session.raceStart !== null && hud.timer && !session.raceFinished) {
+      const elapsed = (performance.now() - session.raceStart) / 1000;
+      hud.setTimer(formatTime(elapsed));
+
+      // "GO!" stays up for a second
+      if (elapsed >= 1 && !this.#goBannerCleared) {
+        this.#goBannerCleared = true;
+        session.set({ racePhase: '' });
+      }
+    }
+
+    // ---------------------------------
+    // LOCK MOVEMENT BEFORE GO
+    // ---------------------------------
+
+    if (!canMove) {
+      if (this.#wasRacing) this.input.clear();
+      this.#wasRacing = false;
+
+      local.hold(delta);
+      remotes.forEach(remote => remote.mixer?.update(delta));
+      this.stage.render();
+      return;
+    }
+
+    this.#wasRacing = true;
+
+    this.chaseCamera.easeFov(local.fov, delta);
+    local.update(delta);
+
+    // ---------------------------------
+    // NETWORK UPDATES
+    // ---------------------------------
+
+    this.#networkTimer += delta;
+    if (this.#networkTimer >= NETWORK_INTERVAL) {
+      this.#networkTimer = 0;
+      socket.emit('playerMove', local.moveMessage);
+    }
+
+    // ---------------------------------
+    // REMOTE PLAYER UPDATES
+    // ---------------------------------
+
+    remotes.forEach((remote, id) => {
+      remote.update(delta, {
+        swimmingAt: position => world.poolAt(position)?.swimming,
+        playsOwnClips: specials.animating(id),
+        runSpeed: local.runSpeed,
+        sprintSpeed: local.sprintSpeed
+      });
+    });
+
+    // Special abilities: their clips, effects and timing, for every dog (after the dogs have moved)
+    specials.update(delta);
+
+    this.chaseCamera.update(delta, Boolean(local.launchFlight));
+    this.stage.render();
+  };
+
+  // ---------------------------------
+  // CLEANUP
+  // ---------------------------------
+
+  dispose() {
+    this.#disposed = true;
+    cancelAnimationFrame(this.#animationId);
+
+    for (const [event, handler] of Object.entries(this.#events)) this.socket.off(event, handler);
+
+    this.world.dispose();
+    this.burrowOverlay.remove();
+    this.treatBoxes.dispose();
+    this.items.dispose();
+    this.specials.dispose();
+    this.minimap.dispose();
+    this.goldenBones.dispose();
+    this.input.dispose();
+    this.#timer.disconnect();
+    this.stage.dispose();
+  }
+}

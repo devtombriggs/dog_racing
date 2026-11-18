@@ -110,3 +110,18 @@ Anything that moves knocks a dog over like a tennis ball does (1.1 s). The farm 
 - **Scenery:** `src/tracks/farm/FarmTrack.js` (`createFarm`); `world.triangles()` reports the triangle count.
 - **Pickups:** five box rows and six golden bones, kept clear of every hazard (`shared/pickupSpots.js`).
 - **Map card:** `public/maps/farmyard.jpg`.
+
+## Code layout (client)
+
+`src/App.jsx` only connects the session and shows its current screen. Everything else is in:
+
+| Folder | What is in it |
+|---|---|
+| `src/session/` | `GameSession`: the socket, the room, which screen is showing, the race clock, and every lobby action (host, join, pick a dog, vote). The screens read its state through `useSession`. |
+| `src/ui/` | One component per screen (`MenuScreen`, `JoinScreen`, `DogSelectScreen`, `MapScreen`, `RaceScreen`) and the race overlays in `ui/race/`. |
+| `src/game/` | The race. `Race` builds everything, listens to the server and runs the frame loop. It owns a `RaceScene` (renderer, camera, lights), a `TrackWorld` (the map and its ground, water and obstacle checks), a `ChaseCamera`, `PlayerInput`, `RescueWatch` (lost dogs) and a `RaceHud` (the readouts written every frame). |
+| `src/game/dogs/` | `DogAvatar` (model and clips), `LocalDog` (the player's dog: all the movement) and `RemoteDog` (other players' dogs, following the server). `animation.js` and `contact.js` hold the stride and bumping helpers. |
+| `src/config/` | The dogs and their stats (`dogs.js`), the handling numbers (`handling.js`) and build switches (`env.js`). |
+| `src/audio/` | `GameAudio`: selection sounds, the countdown and map music. |
+
+Tracks, pickups and abilities are where they were (`src/tracks`, `src/pickups`, `src/abilities`).
