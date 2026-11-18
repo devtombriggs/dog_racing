@@ -8,6 +8,7 @@
 //   voice.sync(ids, hasVoice);     // ids: everyone in the room; hasVoice(id): that player has a microphone on.
 //                                  // Connects to each of them if either end has a microphone on, drops the rest
 //   voice.handleSignal(message);   // 'voiceSignal' from the server
+//   voice.reset(id);               // 'voiceReset' from the server: that player reconnected, start again with them
 //   voice.dispose();
 //
 // Hearing someone needs no microphone of your own, so a player who leaves the option off still hears
@@ -186,6 +187,10 @@ export function createVoiceChat({ socket, selfId = () => socket.id, onChange }) 
       for (const id of keep) connect(id);
       report();
     },
+
+    // That player is on a new connection (they refreshed, or dropped and came back): the line to the old
+    // one is dead.  Drop it; the next sync() makes a new one.
+    reset(id) { disconnect(id); report(); },
 
     // the standard "perfect negotiation": either end may propose, and a clash is settled by who is polite
     async handleSignal({ from, signal: message } = {}) {

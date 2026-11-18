@@ -3,6 +3,7 @@ import { mock, test } from 'node:test';
 import { env } from 'node:process';
 import { MAPS, PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
+import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 import { FARMYARD as FARM } from '../shared/farmData.js';
 import { TREAT_BOXES, TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS } from '../shared/treatBoxes.js';
@@ -1697,10 +1698,14 @@ test('a refresh: the seat is held for a minute, the dog jogs on by itself, and t
   const along = position => FARM.query(position[0], position[2]).s;
 
   // Berri's page reloads: she is not gone, and her dog carries on up the road at a jog
+  berri.call('setVoice', { enabled: true });
   berri.call('disconnect');
   assert.equal(events('playerLeft').length, 0);
   assert.deepEqual(events('playerAway').at(-1), { playerId: berri.id, away: true });
   assert.equal(latest(room.code, 'lobbyUpdated').players.find(p => p.id === berri.id).away, true);
+  // her voice line is dead: the others are told to drop it, and her microphone counts as off
+  assert.deepEqual(events('voiceReset'), [{ playerId: berri.id }]);
+  assert.deepEqual(events('voiceChanged').at(-1), { playerId: berri.id, enabled: false });
   for (let i = 0; i < 200; i++) context.mock.timers.tick(50);
   const jogged = along(berriAt());
   assert.ok(jogged > 40 && jogged < 130, `ten seconds on she is ${jogged} m up the road: a jog, not a sprint`);
@@ -1711,6 +1716,9 @@ test('a refresh: the seat is held for a minute, the dog jogs on by itself, and t
   const resumed = back.call('resume', { token });
   assert.equal(resumed.success, true);
   assert.equal(resumed.playerId, berri.id, 'the same player, whatever the new connection is called');
+  assert.equal(events('voiceReset').length, 2, 'and a new voice line is started to her new connection');
+  tom.call('voiceSignal', { to: berri.id, signal: { candidate: {} } });
+  assert.equal(server.events.findLast(e => e.event === 'voiceSignal').room, berri.id, 'which reaches her by her player id');
   assert.equal(resumed.race.mapId, 'farmyard');
   assert.equal(resumed.race.status, 'racing');
   assert.equal(resumed.room.players.find(p => p.id === berri.id).dog, 'pablo');
@@ -1885,4 +1893,36 @@ test('Kombu\'s Kelp Dive: up behind the dog two places ahead; a good way behind 
   assert.equal(events('playerBurrowEntered').length, 0);
   assert.deepEqual(events('itemUsed').at(-1), { playerId: kombu.id, item: 'bone' });
   for (const s of sockets) s.call('leaveGame');
+});
+
+test('Ralph on his rocket paws is still fired by the cannon and thrown by the catapult, and keeps flying when he lands', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  for (const mapId of ['frostpeak', 'treat_road']) {
+    const lead = client(), ralph = client(), sockets = [lead, ralph];
+    const room = lead.call('hostGame', { mapId }).room;
+    ralph.call('joinGame', { roomCode: room.code });
+    lead.call('selectDog', { dog: 'gsp' }); ralph.call('selectDog', { dog: 'ralph' });
+    lead.call('startRace'); for (const s of sockets) s.call('raceLoaded');
+    for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+    const move = (socket, position, rotation = 0) => socket.call('playerMove', { position, rotation, animation: 'Run', respawnRevision: 0 });
+    const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+    for (const cp of MAPS[mapId].checkpoints.slice(0, 8)) move(lead, [cp.x, cp.y ?? 0, cp.z]);      // (someone in front: the leader gets no special)
+    context.mock.method(Math, 'random', () => 0);
+    move(ralph, TREAT_BOXES_BY_MAP[mapId][0].groundPosition);
+    ralph.call('useItem');
+    assert.equal(events('specialStarted').at(-1)?.kind, 'jet', mapId);
+    context.mock.restoreAll();
+    // over the pad at flying height (3.2 m up)
+    if (mapId === 'frostpeak') {
+      const C = FROSTPEAK_CANNON, yaw = C.takeoffRotationY;
+      const at = along => [C.takeoff[0] + Math.sin(yaw) * along, C.takeoff[1] + 3.2, C.takeoff[2] + Math.cos(yaw) * along];
+      move(ralph, at(-2), yaw); move(ralph, at(1), yaw);
+    } else {
+      const T = TREAT_ROAD, up = s => { const p = T.pointAt(s); return [p.x, p.y + 3.2, p.z]; };
+      move(ralph, up(T.launch.padStart + 1)); move(ralph, up(T.launch.takeoffS + 0.1));
+    }
+    assert.equal(events('playerLaunched').at(-1)?.playerId, ralph.id, mapId);
+    assert.ok(!events('specialEnded').some(e => e.playerId === ralph.id), 'the rocket paws stay lit');
+    for (const s of sockets) s.call('leaveGame');
+  }
 });

@@ -37,6 +37,12 @@ function seatToken() {
 // One player's visit to the game: the connection to the server, the room they are in, which screen
 // they are on and how their race is going.  The screens read `state` (through useSession) and call
 // the methods here; the race (game/Race.js) reads the race clock and reports back through `set`.
+// The microphone option, kept for this tab only (so a refresh in the middle of a game keeps you talking)
+const VOICE_KEY = 'dogRacing.voice';
+function rememberedVoice() {
+  try { return sessionStorage.getItem(VOICE_KEY) === '1'; } catch { return false; }
+}
+
 export class GameSession {
   socket = null;
   voice = null;
@@ -75,7 +81,8 @@ export class GameSession {
     accessibilityMode: false,
     // Voice chat: the microphone option in the lobby, which stays on through the race.  Not remembered
     // between visits: a microphone should only ever come on because you ticked the box this time.
-    voiceEnabled: false,
+    // (It is remembered through a refresh of the page, like the player's seat.)
+    voiceEnabled: rememberedVoice(),
     voiceStatus: { enabled: false, muted: false, error: null, connected: 0 },
     voiceMap: {}             // "room:playerId" -> has a microphone on (as the server tells it)
   };
@@ -263,6 +270,13 @@ export class GameSession {
 
       voiceSignal: message => voice?.handleSignal(message),
 
+      // someone dropped or came back on a new connection: drop the dead line, and make a new one
+      voiceReset: ({ playerId }) => {
+        if (playerId === this.state.socketId) return;
+        voice?.reset(playerId);
+        this.update('voiceMap', map => ({ ...map }));            // (connects again, if either of us is talking)
+      },
+
       voiceChanged: ({ playerId, enabled }) => {
         const key = `${this.state.room?.code ?? null}:${playerId}`;
         this.update('voiceMap', map => ({ ...map, [key]: enabled }));
@@ -406,7 +420,10 @@ export class GameSession {
     try { localStorage.setItem(ACCESSIBILITY_KEY, accessibilityMode ? '1' : '0'); } catch { /* storage blocked */ }
   };
 
-  setVoiceEnabled = (voiceEnabled) => this.set({ voiceEnabled });
+  setVoiceEnabled = (voiceEnabled) => {
+    this.set({ voiceEnabled });
+    try { sessionStorage.setItem(VOICE_KEY, voiceEnabled ? '1' : '0'); } catch { /* storage blocked */ }
+  };
 
   openJoinScreen = () => {
     this.set({ error: '', availableLobbies: null, lobbyListError: '', screen: 'join' });

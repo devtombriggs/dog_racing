@@ -85,8 +85,8 @@ export const DOGS = {
     name: 'Kombu (Labradoodle)',
     displayName: DOG_NAMES.kombu,
     breed: 'Labradoodle',
-    portrait: '/portraits/kombu.png',
-    accent: '#c98a55',
+    portrait: '/portraits/kombu.png?v=2',
+    accent: '#ffd23a',
     model: '/models/kombu.glb',
     stats: DOG_STATS.kombu,
     // a little smaller than the Labrador he is built from (kombu_labradoodle/create_kombu.py)

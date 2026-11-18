@@ -143,6 +143,9 @@ function updateWoodlandRace(room, player, data) {
   return true;
 }
 
+// Is this dog up in the air on its special (Ralph's rocket paws)?
+const flying = player => Boolean(activeSpecials.get(player)?.spec.flyHeight);
+
 // Frostpeak's cannon: run off the end of the launch pad and the server flies the dog up to the top of
 // the ski slope (the same curve the game draws), then lands it with a short boost.  Moves sent from
 // before the landing carry an old revision and are ignored, so the dog cannot be dragged back down.
@@ -168,14 +171,16 @@ function updateFrostpeakRace(room, player, data) {
     return true;
   }
   if (rideBurrow(room, player, data)) return false;
-  const lateral = FROSTPEAK_CANNON.cannonFired(player.position, data.position);
+  // (Ralph on his rocket paws flies above the height the cannon takes a dog at: it takes him all the same)
+  const level = position => (flying(player) ? [position[0], FROSTPEAK_CANNON.takeoff[1], position[2]] : position);
+  const lateral = FROSTPEAK_CANNON.cannonFired(level(player.position), level(data.position));
   if (lateral !== null) {
     state.launch = { startedAt: now, lateral };
     const point = FROSTPEAK_CANNON.launchPoint(0, lateral);
     player.position = [point.x, point.y, point.z];
     player.rotation = point.rotationY;
     player.animation = 'Jump';
-    endSpecial(room, player, 'cancelled');
+    if (!flying(player)) endSpecial(room, player, 'cancelled');      // (Ralph keeps his rocket paws for the landing)
     io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral });
     return false;
   }
@@ -243,12 +248,12 @@ function updateProceduralRace(room, player, data) {
     if (previous.onTrack && previous.s >= pad.padStart && previous.s < pad.takeoffS
       && ground.s >= pad.takeoffS && ground.s <= pad.gapStart + 8
       && Math.abs(ground.lateral) <= ground.halfWidth
-      && y > ground.y - 1.2 && y < ground.y + 2.5) {   // a dog jumping across the pad still launches
+      && y > ground.y - 1.2 && (y < ground.y + 2.5 || flying(player))) {   // a dog jumping across the pad still launches, and so does Ralph flying over it
       const halfWidth = Math.min(ground.halfWidth, track.pointAt(pad.landingS).halfWidth) - 1;
       state.launch = { startedAt: now, lateral: Math.max(-halfWidth, Math.min(halfWidth, ground.lateral)) };
       const point = track.launchPoint(0, state.launch.lateral);
       player.position = [point.x,point.y,point.z]; player.rotation = point.rotationY; player.animation = 'Jump';
-      endSpecial(room, player, 'cancelled');
+      if (!flying(player)) endSpecial(room, player, 'cancelled');      // (Ralph keeps his rocket paws for the landing)
       io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral: state.launch.lateral });
       return false;
     }
@@ -1259,6 +1264,16 @@ const liveSeats = new Map();
 const stalledAfterMs = () => Number(env.STALLED_AFTER_MS) || 3000;
 const IN_A_RACE = ['loading', 'countdown', 'racing', 'finished'];
 
+// A player's connection has gone, or is a new one: whatever voice line the others had to them is dead.
+// Their microphone counts as off until their game says otherwise, and the others are told to drop the
+// old line ('voiceReset') so that a fresh one is made when the player is back.
+function hangUp(room, player) {
+  if (room.singlePlayer) return;
+  player.voice = false;
+  io.to(room.code).emit('voiceChanged', { playerId: player.id, enabled: false });
+  io.to(room.code).emit('voiceReset', { playerId: player.id });
+}
+
 function holdSeat(room, player, token) {
   const already = player.away;
   player.away = true;
@@ -1272,6 +1287,7 @@ function holdSeat(room, player, token) {
   }, SEAT_HOLD_MS);
   timer.unref?.();
   heldSeats.set(token, { roomCode: room.code, playerId: player.id, timer });
+  hangUp(room, player);
   io.to(room.code).emit('playerAway', { playerId: player.id, away: true });
   if (room.status === 'loading') beginCountdown(room);          // (nobody waits for a game that is not there)
   if (room.status === 'racing' || room.status === 'finished') broadcastStandings(room);
@@ -1642,6 +1658,7 @@ io.on('connection', (socket) => {
     playerId = player.id;
     socket.join(room.code);
     socket.join(playerId);                        // (messages sent to the player by id still reach them)
+    hangUp(room, player);                         // (a new connection: the others start a new voice line to it)
     // In the lobby they are simply back.  In a race their dog runs on by itself until their game has
     // loaded the map and says so (backInRace).
     const race = raceSnapshot(room, player);
