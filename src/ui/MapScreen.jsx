@@ -3,6 +3,7 @@ import { MAPS } from '../../shared/maps.js';
 import { GRAND_PRIX, GRAND_PRIX_POINTS } from '../../shared/grandPrix.js';
 import { playerColor } from '../config/dogs.js';
 import { BotSettings } from './BotSettings.jsx';
+import { fullscreen } from '../fullscreen.js';
 
 // Map vote countdown: the seconds left until the vote closes, redrawn as they pass
 function useVoteSecondsLeft(session, voting) {
@@ -56,7 +57,7 @@ export function MapScreen({ session, state }) {
                 key={id}
                 className={`map-card map-card--cup${myVote === id ? ' map-card--mine' : ''}`}
                 disabled={!connected}
-                onClick={() => (voting ? session.voteMap(id) : session.startSoloGrandPrix(id))}
+                onClick={() => { fullscreen.enterForRace(); if (voting) session.voteMap(id); else session.startSoloGrandPrix(id); }}
                 aria-label={`${cup.name}: four races. ${cup.maps.map(mapId => MAPS[mapId].name).join(', ')}.${voting ? ` ${voters.length} ${voters.length === 1 ? 'vote' : 'votes'}.` : ''}`}
               >
                 <span className="map-card__strip" aria-hidden="true">
@@ -89,7 +90,7 @@ export function MapScreen({ session, state }) {
                 key={id}
                 className={`map-card${myVote === id ? ' map-card--mine' : ''}`}
                 disabled={!connected}
-                onClick={() => (voting ? session.voteMap(id) : session.startSoloRace(id))}
+                onClick={() => { fullscreen.enterForRace(); if (voting) session.voteMap(id); else session.startSoloRace(id); }}
                 aria-label={`${map.name}. ${map.description}.${voting ? ` ${voters.length} ${voters.length === 1 ? 'vote' : 'votes'}.` : ''}`}
               >
                 <img src={`/maps/${id}.jpg`} alt="" width="640" height="360" draggable="false" />

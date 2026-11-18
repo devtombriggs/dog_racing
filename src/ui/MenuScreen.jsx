@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { pageStyle, panelStyle, buttonStyle } from './styles.js';
+import { fullscreen } from '../fullscreen.js';
 
 // The first screen: your name, and how you want to play.
 //   Single Player
@@ -46,6 +47,12 @@ export function MenuScreen({ session, state }) {
             <p style={{ margin: '4px 0 14px', fontSize: 13, color: '#b4c9b5' }}>Two players on this screen: a keyboard and a controller, or two controllers</p>
             <button style={{ ...buttonStyle, background: '#3d5a45', color: 'white' }} onClick={() => setMultiplayer(false)}>← Back</button>
           </>
+        )}
+
+        {fullscreen.available && (
+          <p style={{ margin: '16px 0 0', fontSize: 13, color: '#b4c9b5' }}>
+            Races open in full screen. <button onClick={() => fullscreen.toggle()} style={{ background: 'none', border: 'none', color: '#9fe49b', cursor: 'pointer', textDecoration: 'underline', fontSize: 13, padding: 0 }}>Turn full screen on or off</button> · Esc in a race for the menu
+          </p>
         )}
 
         {error && (

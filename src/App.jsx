@@ -7,6 +7,7 @@ import { LocalJoinScreen } from './ui/LocalJoinScreen.jsx';
 import { DogSelectScreen } from './ui/DogSelectScreen.jsx';
 import { MapScreen } from './ui/MapScreen.jsx';
 import { RaceScreen } from './ui/RaceScreen.jsx';
+import { PauseMenu } from './ui/race/PauseMenu.jsx';
 
 const SCREENS = {
   menu: MenuScreen,
@@ -50,6 +51,8 @@ function App() {
   return (
     <>
       <Screen key={state.screen === 'race' ? `race-${state.raceNumber}` : state.screen} session={session} state={state} />
+      {/* Esc during a race: resume, full screen, main menu */}
+      {state.screen === 'race' && <PauseMenu key={`menu-${state.raceNumber}`} session={session} />}
       {/* in a room and the connection has gone: say so (the game reconnects by itself and takes the seat back) */}
       {state.room && !state.connected && (
         <div className="connection-lost" role="alert">

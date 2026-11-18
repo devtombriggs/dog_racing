@@ -72,6 +72,10 @@ A controller works in the race beside the keyboard, laid out like an Xbox 360 pa
 
 The menus, dog select and map screens still need a mouse or keyboard.
 
+## Full screen and the Esc menu
+
+Clicking a map (or voting for one) puts the game in full screen (`src/fullscreen.js`); a browser only allows that from a click, so a player who never clicks a map stays in a window until they use the menu. **Esc** during a race opens a menu (`src/ui/race/PauseMenu.jsx`): Resume, Full screen on/off (remembered between visits), Quit to Main Menu. The race does not pause. In Chrome and Edge Esc opens the menu and the screen stays full; in browsers that keep Esc for themselves, Esc leaves full screen and the menu opens at the same moment.
+
 ## Split screen (two players at one computer)
 
 Menu: **Multiplayer → Local → Split Screen**. Player 1 presses Enter on the keyboard or A on a controller, then player 2 does the same on a different one; what each pressed is what they drive with, so it needs a keyboard and a controller, or two controllers. Player 1 has the left half of the screen, player 2 the right. They pick dogs in turn, player 1 picks the map or a Grand Prix, and computer dogs fill the other three places.
