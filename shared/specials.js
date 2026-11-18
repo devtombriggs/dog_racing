@@ -5,6 +5,7 @@
 //   Pablo  — Pack Rush:      two friends and a sled; 10 seconds of fast, steerable ride that knocks over any dog it runs into
 //   Meela  — Zoomies:        5 seconds of low whirling spin with a wide reach; knocks over any dog she spins into
 //   Pippa  — Pheasant Flush: one pheasant for every other dog, ahead or behind; each flies its dog down and knocks it over
+//   Kombu  — Kelp Dive:      seaweed pulls him under and puts him down behind the dog two places ahead (never past first)
 //   Poppy  — Surf's Up:      belly-flops onto her own wave: the fastest of the lot, but it steers itself for five
 //                            seconds, so it only hits who happens to be in the way
 //
@@ -19,7 +20,21 @@ export const SPECIALS = {
   pablo: { kind: 'sled', name: 'Pack Rush', durationMs: 10000, speed: 1.65, hitRadius: 2.2, reach: 6 },
   second_dog: { kind: 'zoomies', name: 'Zoomies', durationMs: 5000, speed: 1.35, hitRadius: 3.0, reach: 0 },
   gsp: { kind: 'flush', name: 'Pheasant Flush', durationMs: 900 },
+  // (Kombu's is over in a moment: the server moves him; shared/specials.js KELP has the rules)
+  kombu: { kind: 'kelp', name: 'Kelp Dive', durationMs: 1100 },
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true },
+};
+
+// Kombu's Kelp Dive: seaweed comes up out of the ground, pulls him under, and puts him down further
+// up the road: just behind the dog two places ahead of him.  Never in front of the dog in first place:
+// if the dog two places ahead IS first (he is 3rd), or there is only one dog ahead, he comes up a good
+// way behind the leader instead.
+export const KELP = {
+  seconds: 1.1,          // how long he is under
+  behind: 8,             // metres behind the dog he comes up behind
+  behindLeader: 27,      // ...when that dog is the leader (about 30 yards)
+  worthIt: 5,            // if it would move him on less than this he is not moved (he gets a golden bone's dash instead)
+  boostSeconds: 1.0, speedMultiplier: 1.2,     // the dash he comes up with
 };
 
 export const SPECIAL_HIT = {

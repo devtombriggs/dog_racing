@@ -6,8 +6,8 @@ import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHe
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, specialChance, specialFor, specialTouches, pheasantFlightMs } from '../shared/specials.js';
-import { racingLineAt, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, specialChance, specialFor, specialTouches, pheasantFlightMs } from '../shared/specials.js';
+import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
 import { GRAND_PRIX, pointsForPlace } from '../shared/grandPrix.js';
@@ -29,7 +29,7 @@ const io = new Server(PORT, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu'];
 const TOTAL_LAPS = 3;
 const MAX_PLAYERS = 5;
 const LOBBY_BROWSER = 'lobby-browser';
@@ -88,22 +88,28 @@ for (const [mapId, map] of Object.entries(MAPS)) {
 // comes out further up the road.  Returns true while a burrow has him (going in, under, or coming out):
 // the move he sent is not used.
 function rideBurrow(room, player, data) {
-  const tunnels = BURROWS[room.mapId];
-  if (!tunnels) return false;
+  const tunnels = BURROWS[room.mapId] ?? [];
   const marks = BURROW_CHECKPOINTS[room.mapId], ride = burrowRides.get(player);
   if (ride) {
     const { tunnel, startedAt } = ride;
     if (Date.now() - startedAt < tunnel.duration * 1000) return true;
     player.position = [...tunnel.exit]; player.rotation = tunnel.exitYaw; player.animation = 'Sprint';
-    // Only checkpoints along this authorised shortcut are credited. No lap or finish is skipped.
-    while (player.checkpoint < marks.length && marks[player.checkpoint] < tunnel.exitS) player.checkpoint++;
+    if (tunnel.kelp) {
+      // the kelp puts him down at a place in the race: its lap and its checkpoints are his
+      player.lap = tunnel.lap; player.checkpoint = tunnel.checkpoint;
+      const procedural = proceduralRaceStates.get(player);
+      if (procedural && tunnel.landed) procedural.launchLap = tunnel.lap;
+    } else {
+      // Only checkpoints along this authorised shortcut are credited. No lap or finish is skipped.
+      while (player.checkpoint < marks.length && marks[player.checkpoint] < tunnel.exitS) player.checkpoint++;
+    }
     burrowRides.delete(player);
     const state = raceStateOf(room, player);
     if (state) state.revision++;                  // (moves sent from before he came out are ignored)
     broadcastProgress(room, player);
     io.to(room.code).emit('playerBurrowExited', {
       playerId: player.id, position: player.position, rotation: player.rotation,
-      respawnRevision: state?.revision ?? 0, boostSeconds: tunnel.boostSeconds, speedMultiplier: tunnel.speedMultiplier
+      respawnRevision: state?.revision ?? 0, boostSeconds: tunnel.boostSeconds, speedMultiplier: tunnel.speedMultiplier, kelp: Boolean(tunnel.kelp)
     });
     return true;
   }
@@ -404,6 +410,7 @@ function useItem(room, player) {
 function startSpecial(room, player) {
   const spec = specialFor(player.dog);
   if (!spec) return;
+  if (spec.kind === 'kelp') { kelpDive(room, player); return; }       // (over in a moment: nothing to keep track of)
   clearTimeout(activeSpecials.get(player)?.timer);
   const now = Date.now();
   activeSpecials.set(player, {
@@ -424,6 +431,44 @@ function endSpecial(room, player, reason) {
   clearTimeout(active.timer);
   activeSpecials.delete(player);
   io.to(room.code).emit('specialEnded', { playerId: player.id, reason });
+}
+
+// Kombu's Kelp Dive (shared/specials.js KELP): where he comes up, worked out along the road.  He is
+// taken under like Ralph down a burrow (the same ride), with the lap and checkpoints of the place he
+// comes up at.
+function kelpDive(room, player) {
+  const route = fireworkRoute(room.mapId), path = PICKUP_PATHS[room.mapId], L = route.length;
+  const standings = raceStandings(room);
+  const place = standings.find(entry => entry.playerId === player.id)?.place ?? 1;
+  const entry = standings.find(e => e.place === Math.max(1, place - 2));
+  const target = entry && entry.playerId !== player.id && !entry.finished ? room.players.get(entry.playerId) : null;
+  const progress = dog => (dog.lap - 1) * L + route.sAt(dog.position);
+  const here = progress(player);
+  // behind the dog two places up; a good way behind if that dog is the leader
+  let landing = target ? progress(target) - (entry.place === 1 ? KELP.behindLeader : KELP.behind) : -Infinity;
+  // (on to plain road: not into a jump, a pool, a hazard or the start of a catapult)
+  const clear = s => !path.hazards.some(([a, b]) => { const mid = (a + b) / 2, d = Math.abs(s - mid) % L; return Math.min(d, L - d) <= (b - a) / 2 + 2; });
+  for (let tries = 0; tries < 60 && landing > here && !clear(((landing % L) + L) % L); tries++) landing -= 4;
+  if (!(landing - here >= KELP.worthIt) || raceStateOf(room, player)?.launch || raceStateOf(room, player)?.fall || burrowRides.has(player)) {
+    // nowhere worth going: the kelp gives him a shove instead (a golden bone's dash)
+    io.to(room.code).emit('itemUsed', { playerId: player.id, item: 'bone' });
+    botDrivers.get(player)?.boost();
+    return;
+  }
+  const s = ((landing % L) + L) % L, lap = Math.floor(landing / L) + 1, point = path.pointAt(s);
+  const y = BALL_GROUND[room.mapId] ? BALL_GROUND[room.mapId](point.x, point.z) : point.y;
+  const checkpoint = BURROW_CHECKPOINTS[room.mapId].filter(mark => mark < s).length;
+  const tunnel = {
+    id: 'kelp', kelp: true, name: 'Kelp Dive', entry: [...player.position], entryYaw: player.rotation,
+    exit: [point.x, y, point.z], exitYaw: point.rotationY, exitS: s, lap, checkpoint,
+    // (if he comes up beyond a catapult's landing, he has "landed" this lap)
+    landed: MAPS[room.mapId].checkpoints.slice(0, checkpoint).some(cp => cp.launchLanding),
+    duration: KELP.seconds, boostSeconds: KELP.boostSeconds, speedMultiplier: KELP.speedMultiplier,
+  };
+  burrowRides.set(player, { tunnel, startedAt: Date.now() });
+  player.animation = 'Jump';
+  io.to(room.code).emit('playerBurrowEntered', { playerId: player.id, tunnelId: tunnel.id, duration: tunnel.duration, kelp: true,
+    tunnel: { id: tunnel.id, name: tunnel.name, entry: tunnel.entry, entryYaw: tunnel.entryYaw, exit: tunnel.exit } });
 }
 
 // Pippa's pheasants: one for every other dog still racing.  Each lands after its flight time and

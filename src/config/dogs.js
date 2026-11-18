@@ -81,6 +81,25 @@ export const DOGS = {
       Sprint: 3.919
     }
   },
+  kombu: {
+    name: 'Kombu (Labradoodle)',
+    displayName: DOG_NAMES.kombu,
+    breed: 'Labradoodle',
+    portrait: '/portraits/kombu.png',
+    accent: '#c98a55',
+    model: '/models/kombu.glb',
+    stats: DOG_STATS.kombu,
+    // a little smaller than the Labrador he is built from (kombu_labradoodle/create_kombu.py)
+    scale: 2.8,
+    size: 0.93,
+    // kombu_labradoodle/clip_info.json (Poppy's captured strides, with his bounce and waddle on top)
+    gaitSpeed: {
+      Walk: 1.205,
+      Trot: 2.051,
+      Run: 3.597,
+      Sprint: 5.598
+    }
+  },
   ralph: {
     name: 'Ralph (Dachshund)',
     displayName: DOG_NAMES.ralph,

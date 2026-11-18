@@ -1438,7 +1438,7 @@ test('computer dogs: the host sets how many and how good, they take the free dog
   const bots = start.players.filter(player => player.bot);
   assert.equal(start.players.length, 5);
   assert.equal(bots.length, 3);
-  assert.deepEqual(start.players.map(player => player.dog).sort(), ['black_lab', 'gsp', 'pablo', 'ralph', 'second_dog']);
+  assert.equal(new Set(start.players.map(player => player.dog)).size, 5, 'five different dogs (of the six)');
   assert.deepEqual(start.players.map(player => player.slot).sort(), [0, 1, 2, 3, 4]);
   start.players.forEach((player, index) => assert.deepEqual(player.position, MAPS.wendover.startPositions[index].position));
   assert.ok(bots.every(bot => bot.loaded && bot.level === 'hard' && bot.name === 'CPU'));
@@ -1816,4 +1816,73 @@ test('reconnecting before the server has noticed the old connection is dead: the
   context.mock.timers.tick(61000);
   assert.equal(latest(room.code, 'lobbyUpdated').players.length, 2, 'still there a minute on');
   for (const p of [tom, again]) p.call('leaveGame');
+});
+
+test('Kombu\'s Kelp Dive: up behind the dog two places ahead; a good way behind the leader when that dog is first; never past first', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const { KELP } = { KELP: { behind: 8, behindLeader: 27, seconds: 1.1 } };
+  const at = s => { const p = FARM.pointAt(s); return [p.x, p.y, p.z]; };
+  const along = position => FARM.query(position[0], position[2]).s;
+  const box = TREAT_BOXES_BY_MAP.farmyard[0].groundPosition;        // (the first row of boxes, about 117 m round)
+  const race = (others) => {
+    const sockets = [...others.map(() => client()), client()], kombu = sockets.at(-1);
+    const room = sockets[0].call('hostGame', { mapId: 'farmyard', name: 'One' }).room;
+    sockets.slice(1).forEach((socket, i) => socket.call('joinGame', { roomCode: room.code, name: `P${i + 2}` }));
+    ['gsp', 'pablo', 'ralph'].slice(0, others.length).forEach((dog, i) => sockets[i].call('selectDog', { dog }));
+    kombu.call('selectDog', { dog: 'kombu' });
+    sockets[0].call('startRace');
+    for (const socket of sockets) socket.call('raceLoaded');
+    for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+    const move = (socket, position, revision = 0) => socket.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: revision });
+    // each of the others runs the road to where it is (through the checkpoints on the way)
+    others.forEach((s, i) => { for (const cp of MAPS.farmyard.checkpoints) { if (FARM.query(cp.x, cp.z).s < s) move(sockets[i], [cp.x, cp.y, cp.z]); } move(sockets[i], at(s)); });
+    context.mock.method(Math, 'random', () => 0);              // (anyone but the leader: the special)
+    move(kombu, box);
+    const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+    assert.deepEqual(events('itemChanged').at(-1), { playerId: kombu.id, item: 'special' });
+    const from = along(box);
+    kombu.call('useItem');
+    const down = events('playerBurrowEntered').at(-1);
+    assert.deepEqual([down.playerId, down.kelp, down.tunnelId], [kombu.id, true, 'kelp']);
+    move(kombu, at(from + 5));
+    assert.equal(events('playerBurrowExited').length, 0, 'he is under: his own moves do nothing');
+    context.mock.timers.tick(KELP.seconds * 1000 + 1);
+    move(kombu, at(from + 5));
+    const up = events('playerBurrowExited').at(-1);
+    assert.deepEqual([up.playerId, up.kelp, up.respawnRevision], [kombu.id, true, 1]);
+    assert.ok(FARM.query(up.position[0], up.position[2]).onTrack);
+    const result = { room, sockets, kombu, from, landed: along(up.position), progress: server.events.findLast(e => e.event === 'raceProgress' && e.data.playerId === kombu.id).data,
+      places: latest(room.code, 'raceStandings').standings.map(e => e.playerId) };
+    context.mock.restoreAll();
+    for (const socket of sockets) socket.call('leaveGame');
+    return result;
+  };
+  // 4th of four: the dog two places ahead is 2nd (250 m round); he comes up just behind it, in front of the 3rd
+  let r = race([330, 250, 190]);
+  assert.ok(r.landed > 190 && r.landed <= 250 - KELP.behind + 2.5 && r.landed > 250 - KELP.behind - 30, `up at ${r.landed} m`);
+  assert.equal(r.places.indexOf(r.kombu.id), 2, 'that makes him 3rd');
+  assert.equal(r.progress.lap, 1);
+  assert.equal(r.progress.checkpoint, MAPS.farmyard.checkpoints.filter(cp => FARM.query(cp.x, cp.z).s < r.landed).length, 'with the checkpoints of the place he came up at');
+  // 3rd of three: two places ahead is the leader (330 m): about 30 yards behind it, which is in front of the 2nd
+  // (a leader placed so that the spot behind it is plain road: he is never put down in the barn or among the bales)
+  const plain = s => !PICKUP_PATHS.farmyard.hazards.some(([a, b]) => s >= a - 4 && s <= b + 4);
+  let leader = 330; while (!plain(leader - KELP.behindLeader)) leader += 5;
+  r = race([leader, 200]);
+  assert.ok(r.landed <= leader - KELP.behindLeader + 2.5 && r.landed > leader - KELP.behindLeader - 6 && r.landed > 200, `up at ${r.landed} m, the leader at ${leader}`);
+  assert.deepEqual([r.places.indexOf(r.kombu.id), r.places.indexOf(r.sockets[0].id)], [1, 0], '2nd, and the leader is still the leader');
+  // 2nd of two, already close behind the leader: nowhere to go, so the kelp gives him a dash instead
+  const sockets = [client(), client()], [lead, kombu] = sockets;
+  const room = lead.call('hostGame', { mapId: 'farmyard' }).room;
+  kombu.call('joinGame', { roomCode: room.code });
+  lead.call('selectDog', { dog: 'gsp' }); kombu.call('selectDog', { dog: 'kombu' });
+  lead.call('startRace'); for (const s of sockets) s.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const move = (socket, position) => socket.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: 0 });
+  move(lead, [MAPS.farmyard.checkpoints[0].x, MAPS.farmyard.checkpoints[0].y, MAPS.farmyard.checkpoints[0].z]); move(lead, at(along(box) + 14));
+  context.mock.method(Math, 'random', () => 0);
+  move(kombu, box); kombu.call('useItem');
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  assert.equal(events('playerBurrowEntered').length, 0);
+  assert.deepEqual(events('itemUsed').at(-1), { playerId: kombu.id, item: 'bone' });
+  for (const s of sockets) s.call('leaveGame');
 });

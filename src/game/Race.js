@@ -4,6 +4,7 @@ import { MAPS, DEFAULT_MAP, PROCEDURAL_TRACKS } from '../../shared/maps.js';
 import { GOLDEN_BONE_SPOTS } from '../../shared/pickupSpots.js';
 import { BURROWS } from '../../shared/burrows.js';
 import { createBurrowMouths } from '../tracks/burrowMouths.js';
+import { createKelp } from '../abilities/kelp.js';
 import { createTreatBoxes } from '../pickups/treatBoxes.js';
 import { createGoldenBones } from '../pickups/goldenBones.js';
 import { createItems } from '../pickups/items.js';
@@ -78,6 +79,8 @@ export class Race {
     this.shields = createShields({ envMap: this.items.envMap });
     // The mouths of Ralph's burrows (Wendover's are part of its model)
     this.burrowMouths = createBurrowMouths({ scene, mapId });
+    // Kombu's seaweed (shared/specials.js KELP)
+    this.kelp = createKelp({ scene });
     // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
     this.specials = createSpecials({
       scene,
@@ -278,8 +281,11 @@ export class Race {
       },
 
       playerBurrowEntered: (data) => {
+        if (data.kelp) this.kelp.burst(data.tunnel.entry);       // the seaweed that takes him
         if (mine(data.playerId)) {
-          const tunnel = BURROWS[this.mapId]?.find(t => t.id === data.tunnelId);
+          // (one of Ralph's burrows, or Kombu's kelp, which says where it is itself)
+          const tunnel = data.tunnel ?? BURROWS[this.mapId]?.find(t => t.id === data.tunnelId);
+          this.burrowOverlay.textContent = data.kelp ? 'KELP DIVE' : 'BURROW BOOST';
           if (tunnel) local.enteredBurrow(tunnel);
         } else {
           remotes.get(data.playerId)?.hide();
@@ -287,6 +293,7 @@ export class Race {
       },
 
       playerBurrowExited: (data) => {
+        if (data.kelp) this.kelp.burst(data.position);            // up he comes
         playerRespawned({ ...data, rescued: true, penaltySeconds: 0 });
         if (mine(data.playerId)) local.leftBurrow(data);
       },
@@ -417,6 +424,7 @@ export class Race {
     remotes.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
     this.items.update(delta, itemAnchors, world.ballGround);
     this.fireworks.update(delta);
+    this.kelp.update(delta);
     this.shields.update(delta, id => (id === this.myId ? local : remotes.get(id)));
     local.spinIfStunned();
 
@@ -510,6 +518,7 @@ export class Race {
     this.fireworks.dispose();
     this.shields.dispose();
     this.burrowMouths.dispose();
+    this.kelp.dispose();
     this.specials.dispose();
     this.minimap.dispose();
     this.goldenBones.dispose();

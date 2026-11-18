@@ -79,4 +79,4 @@ function checkpointDistances(mapId) {
     return best;
   });
 }
-export const BURROW_CHECKPOINTS = Object.fromEntries(Object.keys(BURROWS).map(mapId => [mapId, checkpointDistances(mapId)]));
+export const BURROW_CHECKPOINTS = Object.fromEntries(Object.keys(MAPS).map(mapId => [mapId, checkpointDistances(mapId)]));

@@ -91,6 +91,8 @@ The players' browsers send their voices straight to each other (`src/voiceChat.j
 
 Each dog has its own special move from a rare Treat Box item: see `../special_abilities/README.md` ("In the game"). Start the server with `ALWAYS_SPECIAL=1` to try them without waiting for the dice.
 
+**Kombu** (labradoodle, built in `../kombu_labradoodle/`) is the sixth dog; five still race at a time. His special is the **Kelp Dive** (`KELP` in `shared/specials.js`, `kelpDive` in `server/server.js`): seaweed pulls him under for about a second and puts him down 8 m behind the dog two places ahead of him. If that dog is the leader, or only the leader is ahead, he comes up 27 m (about 30 yards) behind the leader instead, so he is never put in front of first place. He is always put down on plain road (not in a jump, a pool or a hazard), with the lap and checkpoints of that spot; if the dive would gain him under 5 m he gets a golden bone's dash instead.
+
 Nothing knocks a dog out of its special: while it lasts, anything thrown, dropped or driven at the dog bounces off, another dog's special included. A fall, a catapult or a burrow still ends it.
 
 **Ralph's burrows** (`shared/burrows.js`): Wendover Woods has four long ones in its model, of which he may use any two a lap (2.2 seconds underground for about 100 m of road). Frostpeak, Modbury Heights, the farm and the Water Park each have two short ones (45 m of road in 1.3 seconds, then a short dash), placed automatically on wide, clear stretches; Treat Road has none. Only Ralph can use them, once a lap each. The mouths are drawn by `src/tracks/burrowMouths.js`.

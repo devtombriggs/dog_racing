@@ -137,7 +137,7 @@ test('specials: never for the leader, more likely the further back, and a rammin
   assert.ok(chances.every((c, i) => i === 0 || c > chances[i - 1]), `rising with place: ${chances}`);
   assert.ok(Math.abs(chances[0] - 0.1) < 1e-9 && Math.abs(chances[3] - 0.3) < 1e-9, '2nd 10 %, last 30 %');
   assert.ok(Math.abs(specialChance(2, 2) - 0.3) < 1e-9, '2nd of two is last');
-  assert.deepEqual(Object.keys(SPECIALS).sort(), ['black_lab', 'gsp', 'pablo', 'ralph', 'second_dog'], 'every dog has one');
+  assert.deepEqual(Object.keys(SPECIALS).sort(), ['black_lab', 'gsp', 'kombu', 'pablo', 'ralph', 'second_dog'], 'every dog has one');
   // Pablo's team runs ahead of him: a dog 7 m in front is hit, one 7 m behind or beside is not
   const sled = SPECIALS.pablo;
   assert.ok(specialTouches(sled, [0, 0, 0], 0, [0, 0, 7]));

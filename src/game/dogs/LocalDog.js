@@ -329,7 +329,7 @@ export class LocalDog extends DogAvatar {
     const elapsed = (performance.now() - this.tunnelRide.startedAt) / 1000;
     if (this.model) this.model.visible = elapsed < 0.12;
     this.mixer?.update(delta);
-    hud.setSurface('RALPH’S BURROW BOOST', '#ffc478');
+    hud.setSurface(this.tunnelRide.tunnel.id === 'kelp' ? 'KELP DIVE!' : 'RALPH’S BURROW BOOST', '#ffc478');
     hud.setSpeed('»');
   }
 
