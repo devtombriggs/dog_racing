@@ -1,0 +1,463 @@
+import { io } from 'socket.io-client';
+import { MAPS, DEFAULT_MAP } from '../../shared/maps.js';
+import { SERVER_URL, VOICE_CHAT } from '../config/env.js';
+import { gameAudio } from '../audio/GameAudio.js';
+import { createVoiceChat } from '../voiceChat.js';
+
+const ACCESSIBILITY_KEY = 'dogRacing.accessibilityMode.v2';
+
+// What a race in progress shows; put back to this whenever a race starts, ends or is left
+const NO_RACE = {
+  racePhase: '',
+  finishTime: null,
+  lobbyReturnAt: null,
+  standings: [],
+  frisbeesIncoming: [],
+  heldItem: null
+};
+
+// One player's visit to the game: the connection to the server, the room they are in, which screen
+// they are on and how their race is going.  The screens read `state` (through useSession) and call
+// the methods here; the race (game/Race.js) reads the race clock and reports back through `set`.
+export class GameSession {
+  socket = null;
+  voice = null;
+
+  // The race clock, read every frame by the race: not part of `state`, so changing it redraws nothing
+  raceGo = false;
+  raceFinished = false;
+  raceStart = null;          // performance clock at GO
+  voteDeadline = 0;          // performance clock when the map vote closes
+  singlePlayer = false;
+
+  state = {
+    screen: 'menu',          // 'menu' | 'join' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
+    room: null,
+    playerName: '',
+    availableLobbies: null,
+    lobbyListError: '',
+    joiningRoom: null,
+    socketId: null,
+    error: '',
+    hoveredDog: null,
+    connected: false,
+    lap: 1,
+    checkpoint: 0,
+    totalCheckpoints: 5,
+    // racePhase: the big words mid-screen ('Loading...', '3', 'GO!', 'FINISHED!')
+    // lobbyReturnAt: the race is over for everyone; when the room goes back to the lobby (performance clock)
+    // standings: race order for the board at the top left: [{ playerId, name, dog, place, finished }]
+    // frisbeesIncoming: red frisbees chasing me (ids)
+    // heldItem: the item this player is holding from a Treat Box ('ball' | 'toy' | 'bone' | null)
+    ...NO_RACE,
+    // Accessibility mode: the dog runs by itself, Up jumps and Down uses the item
+    accessibilityMode: false,
+    // Voice chat: the microphone option in the lobby, which stays on through the race.  Not remembered
+    // between visits: a microphone should only ever come on because you ticked the box this time.
+    voiceEnabled: false,
+    voiceStatus: { enabled: false, muted: false, error: null, connected: 0 },
+    voiceMap: {}             // "room:playerId" -> has a microphone on (as the server tells it)
+  };
+
+  #listeners = new Set();
+  #joinRequest = 0;
+  #events = null;
+  #muteKeyOn = false;
+
+  constructor() {
+    // Off unless the player turns it on.  (The key was renamed so that browsers which had remembered it
+    // as on start with it off again.)
+    try { this.state.accessibilityMode = localStorage.getItem(ACCESSIBILITY_KEY) === '1'; } catch { /* storage blocked */ }
+  }
+
+  // ---------------------------------
+  // STATE
+  // ---------------------------------
+
+  subscribe = (listener) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
+
+  getState = () => this.state;
+
+  set(patch) {
+    const previous = this.state;
+    if (Object.keys(patch).every(key => Object.is(previous[key], patch[key]))) return;
+    this.state = { ...previous, ...patch };
+    this.#afterChange(previous);
+    for (const listener of [...this.#listeners]) listener();
+  }
+
+  // Change one value from what it is now, e.g. update('frisbeesIncoming', list => [...list, id])
+  update(key, change) {
+    this.set({ [key]: change(this.state[key]) });
+  }
+
+  get #inVoiceRoom() {
+    const { room, connected } = this.state;
+    return Boolean(VOICE_CHAT && room && !room.singlePlayer && connected);
+  }
+
+  // Things that follow from a change of state, whoever made it
+  #afterChange(previous) {
+    const now = this.state;
+
+    // Countdown and music stop as soon as the player leaves the race screen
+    if (now.screen !== previous.screen && now.screen !== 'race') gameAudio.stopRace();
+
+    if (!this.voice) return;
+    const inVoiceRoom = this.#inVoiceRoom;
+    const wasInVoiceRoom = Boolean(VOICE_CHAT && previous.room && !previous.room.singlePlayer && previous.connected);
+    const code = now.room?.code ?? null;
+    const previousCode = previous.room?.code ?? null;
+
+    if (now.voiceEnabled !== previous.voiceEnabled || inVoiceRoom !== wasInVoiceRoom || code !== previousCode) {
+      this.voice.setEnabled(now.voiceEnabled && inVoiceRoom);
+    }
+    // connect to everyone in the room who is talking (or to everyone, if we are)
+    if (inVoiceRoom !== wasInVoiceRoom || now.room !== previous.room || code !== previousCode ||
+        now.voiceMap !== previous.voiceMap || now.voiceStatus.enabled !== previous.voiceStatus.enabled) {
+      const players = inVoiceRoom ? this.state.room.players : [];
+      this.voice.sync(players.map(p => p.id),
+        id => this.state.voiceMap[`${code}:${id}`] ?? players.find(p => p.id === id)?.voice ?? false);
+    }
+    this.#listenForMuteKey(this.state.screen === 'race' && this.state.voiceStatus.enabled);
+  }
+
+  // M mutes and unmutes during the race
+  #onMuteKey = (event) => {
+    if (event.code === 'KeyM' && !event.repeat) this.voice?.setMuted(!this.voice.isMuted());
+  };
+
+  #listenForMuteKey(on) {
+    if (on === this.#muteKeyOn) return;
+    this.#muteKeyOn = on;
+    if (on) window.addEventListener('keydown', this.#onMuteKey);
+    else window.removeEventListener('keydown', this.#onMuteKey);
+  }
+
+  #resetRaceClock() {
+    this.raceGo = false;
+    this.raceFinished = false;
+    this.raceStart = null;
+  }
+
+  // ---------------------------------
+  // SOCKET CONNECTION
+  // ---------------------------------
+
+  connect() {
+    const socket = io(SERVER_URL);
+    this.socket = socket;
+
+    // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
+    const voice = VOICE_CHAT ? createVoiceChat({ socket, onChange: voiceStatus => this.set({ voiceStatus }) }) : null;
+    this.voice = voice;
+
+    this.#events = {
+      connect: () => {
+        console.log('Connected:', socket.id);
+        this.set({ connected: true, socketId: socket.id });
+      },
+
+      disconnect: () => {
+        this.#joinRequest += 1;
+        this.set({ connected: false, socketId: null, availableLobbies: null, lobbyListError: '', joiningRoom: null });
+      },
+
+      voiceSignal: message => voice?.handleSignal(message),
+
+      voiceChanged: ({ playerId, enabled }) => {
+        const key = `${this.state.room?.code ?? null}:${playerId}`;
+        this.update('voiceMap', map => ({ ...map, [key]: enabled }));
+      },
+
+      lobbyUpdated: (updatedRoom) => {
+        this.set({ room: updatedRoom });
+        // Everyone has a dog (or the host pressed Next): on to the map vote
+        if (updatedRoom.status === 'voting') {
+          if (updatedRoom.voteMsLeft != null) this.voteDeadline = performance.now() + updatedRoom.voteMsLeft;
+          if (this.state.screen === 'selection') this.set({ screen: 'mapVote' });
+        }
+      },
+
+      raceStarted: (data) => {
+        console.log('Race loading:', data);
+        const mapId = data.mapId ?? DEFAULT_MAP;
+        gameAudio.loadRace(mapId);
+        this.#resetRaceClock();
+
+        this.set({
+          ...NO_RACE,
+          racePhase: 'Loading...',
+          totalCheckpoints: data.totalCheckpoints ?? MAPS[mapId].checkpoints.length,
+          lap: 1,
+          checkpoint: 0,
+          room: { ...this.state.room, status: 'loading', mapId, players: data.players },
+          screen: 'race'
+        });
+      },
+
+      raceCountdown: (data) => {
+        console.log('Countdown:', data.number);
+        if (data.number === 3) gameAudio.playRace('countdown');
+        this.set({ racePhase: String(data.number) });
+      },
+
+      raceGo: () => {
+        console.log('GO!');
+        this.raceStart = performance.now();
+        this.raceGo = true;
+        gameAudio.playRace('music');
+        this.set({ racePhase: 'GO!' });
+      },
+
+      raceProgress: (data) => {
+        if (data.playerId !== socket.id) return;
+
+        this.set({ lap: data.lap, checkpoint: data.checkpoint });
+        if (data.totalCheckpoints !== undefined) this.set({ totalCheckpoints: data.totalCheckpoints });
+
+        if (data.finished) {
+          this.raceFinished = true;
+          this.raceGo = false;
+          this.set({ finishTime: data.finishTime, racePhase: 'FINISHED!' });
+        }
+      },
+
+      raceStandings: (data) => {
+        if (Array.isArray(data?.standings)) this.set({ standings: data.standings });
+      },
+
+      // Everyone is home (or the time allowed after the winner ran out): the race is over for all,
+      // and the room goes back to the lobby shortly
+      raceEnded: (data) => {
+        this.raceFinished = true;
+        this.raceGo = false;
+        this.set({ racePhase: '', lobbyReturnAt: performance.now() + (data?.returnMs ?? 0) });
+      },
+
+      // Back to character select with the same players: the next race starts from there as the first did
+      returnedToLobby: () => {
+        this.#resetRaceClock();
+        this.set({ ...NO_RACE, error: '' });
+        if (this.state.screen === 'race') this.set({ screen: 'selection' });
+      },
+
+      playerFinished: (data) => {
+        if (data.playerId === socket.id) console.log('Your finish time:', data.finishTime);
+        else console.log(`${data.name} finished in ${data.finishTime}s`);
+      }
+    };
+
+    for (const [event, handler] of Object.entries(this.#events)) socket.on(event, handler);
+  }
+
+  disconnect() {
+    const socket = this.socket;
+    if (!socket) return;
+    for (const [event, handler] of Object.entries(this.#events)) socket.off(event, handler);
+    this.voice?.dispose();
+    this.voice = null;
+    this.#listenForMuteKey(false);
+    gameAudio.stopRace();
+    socket.disconnect();
+    this.socket = null;
+  }
+
+  // The list of games waiting for players, kept up to date while the join screen is open.
+  // Returns a function that stops watching.
+  watchLobbies() {
+    const socket = this.socket;
+    const timer = setTimeout(() => {
+      this.set({ lobbyListError: 'Could not load games. Go back and try again.' });
+    }, 8000);
+    const handleLobbiesUpdated = (lobbies) => {
+      clearTimeout(timer);
+      this.set({ availableLobbies: lobbies, lobbyListError: '' });
+    };
+    socket.on('lobbiesUpdated', handleLobbiesUpdated);
+    socket.emit('watchLobbies');
+    return () => {
+      clearTimeout(timer);
+      socket.off('lobbiesUpdated', handleLobbiesUpdated);
+      if (socket.connected) socket.emit('unwatchLobbies');
+    };
+  }
+
+  // ---------------------------------
+  // MENU
+  // ---------------------------------
+
+  setPlayerName = (playerName) => this.set({ playerName });
+
+  setAccessibilityMode = (accessibilityMode) => {
+    this.set({ accessibilityMode });
+    try { localStorage.setItem(ACCESSIBILITY_KEY, accessibilityMode ? '1' : '0'); } catch { /* storage blocked */ }
+  };
+
+  setVoiceEnabled = (voiceEnabled) => this.set({ voiceEnabled });
+
+  openJoinScreen = () => {
+    this.set({ error: '', availableLobbies: null, lobbyListError: '', screen: 'join' });
+  };
+
+  backToMenu = () => {
+    this.set({ error: '', screen: 'menu' });
+  };
+
+  // ---------------------------------
+  // HOST GAME
+  // ---------------------------------
+
+  hostGame = () => {
+    this.singlePlayer = false;
+    this.set({ error: '' });
+
+    this.socket.emit('hostGame', { name: this.state.playerName }, (response) => {
+      if (!response?.success) {
+        this.set({ error: response?.error || 'Failed to host game' });
+        return;
+      }
+      this.set({ room: response.room, screen: 'selection' });
+    });
+  };
+
+  // ---------------------------------
+  // SINGLE PLAYER
+  // ---------------------------------
+
+  startSinglePlayer = () => {
+    this.set({ error: '' });
+
+    if (!this.socket?.connected) {
+      this.set({ error: 'Not connected to server' });
+      return;
+    }
+
+    this.singlePlayer = true;
+
+    this.socket.emit('hostGame', { name: this.state.playerName, singlePlayer: true }, (response) => {
+      if (!response?.success) {
+        this.singlePlayer = false;
+        this.set({ error: response?.error || 'Failed to create single-player game' });
+        return;
+      }
+      this.set({ room: response.room, screen: 'selection' });
+    });
+  };
+
+  // ---------------------------------
+  // JOIN GAME
+  // ---------------------------------
+
+  joinGame = (roomCode) => {
+    if (!this.socket?.connected || this.state.joiningRoom) return;
+    this.singlePlayer = false;
+    this.set({ error: '', joiningRoom: roomCode });
+    const requestId = ++this.#joinRequest;
+
+    this.socket.timeout(8000).emit('joinGame', { roomCode, name: this.state.playerName }, (timeoutError, response) => {
+      if (requestId !== this.#joinRequest) return;
+      this.set({ joiningRoom: null });
+      if (timeoutError) {
+        this.set({ error: 'Joining timed out. Please try again.' });
+        return;
+      }
+      if (!response?.success) {
+        this.set({ error: response?.error || 'Failed to join game' });
+        return;
+      }
+      this.set({ room: response.room, screen: 'selection' });
+    });
+  };
+
+  // ---------------------------------
+  // MAP AND DOG SELECTION
+  // ---------------------------------
+
+  selectDog = (dogId) => {
+    this.set({ error: '', hoveredDog: null });
+
+    const socket = this.socket;
+    if (!socket?.connected) {
+      this.set({ error: 'Not connected to server' });
+      return;
+    }
+
+    socket.emit('selectDog', { dog: dogId }, (response) => {
+      if (!response?.success) {
+        this.set({ error: response?.error || 'Failed to select dog' });
+        return;
+      }
+
+      gameAudio.playSelection(dogId);
+
+      // Multiplayer: stay on character select (the dog can still be changed) until
+      // everyone has picked or the host presses Next; then the map vote takes over
+      if (!this.singlePlayer) return;
+
+      // Single player: ready up, then choose the map
+      socket.emit('setReady', { ready: true }, (readyResponse) => {
+        if (!readyResponse?.success) {
+          this.set({ error: readyResponse?.error || 'Failed to ready up' });
+          return;
+        }
+        this.set({ screen: 'mapSelect' });
+      });
+    });
+  };
+
+  // Tell the other players which dog this one is looking at
+  hoverDog = (dogId) => {
+    this.set({ hoveredDog: dogId });
+    if (!this.singlePlayer) this.socket?.emit('hoverDog', { dog: dogId });
+  };
+
+  // ---------------------------------
+  // MAP SELECT / VOTE
+  // ---------------------------------
+
+  // Host only: go to the map vote now (anyone without a dog is given one)
+  skipToMapVote = () => {
+    this.set({ error: '' });
+    this.socket?.emit('skipToMapVote', (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Could not move on to the map vote' });
+    });
+  };
+
+  voteMap = (mapId) => {
+    this.set({ error: '' });
+    this.socket?.emit('voteMap', { mapId }, (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Vote not counted' });
+    });
+  };
+
+  // Single player: clicking a map starts the race on it
+  startSoloRace = (mapId) => {
+    this.set({ error: '' });
+    const socket = this.socket;
+    socket?.emit('selectMap', { mapId }, (response) => {
+      if (!response?.success) { this.set({ error: response?.error || 'Failed to select map' }); return; }
+      socket.emit('startRace', (startResponse) => {
+        if (!startResponse?.success) this.set({ error: startResponse?.error || 'Failed to start race' });
+      });
+    });
+  };
+
+  // ---------------------------------
+  // LEAVING
+  // ---------------------------------
+
+  returnToLobby = () => {
+    this.socket?.emit('returnToLobby');
+  };
+
+  leaveGame = () => {
+    this.singlePlayer = false;
+    this.#resetRaceClock();
+    this.socket?.emit('leaveGame');
+    this.set({ ...NO_RACE, room: null, error: '', screen: 'menu' });
+  };
+}
