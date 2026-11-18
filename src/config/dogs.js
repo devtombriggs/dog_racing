@@ -81,6 +81,25 @@ export const DOGS = {
       Sprint: 3.919
     }
   },
+  rocky: {
+    name: 'Rocky (Border Collie)',
+    displayName: DOG_NAMES.rocky,
+    breed: 'Border Collie',
+    portrait: '/portraits/rocky.png',
+    accent: '#3ddc4a',
+    model: '/models/rocky.glb',
+    stats: DOG_STATS.rocky,
+    // (rocky_collie/create_rocky.py: built from the Labrador's body, a little lighter)
+    scale: 2.8,
+    size: 0.95,
+    // rocky_collie/clip_info.json (Poppy's captured strides, carried low like a collie working sheep)
+    gaitSpeed: {
+      Walk: 1.205,
+      Trot: 2.051,
+      Run: 3.597,
+      Sprint: 5.598
+    }
+  },
   kombu: {
     name: 'Kombu (Labradoodle)',
     displayName: DOG_NAMES.kombu,

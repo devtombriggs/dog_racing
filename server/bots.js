@@ -449,7 +449,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       case SPECIAL_ITEM:
         if (!special) return true;
         if (special.kind === 'jet') return true;
-        if (special.kind === 'flush' || special.kind === 'kelp') return !leading || heldFor > 8;
+        if (special.kind === 'flush' || special.kind === 'kelp' || special.kind === 'sheep') return !leading || heldFor > 8;
         return inFront(aim ? 22 : 35, aim ? 4 : 8) || heldFor > 6;    // the sled, the spin, the wave: with someone to run into
       default: return true;
     }

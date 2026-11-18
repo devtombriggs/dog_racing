@@ -6,7 +6,7 @@ import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHe
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, specialChance, specialFor, specialTouches, pheasantFlightMs } from '../shared/specials.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, specialChance, specialFor, specialTouches, pheasantFlightMs } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
@@ -29,7 +29,7 @@ const io = new Server(PORT, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky'];
 const TOTAL_LAPS = 3;
 const MAX_PLAYERS = 5;
 const LOBBY_BROWSER = 'lobby-browser';
@@ -337,6 +337,7 @@ function grantItem(room, player) {
 function resetItems(room) {
   stopFrisbees(room);
   stopFireworks(room);
+  stopSheep(room);
   for (const timer of room.boneTimers?.values() ?? []) clearTimeout(timer);
   room.boneTimers = new Map();
   room.hazards = new Map();
@@ -416,6 +417,7 @@ function startSpecial(room, player) {
   const spec = specialFor(player.dog);
   if (!spec) return;
   if (spec.kind === 'kelp') { kelpDive(room, player); return; }       // (over in a moment: nothing to keep track of)
+  if (spec.kind === 'sheep') { releaseSheep(room, player); return; }  // (the flock is on its own from here: he just runs on)
   clearTimeout(activeSpecials.get(player)?.timer);
   const now = Date.now();
   activeSpecials.set(player, {
@@ -436,6 +438,89 @@ function endSpecial(room, player, reason) {
   clearTimeout(active.timer);
   activeSpecials.delete(player);
   io.to(room.code).emit('specialEnded', { playerId: player.id, reason });
+}
+
+// Rocky's Sheep Stampede (shared/specials.js SHEEP): the server runs five sheep up the road, telling
+// everyone where they are, and each knocks over the first dog it reaches.
+function releaseSheep(room, player) {
+  // how far round the lap and across the road Rocky is: the flock is centred on him
+  const { s, across } = roadPlace(room, player.position);
+  const now = Date.now(), flock = [];
+  room.sheep ??= new Map();
+  for (let i = 0; i < SHEEP.count; i++) {
+    const offset = i - (SHEEP.count - 1) / 2;
+    const sheep = {
+      id: `sheep-${room.nextItemId++}`, owner: player.id, bornAt: now,
+      s: s + SHEEP.ahead - Math.abs(offset) * SHEEP.stagger, lateral: across + offset * SHEEP.spacing,
+    };
+    placeSheep(room, sheep);
+    room.sheep.set(sheep.id, sheep);
+    flock.push({ id: sheep.id, position: sheep.position, yaw: sheep.yaw });
+  }
+  io.to(room.code).emit('sheepReleased', { owner: player.id, sheep: flock });
+  room.sheepTimer ??= setInterval(() => tickSheep(room), SHEEP.tickMs);
+}
+
+// Where on the road a position is: how far round the lap, and how far across from the middle
+function roadPlace(room, position) {
+  const path = PICKUP_PATHS[room.mapId], s = fireworkRoute(room.mapId).sAt(position), centre = path.pointAt(s), side = path.pointAt(s, 1);
+  return { s, across: (position[0] - centre.x) * (side.x - centre.x) + (position[2] - centre.z) * (side.z - centre.z) };
+}
+
+// Where a sheep is: on the road at its distance round the lap, kept inside the edges
+function placeSheep(room, sheep) {
+  const path = PICKUP_PATHS[room.mapId], L = path.length, s = ((sheep.s % L) + L) % L;
+  const reach = Math.max(0, path.pointAt(s).halfWidth - SHEEP.edge);
+  const point = path.pointAt(s, Math.max(-reach, Math.min(reach, sheep.lateral)));
+  const y = BALL_GROUND[room.mapId] ? BALL_GROUND[room.mapId](point.x, point.z) : point.y;
+  sheep.position = [point.x, y, point.z];
+  sheep.yaw = point.rotationY;
+}
+
+function tickSheep(room) {
+  if (rooms.get(room.code) !== room || room.status !== 'racing') { stopSheep(room); return; }
+  const now = Date.now(), dt = SHEEP.tickMs / 1000, moved = [], L = PICKUP_PATHS[room.mapId].length;
+  // the dogs a sheep could go for, and where each is on the road
+  const dogs = [...room.players.values()].filter(dog => !dog.finished && !burrowRides.has(dog)).map(dog => ({ dog, ...roadPlace(room, dog.position) }));
+  for (const sheep of room.sheep.values()) {
+    if (now - sheep.bornAt > SHEEP.seconds * 1000) {
+      room.sheep.delete(sheep.id);
+      io.to(room.code).emit('sheepGone', { id: sheep.id, position: sheep.position });
+      continue;
+    }
+    sheep.s += SHEEP.speed * dt;
+    // it veers towards the nearest dog up the road in front of it
+    const aheadBy = place => (((place.s - sheep.s) % L) + L) % L;
+    const quarry = dogs.filter(place => place.dog.id !== sheep.owner && now >= place.dog.hitImmuneUntil && aheadBy(place) <= SHEEP.sees)
+      .sort((a, b) => aheadBy(a) - aheadBy(b))[0];
+    if (quarry) sheep.lateral += Math.max(-SHEEP.steer * dt, Math.min(SHEEP.steer * dt, quarry.across - sheep.lateral));
+    placeSheep(room, sheep);
+    const near = (position, radius) => Math.hypot(position[0] - sheep.position[0], position[2] - sheep.position[2]) <= radius;
+    // chew toys in the way go flying
+    for (const toy of [...room.hazards.values()]) {
+      if (!near(toy.position, SHEEP.hitRadius)) continue;
+      room.hazards.delete(toy.id);
+      io.to(room.code).emit('hazardRemoved', { id: toy.id, hitBy: 'special' });
+    }
+    // the first dog it reaches (a dog down a burrow, or jumping clean over, is missed)
+    const victim = [...room.players.values()].find(dog => dog.id !== sheep.owner && !dog.finished && now >= dog.hitImmuneUntil
+      && !burrowRides.has(dog) && near(dog.position, SHEEP.hitRadius) && Math.abs(dog.position[1] - sheep.position[1]) <= SHEEP.hitHeight);
+    if (victim) {
+      room.sheep.delete(sheep.id);
+      io.to(room.code).emit('sheepGone', { id: sheep.id, position: sheep.position, hit: victim.id });
+      hitPlayer(room, victim, sheep.owner, SPECIAL_ITEM);            // (a dog in its own special, or flying, shrugs it off)
+      continue;
+    }
+    moved.push({ id: sheep.id, position: sheep.position, yaw: sheep.yaw });
+  }
+  if (moved.length) io.to(room.code).emit('sheepMoved', { sheep: moved });
+  if (room.sheep.size === 0) stopSheep(room);
+}
+
+function stopSheep(room) {
+  if (room.sheepTimer) clearInterval(room.sheepTimer);
+  room.sheepTimer = null;
+  room.sheep = new Map();
 }
 
 // Kombu's Kelp Dive (shared/specials.js KELP): where he comes up, worked out along the road.  He is
@@ -1601,6 +1686,7 @@ function leaveRoom(socket, id = id) {
     clearRaceEndTimers(room);
     stopFrisbees(room);
     stopFireworks(room);
+    stopSheep(room);
     rooms.delete(roomCode);
     updateLobbies();
 

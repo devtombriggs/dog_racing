@@ -5,6 +5,7 @@ import { GOLDEN_BONE_SPOTS } from '../../shared/pickupSpots.js';
 import { BURROWS } from '../../shared/burrows.js';
 import { createBurrowMouths } from '../tracks/burrowMouths.js';
 import { createKelp } from '../abilities/kelp.js';
+import { createSheep } from '../abilities/sheep.js';
 import { createTreatBoxes } from '../pickups/treatBoxes.js';
 import { createGoldenBones } from '../pickups/goldenBones.js';
 import { createItems } from '../pickups/items.js';
@@ -81,6 +82,8 @@ export class Race {
     this.burrowMouths = createBurrowMouths({ scene, mapId });
     // Kombu's seaweed (shared/specials.js KELP)
     this.kelp = createKelp({ scene });
+    // Rocky's flock (shared/specials.js SHEEP)
+    this.sheep = createSheep({ scene });
     // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
     this.specials = createSpecials({
       scene,
@@ -385,6 +388,11 @@ export class Race {
       // SPECIAL ABILITIES: the server says when one starts, who it knocks over and when it ends
       // ---------------------------------
 
+      // Rocky's Sheep Stampede: the server runs the flock; we draw it
+      sheepReleased: ({ sheep }) => this.sheep.release(sheep),
+      sheepMoved: ({ sheep }) => this.sheep.move(sheep),
+      sheepGone: ({ id, position }) => this.sheep.gone(id, position),
+
       specialStarted: (data) => {
         specials.start(data.playerId, data);
         if (mine(data.playerId)) local.specialStarted();
@@ -426,6 +434,7 @@ export class Race {
     this.items.update(delta, itemAnchors, world.ballGround);
     this.fireworks.update(delta);
     this.kelp.update(delta);
+    this.sheep.update(delta);
     this.shields.update(delta, id => (id === this.myId ? local : remotes.get(id)));
     local.spinIfStunned();
 
@@ -520,6 +529,7 @@ export class Race {
     this.shields.dispose();
     this.burrowMouths.dispose();
     this.kelp.dispose();
+    this.sheep.dispose();
     this.specials.dispose();
     this.minimap.dispose();
     this.goldenBones.dispose();

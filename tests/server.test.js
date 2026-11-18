@@ -1439,7 +1439,7 @@ test('computer dogs: the host sets how many and how good, they take the free dog
   const bots = start.players.filter(player => player.bot);
   assert.equal(start.players.length, 5);
   assert.equal(bots.length, 3);
-  assert.equal(new Set(start.players.map(player => player.dog)).size, 5, 'five different dogs (of the six)');
+  assert.equal(new Set(start.players.map(player => player.dog)).size, 5, 'five different dogs (of the seven)');
   assert.deepEqual(start.players.map(player => player.slot).sort(), [0, 1, 2, 3, 4]);
   start.players.forEach((player, index) => assert.deepEqual(player.position, MAPS.wendover.startPositions[index].position));
   assert.ok(bots.every(bot => bot.loaded && bot.level === 'hard' && bot.name === 'CPU'));
@@ -1950,4 +1950,47 @@ test('split screen: a single-player room with a second seat that only the page w
   const solo = client().call('hostGame', { singlePlayer: true }).room;
   assert.equal(two.call('joinGame', { roomCode: solo.code, localKey: key }).success, false);
   for (const p of [one, two]) p.call('leaveGame');
+});
+
+test('Rocky\'s Sheep Stampede: five sheep up the road, each gone on the first dog it reaches or after ten seconds; Rocky is untouched', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const at = (s, lateral = 0) => { const p = FARM.pointAt(s, lateral); return [p.x, p.y, p.z]; };
+  const lead = client(), near = client(), rocky = client(), sockets = [lead, near, rocky];
+  const room = lead.call('hostGame', { mapId: 'farmyard', name: 'Lead' }).room;
+  near.call('joinGame', { roomCode: room.code, name: 'Near' }); rocky.call('joinGame', { roomCode: room.code, name: 'Rocky' });
+  lead.call('selectDog', { dog: 'gsp' }); near.call('selectDog', { dog: 'pablo' }); rocky.call('selectDog', { dog: 'rocky' });
+  lead.call('startRace'); for (const s of sockets) s.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const move = (socket, position) => socket.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: 0 });
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const box = TREAT_BOXES_BY_MAP.farmyard[0].groundPosition, from = FARM.query(box[0], box[2]).s;
+  // one dog 30 m up the road, another a long way round the lap
+  for (const cp of MAPS.farmyard.checkpoints) { if (FARM.query(cp.x, cp.z).s < 400) move(lead, [cp.x, cp.y, cp.z]); }
+  // (in line with Rocky across the road: the flock sets off around where he is)
+  move(lead, at(400)); move(near, at(from + 30, FARM.query(box[0], box[2]).lateral));
+  context.mock.method(Math, 'random', () => 0);
+  move(rocky, box);
+  context.mock.restoreAll();
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: rocky.id, item: 'special' });
+  rocky.call('useItem');
+  const released = events('sheepReleased').at(-1);
+  assert.equal(released.owner, rocky.id);
+  assert.equal(events('sheepReleased').length, 1, 'one flock');
+  assert.equal(released.sheep.length, 5);
+  assert.equal(events('specialStarted').length, 0, 'nothing happens to Rocky himself');
+  for (const sheep of released.sheep) assert.ok(FARM.query(sheep.position[0], sheep.position[2]).onTrack);
+  // two seconds on: the one in the middle has reached the near dog and is gone; the rest run on
+  for (let i = 0; i < 40; i++) context.mock.timers.tick(50);
+  const hits = events('playerHit').filter(e => e.item === 'special');
+  assert.deepEqual(hits.map(e => [e.playerId, e.by]), [[near.id, rocky.id]], 'one dog, knocked over once');
+  assert.equal(events('sheepGone').filter(e => e.hit === near.id).length, 1, 'by one sheep, which is gone');
+  assert.ok(events('sheepMoved').length > 20);
+  assert.ok(!events('playerHit').some(e => e.playerId === rocky.id));
+  // ten seconds after they set off the rest are gone (one or more on the leader, 280 m up the road at most)
+  for (let i = 0; i < 170; i++) context.mock.timers.tick(50);
+  assert.equal(events('sheepGone').length, 5);
+  const moves = events('sheepMoved').length;
+  for (let i = 0; i < 20; i++) context.mock.timers.tick(50);
+  assert.equal(events('sheepMoved').length, moves, 'and nothing more is heard of them');
+  for (const s of sockets) s.call('leaveGame');
 });

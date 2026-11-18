@@ -77,8 +77,8 @@ html, body, #root {
 
 .character-select__grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));      /* six dogs */
-  gap: clamp(10px, 1.4vw, 20px);
+  grid-template-columns: repeat(7, minmax(0, 1fr));      /* seven dogs */
+  gap: clamp(8px, 1.1vw, 16px);
 }
 
 .character-card {

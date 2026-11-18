@@ -5,6 +5,7 @@
 //   Pablo  — Pack Rush:      two friends and a sled; 10 seconds of fast, steerable ride that knocks over any dog it runs into
 //   Meela  — Zoomies:        5 seconds of low whirling spin with a wide reach; knocks over any dog she spins into
 //   Pippa  — Pheasant Flush: one pheasant for every other dog, ahead or behind; each flies its dog down and knocks it over
+//   Rocky  — Sheep Stampede: five sheep charge up the road, each knocking over the first dog it reaches
 //   Kombu  — Kelp Dive:      seaweed pulls him under and puts him down behind the dog two places ahead (never past first)
 //   Poppy  — Surf's Up:      belly-flops onto her own wave: the fastest of the lot, but it steers itself for five
 //                            seconds, so it only hits who happens to be in the way
@@ -20,6 +21,8 @@ export const SPECIALS = {
   pablo: { kind: 'sled', name: 'Pack Rush', durationMs: 10000, speed: 1.65, hitRadius: 2.2, reach: 6 },
   second_dog: { kind: 'zoomies', name: 'Zoomies', durationMs: 5000, speed: 1.35, hitRadius: 3.0, reach: 0 },
   gsp: { kind: 'flush', name: 'Pheasant Flush', durationMs: 900 },
+  // (Rocky's is a flock the server runs up the road: SHEEP below has the rules)
+  rocky: { kind: 'sheep', name: 'Sheep Stampede', durationMs: 10000 },
   // (Kombu's is over in a moment: the server moves him; shared/specials.js KELP has the rules)
   kombu: { kind: 'kelp', name: 'Kelp Dive', durationMs: 1100 },
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true },
@@ -35,6 +38,24 @@ export const KELP = {
   behindLeader: 27,      // ...when that dog is the leader (about 30 yards)
   worthIt: 5,            // if it would move him on less than this he is not moved (he gets a golden bone's dash instead)
   boostSeconds: 1.0, speedMultiplier: 1.2,     // the dash he comes up with
+};
+
+// Rocky's Sheep Stampede: five sheep set off up the road from just in front of him, side by side
+// around where he is on the road, faster than any dog, each veering towards the nearest dog in front of
+// it.  Each knocks over the first dog it reaches (never Rocky) and is gone; any that reach nobody are gone after ten seconds.  They clear chew toys out of
+// their way.  Rocky himself carries on as he was: the special does nothing to him.
+export const SHEEP = {
+  count: 5,
+  seconds: 10,
+  speed: 27,             // m/s (a sprinting dog does about 17)
+  ahead: 3,              // metres in front of Rocky that they start
+  spacing: 1.5,          // metres between one sheep and the next, across the road
+  stagger: 1.2,          // ...and how far the outer ones start behind the middle one
+  edge: 0.8,             // how close to the edge of the road they will run
+  sees: 35,              // a sheep goes for the nearest dog this far up the road in front of it...
+  steer: 4.5,            // ...moving across the road towards it at this many m/s
+  hitRadius: 1.5, hitHeight: 1.7,      // a dog this close is hit (one jumping clean over is not)
+  tickMs: 50,
 };
 
 export const SPECIAL_HIT = {
