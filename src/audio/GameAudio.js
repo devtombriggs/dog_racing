@@ -1,9 +1,11 @@
 // The game's sounds: a dog's call on character select, the countdown and each map's music.
 
 // Played once when the player's pick is confirmed on character select.
-// Add a dog here when its sound is ready, e.g. greyhound: '/audio/meela_selection.wav'
+// Add a dog here when its sound is ready, e.g. pablo: '/audio/pablo_selection.mp3'
 const SELECTION_SOUNDS = {
   gsp: '/audio/pippa_selection.wav',
+  second_dog: '/audio/meela_selection.mp3',
+  black_lab: '/audio/poppy_selection.mp3',
 };
 
 // Race audio. Every map has the same "3, 2, 1, GO" countdown: the clip starts when "3" shows, from
@@ -14,15 +16,15 @@ const SELECTION_SOUNDS = {
 const COUNTDOWN_OFFSET = 1.0;
 const COUNTDOWN_AUDIO = '/audio/countdown.mp3';
 const RACE_AUDIO = {
-  treat_road: { music: '/audio/treat_road.mp3', musicVolume: 0.5 },
+  treat_road: { music: '/audio/treat_road.mp3', musicVolume: 0.35 },
   // (these are instrumentals made with Suno, one to suit each map)
-  wendover: { music: '/audio/wendover.mp3', musicVolume: 0.5 },                // woodland folk: guitar, flute, fiddle
-  frostpeak: { music: '/audio/frostpeak.mp3', musicVolume: 0.5 },              // alpine: sleigh bells, brass, driving snare
-  modbury_heights: { music: '/audio/modbury_heights.mp3', musicVolume: 0.5 },  // coastal surf: ukulele, surf and steel guitar
-  farmyard: { music: '/audio/farmyard.mp3', musicVolume: 0.5 },                // bluegrass hoedown: banjo, fiddle, washboard
-  water_park: { music: '/audio/water_park.mp3', musicVolume: 0.5 },            // tropical: steel drums, marimba, slap bass
-  pet_mall: { music: '/audio/pet_mall.mp3', musicVolume: 0.5 },                // zany funk and disco: synth organ, xylophone, kazoo
-  mud_park: { music: '/audio/mud_park.mp3', musicVolume: 0.5 },                // rowdy stomp: slide guitar, harmonica, tuba
+  wendover: { music: '/audio/wendover.mp3', musicVolume: 0.35 },                // woodland folk: guitar, flute, fiddle
+  frostpeak: { music: '/audio/frostpeak.mp3', musicVolume: 0.35 },              // alpine: sleigh bells, brass, driving snare
+  modbury_heights: { music: '/audio/modbury_heights.mp3', musicVolume: 0.35 },  // coastal surf: ukulele, surf and steel guitar
+  farmyard: { music: '/audio/farmyard.mp3', musicVolume: 0.35 },                // bluegrass hoedown: banjo, fiddle, washboard
+  water_park: { music: '/audio/water_park.mp3', musicVolume: 0.35 },            // tropical: steel drums, marimba, slap bass
+  pet_mall: { music: '/audio/pet_mall.mp3', musicVolume: 0.35 },                // zany funk and disco: synth organ, xylophone, kazoo
+  mud_park: { music: '/audio/mud_park.mp3', musicVolume: 0.35 },                // rowdy stomp: slide guitar, harmonica, tuba
 };
 
 // Voices come first: while this player is connected to anyone in voice chat, the music plays at this
@@ -32,7 +34,7 @@ const MUSIC_UNDER_VOICES = 0.3;
 export class GameAudio {
   #selection = {};
   #race = { countdown: null, music: null };
-  #musicVolume = 0.5;      // this map's music at its usual volume
+  #musicVolume = 0.35;      // this map's music at its usual volume
   #voices = false;         // voice chat is connected to someone
 
   // Turn the music down while voice chat is connected (and back up when it is not)
@@ -74,7 +76,7 @@ export class GameAudio {
         audio.preload = 'auto';
         if (key === 'music') {
           audio.loop = true;
-          this.#musicVolume = config.musicVolume ?? 0.5;
+          this.#musicVolume = config.musicVolume ?? 0.35;
         }
         this.#race[key] = audio;
       }
