@@ -21,7 +21,8 @@ const STARTING_GRID = [
   [-4, 0, 2.1],
   [-4, 0, 0],
   [-4, 0, -2.1],
-  [-4, 0, -4.2]
+  [-4, 0, -4.2],
+  [-7, 0, 0]          // (the sixth dog: behind the middle of the row)
 ];
 
 const START_ROTATION = Math.PI / 2;
@@ -58,7 +59,9 @@ export const MAPS = {
     name: frostpeak.name,
     description: '2.5 km alpine circuit · summit cannon · black run slalom',
     model: '/models/frostpeak_alpine.glb',
-    startPositions: frostpeak.startPositions,
+    // (the model has five places in a row; the sixth dog starts 3 m behind the middle one)
+    startPositions: [...frostpeak.startPositions, (({ position, forward, rotationY }) => ({ id: 6, rotationY, forward,
+      position: [position[0] - forward[0] * 3, position[1], position[2] - forward[2] * 3] }))(frostpeak.startPositions[2])],
     // Checkpoint zero is the finish line, tested separately after the others.
     checkpoints: frostpeak.checkpoints.slice(1).map(({ position, radius }) => ({
       x: position[0], z: position[2], radius

@@ -137,7 +137,7 @@ test('specials: never for the leader, more likely the further back, and a rammin
   assert.ok(chances.every((c, i) => i === 0 || c > chances[i - 1]), `rising with place: ${chances}`);
   assert.ok(Math.abs(chances[0] - 0.1) < 1e-9 && Math.abs(chances[3] - 0.3) < 1e-9, '2nd 10 %, last 30 %');
   assert.ok(Math.abs(specialChance(2, 2) - 0.3) < 1e-9, '2nd of two is last');
-  assert.deepEqual(Object.keys(SPECIALS).sort(), ['black_lab', 'gsp', 'kombu', 'pablo', 'ralph', 'rocky', 'second_dog'], 'every dog has one');
+  assert.deepEqual(Object.keys(SPECIALS).sort(), ['black_lab', 'enzo', 'gsp', 'kombu', 'pablo', 'ralph', 'rocky', 'second_dog'], 'every dog has one');
   // Pablo's team runs ahead of him: a dog 7 m in front is hit, one 7 m behind or beside is not
   const sled = SPECIALS.pablo;
   assert.ok(specialTouches(sled, [0, 0, 0], 0, [0, 0, 7]));
@@ -149,4 +149,19 @@ test('specials: never for the leader, more likely the further back, and a rammin
   assert.equal(pheasantFlightMs(0), PHEASANT.minFlightMs);
   assert.equal(pheasantFlightMs(1e6), PHEASANT.maxFlightMs);
   assert.ok(pheasantFlightMs(60) > pheasantFlightMs(20));
+});
+
+test('Enzo\'s Belly Bounce: up and down every bounce with a burst of speed at the start of each; he squashes a dog only when he is down on it', async () => {
+  const { SPECIALS, bellyBounce, specialTouches } = await import('../shared/specials.js');
+  const spec = SPECIALS.enzo, b = spec.bounce;
+  assert.equal(spec.durationMs, 10000);
+  assert.equal(bellyBounce(spec, 0).height, 0);
+  assert.ok(Math.abs(bellyBounce(spec, b.seconds / 2).height - b.height) < 1e-9, 'top of the bounce');
+  assert.ok(bellyBounce(spec, b.seconds * 3.5).height > b.height * 0.99, 'and of every one after');
+  assert.ok(bellyBounce(spec, 0.01).speed > bellyBounce(spec, b.seconds * 0.9).speed, 'the burst fades through the bounce');
+  assert.ok(bellyBounce(spec, b.seconds * 0.99).speed >= spec.speed, 'never slower than the special itself');
+  // a dog under him: safe while he is up in the air, squashed when he comes down
+  assert.equal(specialTouches(spec, [0, 2.2, 0], 0, [0.5, 0, 0.5]), false);
+  assert.equal(specialTouches(spec, [0, 0.3, 0], 0, [0.5, 0, 0.5]), true);
+  assert.equal(specialTouches(spec, [0, 0.3, 0], 0, [6, 0, 0]), false, 'not one well off to the side');
 });

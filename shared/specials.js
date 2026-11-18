@@ -5,6 +5,7 @@
 //   Pablo  — Pack Rush:      two friends and a sled; 10 seconds of fast, steerable ride that knocks over any dog it runs into
 //   Meela  — Zoomies:        5 seconds of low whirling spin with a wide reach; knocks over any dog she spins into
 //   Pippa  — Pheasant Flush: one pheasant for every other dog, ahead or behind; each flies its dog down and knocks it over
+//   Enzo   — Belly Bounce:   ten seconds of bounding up the road on his belly, a burst of speed on every bounce, squashing any dog he lands on
 //   Rocky  — Sheep Stampede: five sheep charge up the road, each knocking over the first dog it reaches
 //   Kombu  — Kelp Dive:      seaweed pulls him under and puts him down behind the dog two places ahead (never past first)
 //   Poppy  — Surf's Up:      belly-flops onto her own wave: the fastest of the lot, but it steers itself for five
@@ -21,6 +22,11 @@ export const SPECIALS = {
   pablo: { kind: 'sled', name: 'Pack Rush', durationMs: 10000, speed: 1.65, hitRadius: 2.2, reach: 6 },
   second_dog: { kind: 'zoomies', name: 'Zoomies', durationMs: 5000, speed: 1.35, hitRadius: 3.0, reach: 0 },
   gsp: { kind: 'flush', name: 'Pheasant Flush', durationMs: 900 },
+  // Enzo bounds up the road on his belly: each bounce starts with a burst of speed (bounce.kick on top of
+  // `speed`, fading through the bounce), and any dog he comes down on is squashed (`landing`: he has to be
+  // this close to the ground to squash one; a dog he is sailing over is safe)
+  enzo: { kind: 'bounce', name: 'Belly Bounce', durationMs: 10000, speed: 1.3, hitRadius: 2.6, reach: 1.5, landing: 0.9,
+    bounce: { height: 2.4, seconds: 0.85, kick: 0.45 } },
   // (Rocky's is a flock the server runs up the road: SHEEP below has the rules)
   rocky: { kind: 'sheep', name: 'Sheep Stampede', durationMs: 10000 },
   // (Kombu's is over in a moment: the server moves him; shared/specials.js KELP has the rules)
@@ -58,6 +64,12 @@ export const SHEEP = {
   tickMs: 50,
 };
 
+/** Enzo's Belly Bounce at `seconds` since it began: { height (m off the ground), speed (multiplier) } */
+export function bellyBounce(spec, seconds) {
+  const b = spec.bounce, phase = (seconds % b.seconds) / b.seconds;
+  return { height: b.height * 4 * phase * (1 - phase), speed: spec.speed * (1 + b.kick * (1 - phase)), phase };
+}
+
 export const SPECIAL_HIT = {
   stunMs: 1300,         // how long a dog hit by a special is knocked about
   clearHeight: 3,       // a dog this far above or below the special is not touched
@@ -94,6 +106,7 @@ export function specialFor(dog) {
 export function specialTouches(spec, ownerPosition, rotationY, otherPosition) {
   if (!spec?.hitRadius) return false;
   if (Math.abs(otherPosition[1] - ownerPosition[1]) > SPECIAL_HIT.clearHeight) return false;
+  if (spec.landing && ownerPosition[1] - otherPosition[1] > spec.landing) return false;      // (Enzo, still up in the air)
   const fx = Math.sin(rotationY), fz = Math.cos(rotationY);
   const dx = otherPosition[0] - ownerPosition[0], dz = otherPosition[2] - ownerPosition[2];
   const along = Math.max(0, Math.min(spec.reach ?? 0, dx * fx + dz * fz));

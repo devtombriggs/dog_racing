@@ -77,8 +77,12 @@ html, body, #root {
 
 .character-select__grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));      /* seven dogs */
-  gap: clamp(8px, 1.1vw, 16px);
+  /* eight dogs: two rows of four, sized so that both rows fit the height of the screen where they can
+     (never so small that the names and numbers run into each other: a short screen scrolls) */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(10px, 1.4vw, 20px);
+  max-width: max(880px, calc((100dvh - 400px) * 2));
+  margin-inline: auto;
 }
 
 .character-card {

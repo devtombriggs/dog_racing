@@ -10,7 +10,7 @@ const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return T.query
 
 test('Pet Mall: a closed lap with a grid, checkpoints in order and shop fronts all the way round', () => {
   assert.equal(MAPS.pet_mall.procedural, true);
-  assert.equal(MAPS.pet_mall.startPositions.length, 5);
+  assert.equal(MAPS.pet_mall.startPositions.length, 6);
   assert.ok(T.length > 1200 && T.length < 1500, `${T.length} m`);
   for (let i = 1; i < T.checkpoints.length; i++) assert.ok(T.checkpoints[i].s > T.checkpoints[i - 1].s);
   for (const start of T.startPositions) { const q = T.query(start.position[0], start.position[2]); assert.ok(q.onTrack && !q.blocked); }

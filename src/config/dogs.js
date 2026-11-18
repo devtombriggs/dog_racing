@@ -81,6 +81,25 @@ export const DOGS = {
       Sprint: 3.919
     }
   },
+  enzo: {
+    name: 'Enzo (XL Bully)',
+    displayName: DOG_NAMES.enzo,
+    breed: 'XL Bully',
+    portrait: '/portraits/enzo.png',
+    accent: '#ff8a1f',
+    model: '/models/enzo.glb',
+    stats: DOG_STATS.enzo,
+    // (enzo_bully/create_enzo.py: the Labrador's frame, a great deal wider)
+    scale: 2.8,
+    size: 1.05,
+    // enzo_bully/clip_info.json (Poppy's captured strides, with his roll from side to side)
+    gaitSpeed: {
+      Walk: 1.205,
+      Trot: 2.051,
+      Run: 3.597,
+      Sprint: 5.598
+    }
+  },
   rocky: {
     name: 'Rocky (Border Collie)',
     displayName: DOG_NAMES.rocky,
@@ -89,9 +108,8 @@ export const DOGS = {
     accent: '#3ddc4a',
     model: '/models/rocky.glb',
     stats: DOG_STATS.rocky,
-    // (rocky_collie/create_rocky.py: built from the Labrador's body, a little lighter)
-    scale: 2.8,
-    size: 0.95,
+    // (rocky_collie/create_rocky.py: built from the Labrador's body; a touch shorter than Poppy, who is 3)
+    scale: 2.95,
     // rocky_collie/clip_info.json (Poppy's captured strides, carried low like a collie working sheep)
     gaitSpeed: {
       Walk: 1.205,
@@ -109,7 +127,7 @@ export const DOGS = {
     model: '/models/kombu.glb',
     stats: DOG_STATS.kombu,
     // a little smaller than the Labrador he is built from (kombu_labradoodle/create_kombu.py)
-    scale: 2.8,
+    scale: 2.95,
     size: 0.93,
     // kombu_labradoodle/clip_info.json (Poppy's captured strides, with his bounce and waddle on top)
     gaitSpeed: {

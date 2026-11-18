@@ -7,9 +7,9 @@ export const GRAND_PRIX = {
   gp2: { name: 'Grand Prix 2', maps: ['farmyard', 'modbury_heights', 'mud_park', 'frostpeak'] },
 };
 
-// 1st gets 10 points, 2nd 8, and so on down to 2 for 5th.  A dog that had not finished when the race
+// 1st gets 10 points, 2nd 8, and so on down to 2 for 5th and 1 for 6th.  A dog that had not finished when the race
 // ended scores for the place it was in.
-export const GRAND_PRIX_POINTS = [10, 8, 6, 4, 2];
+export const GRAND_PRIX_POINTS = [10, 8, 6, 4, 2, 1];
 
 export function pointsForPlace(place) {
   return GRAND_PRIX_POINTS[place - 1] ?? 0;

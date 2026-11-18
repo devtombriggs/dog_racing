@@ -11,7 +11,7 @@ const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return T.query
 
 test('Mud Run: a closed lap with a grid, checkpoints in order and tape all the way round', () => {
   assert.equal(MAPS.mud_park.procedural, true);
-  assert.equal(MAPS.mud_park.startPositions.length, 5);
+  assert.equal(MAPS.mud_park.startPositions.length, 6);
   assert.ok(T.length > 1300 && T.length < 1600, `${T.length} m`);
   for (let i = 1; i < T.checkpoints.length; i++) assert.ok(T.checkpoints[i].s > T.checkpoints[i - 1].s);
   for (const start of T.startPositions) { const q = T.query(start.position[0], start.position[2]); assert.ok(q.onTrack && !q.blocked && !q.mud); }

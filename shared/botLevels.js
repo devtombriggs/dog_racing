@@ -2,7 +2,8 @@
 // driven, not in what the dog can do: every computer dog has its own dog's stats, and none is given
 // speed a player could not have.  The server drives them (server/bots.js); the lobby shows the names.
 
-export const MAX_BOTS = 4;       // a race is five dogs: the computer dogs take the places the players leave
+export const RACE_DOGS = 6;      // how many dogs are in a race (players and computer dogs together)
+export const MAX_BOTS = RACE_DOGS - 1;       // the computer dogs take the places the players leave
 
 
 export const BOT_LEVELS = {

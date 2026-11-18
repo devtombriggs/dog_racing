@@ -95,6 +95,7 @@ export class Race {
       marks: (PROCEDURAL_TRACKS[mapId]?.chasms ?? []).map(chasm => chasm.s)    // Modbury's broken bridges
     });
     this.myItem = null;
+    this.squashed = new Map();        // dogs Enzo has just landed on: player id -> when they spring back up
     if (resume) {
       // the race as it stands: boxes and bones already taken, chew toys on the road, what each dog is holding
       for (const id of resume.boxesTaken) this.treatBoxes.setVisible(id, false);
@@ -342,7 +343,9 @@ export class Race {
       ballThrown: (data) => items.throwBall(data),
       ballHit: (data) => items.removeBall(data.id, data.position),
 
-      playerHit: ({ playerId, stunMs }) => {
+      playerHit: ({ playerId, stunMs, by, item }) => {
+        // landed on by Enzo: squashed flat for as long as it is knocked about
+        if (item === 'special' && session.state.room?.players.find(p => p.id === by)?.dog === 'enzo') this.squashed.set(playerId, performance.now() + stunMs);
         if (!mine(playerId)) { goldenBones.stopBoost(playerId); return; }
         local.hit(stunMs);
       },
@@ -437,6 +440,12 @@ export class Race {
     this.sheep.update(delta);
     this.shields.update(delta, id => (id === this.myId ? local : remotes.get(id)));
     local.spinIfStunned();
+    // dogs Enzo has landed on: flat, then springing back up
+    for (const [id, until] of this.squashed) {
+      const group = id === this.myId ? local.group : remotes.get(id)?.group, left = until - performance.now();
+      if (group) group.scale.set(left > 0 ? 1.25 : 1, left > 0 ? Math.max(0.3, 1 - left / 250) : 1, left > 0 ? 1.25 : 1);
+      if (left <= 0) this.squashed.delete(id);
+    }
 
     this.input.update();
     const canMove = session.raceGo && !session.raceFinished;

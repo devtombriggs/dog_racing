@@ -142,6 +142,9 @@ export function createSpecials({ scene, resolve }) {
       } else if (kind === 'wave') {
         e.wave ??= createSurfWave({ dog: e.group, size: 1 });
         playClip(e, 'WaveFlop', { fade: 0.1 });
+      } else if (kind === 'bounce') {
+        // Enzo: flat out with all four legs spread, for as long as he bounces (the clip is in his own model)
+        playClip(e, 'BellyFlop', { loop: true, fade: 0.15 });
       } else if (kind === 'flush') {
         // her bark, over whichever stride she is in
         const stride = e.getAction()?.getClip().name === 'Run' ? 'PheasantFlushRun' : 'PheasantFlushSprint';

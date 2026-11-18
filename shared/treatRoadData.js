@@ -218,6 +218,8 @@ function buildTrack() {
     const lat = (2 - k) * spacing;
     startPositions.push({ slot: k, position: [X[gi] + NX[gi] * lat, Y[gi], Z[gi] + NZ[gi] * lat], rotationY: yawAt(gi), s: S[gi] - LENGTH, lateral: lat });
   }
+  // (the sixth dog: a row back, in the middle)
+  { const g6 = wrapIndex(N - 6); startPositions.push({ slot: 5, position: [X[g6], Y[g6], Z[g6]], rotationY: yawAt(g6), s: S[g6] - LENGTH, lateral: 0 }); }
 
   // decorative bone arches ("treat gates"). boost is off for alpha; flip it on later if wanted.
   const firstOf = sec => SEC.indexOf(sec), lastOf = sec => SEC.lastIndexOf(sec);

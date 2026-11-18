@@ -9,11 +9,12 @@ export const DOG_STATS = {
   black_lab: { speed: 7, acceleration: 7, agility: 8, swimming: 10 },    // Poppy
   pablo: { speed: 7, acceleration: 9, agility: 10, swimming: 5 },
   ralph: { speed: 6, acceleration: 10, agility: 9, swimming: 4 },
+  enzo: { speed: 6.5, acceleration: 9, agility: 8, swimming: 4 },          // (Ralph's, a touch faster and a little less nimble)
   rocky: { speed: 8, acceleration: 8, agility: 8, swimming: 6 },          // (Pippa's, with more agility)
   kombu: { speed: 7, acceleration: 8, agility: 9, swimming: 4 },         // (a shade under Pablo: his special is a strong one)
 };
 
-export const DOG_NAMES = { gsp: 'Pippa', second_dog: 'Meela', black_lab: 'Poppy', pablo: 'Pablo', ralph: 'Ralph', kombu: 'Kombu', rocky: 'Rocky' };
+export const DOG_NAMES = { gsp: 'Pippa', second_dog: 'Meela', black_lab: 'Poppy', pablo: 'Pablo', ralph: 'Ralph', kombu: 'Kombu', rocky: 'Rocky', enzo: 'Enzo' };
 
 // A short-legged dog changes stride (walk, trot, run, sprint) at lower speeds: its share of the big dogs' speeds
 export const DOG_STRIDE_BANDS = { pablo: 0.7, ralph: 0.5 };

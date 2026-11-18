@@ -13,7 +13,7 @@ import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.
 import { GRAND_PRIX, pointsForPlace } from '../shared/grandPrix.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 import { createBot, AWAY_DRIVER } from './bots.js';
-import { BOT_LEVEL_IDS } from '../shared/botLevels.js';
+import { RACE_DOGS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { readFileSync } from 'node:fs';
 
 const PORT = Number(env.PORT || 3001);
@@ -29,9 +29,9 @@ const io = new Server(PORT, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo'];
 const TOTAL_LAPS = 3;
-const MAX_PLAYERS = 5;
+const MAX_PLAYERS = RACE_DOGS;
 const LOBBY_BROWSER = 'lobby-browser';
 // For trying the specials out: ALWAYS_SPECIAL=1 makes every Treat Box give the special, even to the leader,
 // and hands every dog its special at GO and again three seconds after each use.

@@ -61,7 +61,7 @@ test('lobby browser lists existing games and updates names, maps, counts and hos
   const room = host.call('hostGame', { name: '  Tom   Smith  ', mapId: 'frostpeak' }).room;
   browser.call('watchLobbies');
   assert.deepEqual(latest(browser.id, 'lobbiesUpdated'), [{
-    code: room.code, hostName: 'Tom Smith', mapId: 'frostpeak', playerCount: 1, maxPlayers: 5
+    code: room.code, hostName: 'Tom Smith', mapId: 'frostpeak', playerCount: 1, maxPlayers: 6
   }]);
   const joined = guest.call('joinGame', { roomCode: room.code, name: 'Sarah' });
   assert.equal(joined.room.players[1].name, 'Sarah');
@@ -92,18 +92,18 @@ test('single-player games stay hidden and reject guests even with a known code',
 });
 
 test('full rooms remain listed, reject extra players and reopen when a player leaves', () => {
-  const host = client(), guests = Array.from({ length: 5 }, client);
+  const host = client(), guests = Array.from({ length: 6 }, client);
   const room = host.call('hostGame', { name: 'Host' }).room;
-  for (const guest of guests.slice(0, 4)) {
+  for (const guest of guests.slice(0, 5)) {
     assert.equal(guest.call('joinGame', { roomCode: room.code }).success, true);
   }
-  assert.equal(lobbies()[0].playerCount, 5);
-  assert.equal(guests[4].call('joinGame', { roomCode: room.code }).error, 'Room is full');
+  assert.equal(lobbies()[0].playerCount, 6);
+  assert.equal(guests[5].call('joinGame', { roomCode: room.code }).error, 'Room is full');
   // Retrying an acknowledged join must not fail just because the room filled up.
   assert.equal(guests[0].call('joinGame', { roomCode: room.code }).success, true);
   guests[0].call('leaveGame');
-  assert.equal(lobbies()[0].playerCount, 4);
-  assert.equal(guests[4].call('joinGame', { roomCode: room.code }).success, true);
+  assert.equal(lobbies()[0].playerCount, 5);
+  assert.equal(guests[5].call('joinGame', { roomCode: room.code }).success, true);
   host.call('leaveGame');
   for (const guest of guests) guest.call('leaveGame');
   assert.deepEqual(lobbies(), []);
@@ -970,17 +970,17 @@ test('jumping: a dog in the air still launches off Treat Road\'s pad and can cle
 
 test('map vote: a full room starts it on its own, it always runs the full 15 s, most votes wins', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const players = ['A', 'B', 'C', 'D', 'E'].map(() => client());
+  const players = ['A', 'B', 'C', 'D', 'E', 'F'].map(() => client());
   const [a, b, c] = players;
   const room = a.call('hostGame', { name: 'A' }).room;
-  players.slice(1).forEach((p, i) => p.call('joinGame', { roomCode: room.code, name: 'BCDE'[i] }));
-  const dogs = ['gsp', 'ralph', 'pablo', 'black_lab', 'second_dog'];
+  players.slice(1).forEach((p, i) => p.call('joinGame', { roomCode: room.code, name: 'BCDEF'[i] }));
+  const dogs = ['gsp', 'ralph', 'pablo', 'black_lab', 'second_dog', 'kombu'];
   players.slice(0, 3).forEach((p, i) => p.call('selectDog', { dog: dogs[i] }));
-  assert.equal(latest(room.code, 'lobbyUpdated').status, 'lobby', 'three of five: waiting for the host');
+  assert.equal(latest(room.code, 'lobbyUpdated').status, 'lobby', 'three of six: waiting for the host');
   assert.equal(a.call('voteMap', { mapId: 'frostpeak' }).success, false, 'no voting before the vote');
   players.slice(3).forEach((p, i) => p.call('selectDog', { dog: dogs[i + 3] }));
   const voting = latest(room.code, 'lobbyUpdated');
-  assert.equal(voting.status, 'voting', 'all five dogs picked: the vote starts by itself');
+  assert.equal(voting.status, 'voting', 'all six dogs picked: the vote starts by itself');
   assert.equal(voting.voteMsLeft, 15000);
   assert.deepEqual(lobbies().filter(l => l.code === room.code), [], 'no joining once the vote is on');
   assert.equal(a.call('voteMap', { mapId: 'nowhere' }).success, false);
@@ -1426,7 +1426,7 @@ test('computer dogs: the host sets how many and how good, they take the free dog
   guest.call('joinGame', { roomCode: room.code, name: 'Sarah' });
   assert.equal(guest.call('setBots', { count: 2 }).success, false, 'only the host');
   assert.equal(host.call('setBots', { count: 9, level: 'hard' }).success, true);
-  assert.deepEqual(latest(room.code, 'lobbyUpdated').bots, { count: 4, level: 'hard' }, 'four at most');
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').bots, { count: 5, level: 'hard' }, 'five at most');
   host.call('setBots', { level: 'impossible' });
   assert.equal(latest(room.code, 'lobbyUpdated').bots.level, 'hard', 'a level that does not exist is ignored');
   assert.equal(latest(room.code, 'lobbyUpdated').players.length, 2, 'in the lobby there are only players');
@@ -1434,13 +1434,13 @@ test('computer dogs: the host sets how many and how good, they take the free dog
   guest.call('selectDog', { dog: 'ralph' });
   assert.equal(host.call('startRace').success, true);
 
-  // two players and four asked for: three join, on the three dogs and the three grid places left
+  // two players and five asked for: four join, on four of the dogs left and the four grid places left
   const start = latest(room.code, 'raceStarted');
   const bots = start.players.filter(player => player.bot);
-  assert.equal(start.players.length, 5);
-  assert.equal(bots.length, 3);
-  assert.equal(new Set(start.players.map(player => player.dog)).size, 5, 'five different dogs (of the seven)');
-  assert.deepEqual(start.players.map(player => player.slot).sort(), [0, 1, 2, 3, 4]);
+  assert.equal(start.players.length, 6);
+  assert.equal(bots.length, 4);
+  assert.equal(new Set(start.players.map(player => player.dog)).size, 6, 'six different dogs (of the eight)');
+  assert.deepEqual(start.players.map(player => player.slot).sort(), [0, 1, 2, 3, 4, 5]);
   start.players.forEach((player, index) => assert.deepEqual(player.position, MAPS.wendover.startPositions[index].position));
   assert.ok(bots.every(bot => bot.loaded && bot.level === 'hard' && bot.name === 'CPU'));
   // the countdown waits for the players only
@@ -1448,7 +1448,7 @@ test('computer dogs: the host sets how many and how good, they take the free dog
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
   assert.ok(latest(room.code, 'raceGo'));
 
-  // they run: ten seconds on, each is well up the road, and the board has all five dogs on it
+  // they run: ten seconds on, each is well up the road, and the board has all six dogs on it
   for (let i = 0; i < 200; i++) context.mock.timers.tick(50);
   const moved = id => server.events.findLast(e => e.room === room.code && e.event === 'playerMoved' && e.data.playerId === id)?.data;
   for (const bot of bots) {
@@ -1456,8 +1456,8 @@ test('computer dogs: the host sets how many and how good, they take the free dog
     assert.ok(line.s > 60 && line.s < 250, `${bot.dog} is ${line.s} m up the road`);
     assert.ok(line.distance < line.halfWidth, `${bot.dog} is on the road`);
   }
-  assert.equal(latest(room.code, 'raceStandings').standings.length, 5);
-  assert.ok(latest(room.code, 'raceStandings').standings.slice(0, 3).every(entry => entry.playerId.startsWith('bot-')), 'ahead of two players standing on the grid');
+  assert.equal(latest(room.code, 'raceStandings').standings.length, 6);
+  assert.ok(latest(room.code, 'raceStandings').standings.slice(0, 4).every(entry => entry.playerId.startsWith('bot-')), 'ahead of two players standing on the grid');
 
   // the race is over when the players are home: the computer dogs keep nobody waiting
   const map = MAPS.wendover;
@@ -1480,7 +1480,7 @@ test('computer dogs: the host sets how many and how good, they take the free dog
   // back in the lobby they are gone, and the room is the two players again
   host.call('returnToLobby');
   assert.deepEqual(latest(room.code, 'lobbyUpdated').players.map(player => player.name), ['Tom', 'Sarah']);
-  assert.deepEqual(latest(room.code, 'lobbyUpdated').bots, { count: 4, level: 'hard' }, 'the choice is kept for the next race');
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').bots, { count: 5, level: 'hard' }, 'the choice is kept for the next race');
   // a room with only computer dogs left in it is an empty room
   assert.equal(host.call('startRace').success, true);
   host.call('leaveGame'); guest.call('leaveGame');
@@ -1940,12 +1940,12 @@ test('split screen: a single-player room with a second seat that only the page w
   one.call('selectDog', { dog: 'kombu' }); one.call('setReady', { ready: true });
   assert.equal(two.call('selectDog', { dog: 'kombu' }).success, false, 'one of each dog');
   two.call('selectDog', { dog: 'ralph' }); two.call('setReady', { ready: true });
-  one.call('setBots', { count: 4 });                       // (more than there is room for)
+  one.call('setBots', { count: 5 });                       // (more than there is room for)
   one.call('selectMap', { mapId: 'farmyard' });
   assert.equal(two.call('startRace').success, false, 'player 1 starts it');
   assert.equal(one.call('startRace').success, true);
   const start = latest(room.code, 'raceStarted');
-  assert.deepEqual(start.players.map(p => Boolean(p.bot)), [false, false, true, true, true], 'two players and three computer dogs');
+  assert.deepEqual(start.players.map(p => Boolean(p.bot)), [false, false, true, true, true, true], 'two players and four computer dogs');
   // an ordinary single-player room still has one seat
   const solo = client().call('hostGame', { singlePlayer: true }).room;
   assert.equal(two.call('joinGame', { roomCode: solo.code, localKey: key }).success, false);

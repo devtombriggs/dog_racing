@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { racingLineAt } from '../../../shared/pickupSpots.js';
-import { SPECIALS } from '../../../shared/specials.js';
+import { bellyBounce, SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
 import { BASE_SPEED } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP } from '../../../shared/handling.js';
@@ -281,6 +281,7 @@ export class LocalDog extends DogAvatar {
     const spec = SPECIALS[this.race.localPlayer?.dog];
     if (spec?.speed && this.currentSpeed > 0) this.currentSpeed = Math.max(this.currentSpeed, this.sprintSpeed);   // straight up to full pace
     if (spec?.flyHeight) { this.jumpGravity = JUMP.gravity; this.verticalVelocity = 0; }
+    this.specialBegan = performance.now();
   }
 
   // The kick of speed a golden bone gives a dog that is already running
@@ -359,6 +360,8 @@ export class LocalDog extends DogAvatar {
   #run(delta) {
     // This dog's special, while it is in force: faster, flying (Ralph) or steering itself (Poppy)
     const frame = { delta, special: this.race.specials.physics(this.id) };
+    // (Enzo's Belly Bounce: where he is in the bounce, and the burst of speed that goes with it)
+    if (frame.special?.bounce) frame.special = { ...frame.special, ...bellyBounce(frame.special, (performance.now() - (this.specialBegan ?? 0)) / 1000), bouncing: true };
 
     this.#accelerate(frame);
     this.#turn(frame);
@@ -680,7 +683,15 @@ export class LocalDog extends DogAvatar {
       if (this.currentAction === this.actions.Jump) this.currentAction.time = 0.2;      // straight into the leap
     }
 
-    if (special?.flyHeight) {
+    if (special?.bouncing) {
+      // Enzo's Belly Bounce: up and down the same arc, again and again, wherever he is
+      this.isJumping = true;                    // (so that he comes down and lands when it ends in mid-air)
+      this.isLanding = false;
+      this.jumpedFromOffTrack = false;
+      this.verticalVelocity = 0;
+      this.jumpGravity = JUMP.gravity;
+      this.jumpHeight = special.height;
+    } else if (special?.flyHeight) {
       // Ralph's rocket paws: up to flying height and held there, over the other dogs and
       // anything on the road; when they go out he drops and lands in his stride
       this.isJumping = true;
@@ -755,7 +766,7 @@ export class LocalDog extends DogAvatar {
   // ---------------------------------
 
   #animate(frame) {
-    const { delta, steeringFactor, effort, swimming } = frame;
+    const { delta, steeringFactor, effort, swimming, special } = frame;
     const { specials } = this.race;
     const playsOwnClips = specials.animating(this.id);       // a special plays its own clips
 
@@ -798,7 +809,9 @@ export class LocalDog extends DogAvatar {
 
       // Nose up the hills and down the far side (not while in the air)
       if (this.model) {
-        this.model.rotation.x = swimming ? -0.06 : this.isJumping ? 0 : -Math.atan(this.slope);
+        // (Enzo bouncing: nose up on the way up, belly first on the way down)
+        this.model.rotation.x = special?.bouncing ? -0.5 * Math.cos(special.phase * Math.PI)
+          : swimming ? -0.06 : this.isJumping ? 0 : -Math.atan(this.slope);
       }
     }
   }

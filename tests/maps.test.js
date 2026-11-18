@@ -13,7 +13,7 @@ import { FROSTPEAK_CANNON, FROSTPEAK_SLALOM, FROSTPEAK_SKI_SLOPE } from '../shar
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
 
 test('Treat Road has half as much road, supported spawns, and open edges', () => {
-  assert.equal(MAPS.treat_road.startPositions.length, 5);
+  assert.equal(MAPS.treat_road.startPositions.length, 6);
   assert.equal(MAPS.treat_road.checkpoints.length, TREAT_ROAD.checkpoints.length - 1);
   assert.ok(Math.abs(TREAT_ROAD.roadLength - 1450) < 5);
   const samples = TREAT_ROAD.samples;
@@ -143,7 +143,7 @@ test('Frostpeak: the cannon fires off the pad and flies way up to the top of a s
 
 
 test('Modbury has supported spawns, continuous terrain, water and open cliff edges', () => {
-  assert.equal(MAPS.modbury_heights.startPositions.length, 5);
+  assert.equal(MAPS.modbury_heights.startPositions.length, 6);
   assert.ok(Math.abs(COAST.length - 3121) < 5);
   for (const { position } of COAST.startPositions) {
     const q = COAST.query(position[0], position[2]);
@@ -281,7 +281,7 @@ test('Modbury ravines: a broken bridge on a straight after every checkpoint run-
 test('Muddy Paws Farm: a fenced lap with a barn to run through, things standing in the road, mud and a pond to jump', () => {
   const T = FARM, s = T.samples;
   assert.equal(MAPS.farmyard.procedural, true);
-  assert.equal(MAPS.farmyard.startPositions.length, 5);
+  assert.equal(MAPS.farmyard.startPositions.length, 6);
   assert.ok(Math.abs(T.length - 1670) < 10, `lap of ${T.length.toFixed(0)} m`);
   assert.deepEqual(T.sections.map(sec => sec.id).join(''), 'ABCDEFGHIJA', 'all ten parts of the farm, in order');
   const bridge = T.chasms[0];

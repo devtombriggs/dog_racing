@@ -13,7 +13,7 @@ const mid = pool => (pool.sStart + pool.sEnd) / 2;
 
 test('Water Park: a closed lap with a grid, checkpoints in order and walls all the way round', () => {
   assert.equal(MAPS.water_park.procedural, true);
-  assert.equal(MAPS.water_park.startPositions.length, 5);
+  assert.equal(MAPS.water_park.startPositions.length, 6);
   assert.ok(T.length > 1500 && T.length < 1900, `${T.length} m`);
   for (let i = 1; i < T.checkpoints.length; i++) assert.ok(T.checkpoints[i].s > T.checkpoints[i - 1].s);
   for (const start of T.startPositions) assert.ok(T.query(start.position[0], start.position[2]).onTrack);
