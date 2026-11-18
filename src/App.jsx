@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { io } from 'socket.io-client';
 import { MAPS, DEFAULT_MAP, sampleGroundHeight, PROCEDURAL_TRACKS } from '../shared/maps.js';
-import { prepareHeadLook, applyHeadLook } from './headLook.js';
 import { createTreatBoxes } from './pickups/treatBoxes.js';
 import { createGoldenBones } from './pickups/goldenBones.js';
 import { GOLDEN_BONE_SPOTS, racingLineAt } from '../shared/pickupSpots.js';
@@ -17,479 +16,14 @@ import { SPECIALS, SPECIAL_ITEM } from '../shared/specials.js';
 import { WENDOVER, woodlandWaterAt, woodlandPlankAt, woodlandSwimMultiplier, woodlandDogY, woodlandBogAt, BOG_SPEED } from '../shared/wendoverData.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 
-// ---------------------------------
-// DOG CONFIGURATION
-// ---------------------------------
+import { DOGS, STAT_EFFECT, WATER_SPEED, WATER_ACCELERATION, STAT_LABELS, playerColor, statScale, swimShare } from './config/dogs.js';
+import { HANDLING, TOTAL_LAPS, RUNNING_JUMP_SPEED } from './config/handling.js';
+import { SERVER_URL, VOICE_CHAT } from './config/env.js';
+import { ordinal, formatTime } from './utils/format.js';
+import { gameAudio } from './audio/GameAudio.js';
+import { CONTACT, dogMass, dogOverlap } from './game/dogs/contact.js';
+import { switchAction, gaitTimeScale, sprintFraction, collectBones, applyTurnPose } from './game/dogs/animation.js';
 
-function ordinal(n) {
-  const teen = n % 100 >= 11 && n % 100 <= 13;
-  return n + (teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th'));
-}
-
-// Played once when the player's pick is confirmed on character select.
-// Add a dog here when its sound is ready, e.g. greyhound: '/audio/meela_selection.wav'
-const SELECTION_SOUNDS = {
-  gsp: '/audio/pippa_selection.wav',
-};
-const selectionAudio = {};
-
-function playSelectionSound(dogId) {
-  const src = SELECTION_SOUNDS[dogId];
-  if (!src) return;
-  try {
-    selectionAudio[dogId] ??= new Audio(src);
-    const audio = selectionAudio[dogId];
-    audio.currentTime = 0;
-    audio.play().catch(() => { /* autoplay blocked or file missing: stay silent */ });
-  } catch { /* no audio support */ }
-}
-
-// Race audio. Every map has the same "3, 2, 1, GO" countdown: the clip starts when "3" shows, from
-// COUNTDOWN_OFFSET seconds into the file, so its spoken "3" lands on the 3 on screen (2, 1 and GO
-// follow a second apart).  The server sends each number to everyone in the race at once, so all the
-// players hear it together.  Nudge COUNTDOWN_OFFSET up if the voice is late, down if it is early.
-// Music is per map (only Treat Road has any so far): it starts on GO and loops until the player leaves the race.
-const COUNTDOWN_OFFSET = 1.0;
-const COUNTDOWN_AUDIO = '/audio/countdown.mp3';
-const RACE_AUDIO = {
-  treat_road: { music: '/audio/treat_road.mp3', musicVolume: 0.5 },
-};
-const raceAudio = { countdown: null, music: null };
-
-function stopRaceAudio() {
-  for (const key of ['countdown', 'music']) {
-    try { raceAudio[key]?.pause(); } catch { /* no audio support */ }
-    raceAudio[key] = null;
-  }
-}
-
-// Called while the race loads, so the countdown is ready the moment "3" shows
-function loadRaceAudio(mapId) {
-  stopRaceAudio();
-  const config = { countdown: COUNTDOWN_AUDIO, ...RACE_AUDIO[mapId] };
-  try {
-    for (const key of ['countdown', 'music']) {
-      if (!config[key]) continue;
-      const audio = new Audio(config[key]);
-      audio.preload = 'auto';
-      if (key === 'music') {
-        audio.loop = true;
-        audio.volume = config.musicVolume ?? 0.5;
-      }
-      raceAudio[key] = audio;
-    }
-  } catch { /* no audio support */ }
-}
-
-function playRaceAudio(kind) {
-  const audio = raceAudio[kind];
-  if (!audio) return;
-  try {
-    audio.currentTime = kind === 'countdown' ? COUNTDOWN_OFFSET : 0;
-    audio.play().catch(() => { /* autoplay blocked or file missing: stay silent */ });
-  } catch { /* no audio support */ }
-}
-
-const DOGS = {
-  gsp: {
-    name: 'Pippa (German Shorthaired Pointer)',
-    displayName: 'Pippa',
-    breed: 'German Shorthaired Pointer',
-    portrait: '/portraits/pippa.png?v=2',
-    accent: '#ff72dd',
-    model: '/models/gsp_female.glb',
-    stats: { speed: 8, acceleration: 8, agility: 7, swimming: 6 },
-    scale: 3,
-    // Speed (model metres per second) at which each stride plays at its
-    // natural rhythm: the top of the speed band that stride is used in
-    // Ground speed (model metres per second) of each captured stride: at
-    // this speed the paws neither slip nor skate (gsp_female/clip_info.json)
-    gaitSpeed: {
-      Walk: 1.23,
-      Trot: 2.09,
-      Run: 3.66,
-      Sprint: 5.7
-    }
-  },
-  second_dog: {
-    name: 'Meela (Greyhound)',
-    displayName: 'Meela',
-    breed: 'Greyhound',
-    portrait: '/portraits/meela.png?v=2',
-    accent: '#cf88ff',
-    model: '/models/meela_greyhound.glb',
-    stats: { speed: 10, acceleration: 9, agility: 5, swimming: 4 },
-    scale: 3,
-    // meela_greyhound/clip_info.json
-    gaitSpeed: {
-      Walk: 1.52,
-      Trot: 2.587,
-      Run: 3.9,
-      Sprint: 5.5
-    }
-  },
-  black_lab: {
-    name: 'Poppy (Black Labrador)',
-    displayName: 'Poppy',
-    breed: 'Black Labrador',
-    portrait: '/portraits/poppy.png?v=2',
-    accent: '#55aaff',
-    model: '/models/black_lab.glb',
-    stats: { speed: 7, acceleration: 7, agility: 8, swimming: 10 },
-    scale: 3,
-    // black_lab/clip_info.json
-    gaitSpeed: {
-      Walk: 1.21,
-      Trot: 2.05,
-      Run: 3.6,
-      Sprint: 5.6
-    }
-  },
-  pablo: {
-    name: 'Pablo (Alaskan Klee Kai)',
-    displayName: 'Pablo',
-    breed: 'Alaskan Klee Kai',
-    portrait: '/portraits/pablo.png?v=2',
-    accent: '#63efff',
-    model: '/models/pablo.glb',
-    stats: { speed: 7, acceleration: 9, agility: 10, swimming: 5 },
-    scale: 3,
-    size: 0.7,
-    strideBands: 0.7,
-    maxStrideRate: 1.6,
-    cameraOffset: [0, 3.1, -6.4],
-    cameraLookHeight: 1.3,
-    // pablo_klee_kai/clip_info.json (exported at 70% of the build frame)
-    gaitSpeed: {
-      Walk: 0.844,
-      Trot: 1.436,
-      Run: 2.518,
-      Sprint: 3.919
-    }
-  },
-  ralph: {
-    name: 'Ralph (Dachshund)',
-    displayName: 'Ralph',
-    breed: 'Dachshund',
-    portrait: '/portraits/ralph.png?v=2',
-    accent: '#ffad57',
-    model: '/models/ralph.glb',
-    stats: { speed: 6, acceleration: 10, agility: 9, swimming: 4 },
-    scale: 3,
-    // A dachshund stands about a third as tall as the pointer.  `size`
-    // scales the collision rays (so he fits the small-dog tunnel), and the
-    // speeds at which he changes stride: short legs break into a gallop
-    // much sooner.  His legs also turn over faster than a big dog's can.
-    size: 0.45,
-    strideBands: 0.5,
-    maxStrideRate: 2.0,
-    cameraOffset: [0, 2.6, -5.6],
-    cameraLookHeight: 0.9,
-    // ralph_dachshund/clip_info.json
-    gaitSpeed: {
-      Walk: 0.39,
-      Trot: 0.66,
-      Run: 1.16,
-      Sprint: 1.8
-    }
-  }
-};
-
-// ---------------------------------
-// HANDLING
-// ---------------------------------
-// How a dog steers.  A dog at full stretch cannot spin on the spot: it
-// carves an arc, leans and bends into it, and has to ease off to turn tight.
-
-const HANDLING = {
-  turnRateSlow: 2.6,    // turning speed at a walk or trot (radians per second)
-  turnRateSprint: 1.5,  // turning speed flat out: lower = wider arcs
-  steerResponse: 5,     // how quickly a turn builds and fades: lower = heavier
-  turnSpeedLoss: 0.22,  // share of top speed lost while turning hard at a sprint
-  gripSlow: 16,         // how tightly travel follows the nose at low speed
-  gripSprint: 5,        // ...and flat out: lower = more drift through a turn
-  lean: 0.2,            // body roll into a turn (radians)
-  bend: 0.07,           // how far the spine, neck and tail curve into a turn
-  fullSteerSpeed: 4,    // below this speed the dog turns less...
-  pivotSteer: 0.6,      // ...but never less than this share: it can turn on the spot, so a dog stuck
-                        // nose-first against something can turn away without having to move forward
-  // Which stride is used at which speed.  These follow a real dog: walk to
-  // about 1.5 m/s, trot to about 2.8, canter to about 4.5, then gallop
-  // (multiplied by the dogs' scale of 3)
-  hillEffect: 0.9,      // how much a slope changes top speed (0 = hills are free)
-  walkBelow: 4.6,
-  trotBelow: 8.5,
-  runBelow: 13.5
-};
-
-// The rigs' sideways bone axis points so that a negative turn bends the body left
-const BEND_SIGN = -1;
-
-// Bones that curve into a turn, and how much each one takes
-const BEND_BONES = [
-  ['spine1', 0.6],
-  ['spine2', 0.8],
-  ['chest', 0.8],
-  ['neck1', 1.1],
-  ['neck2', 1.1],
-  ['head', 0.9],
-  ['hips', 0.7],
-  ['tail1', 1.4],
-  ['tail2', 1.2],
-  ['tail3', 1.0]
-];
-
-const TOTAL_LAPS = 3;
-// ---------------------------------
-// DOG STATS
-// ---------------------------------
-// Each dog is rated 1 to 10 (see `stats` in DOGS).  A 7 is the handling the
-// game was tuned around; every point above or below changes it by the share
-// given here.  Raise a share to make the dogs feel more different.
-
-const STAT_EFFECT = {
-  speed: 0.06,         // top speed per point
-  acceleration: 0.1,   // how quickly speed builds per point
-  agilityTurn: 0.14,   // turning speed flat out per point
-  agilityTurnSlow: 0.06, // ...and at a walk or trot
-  agilityGrip: 0.2     // how tightly travel follows the nose per point: lower drifts wide
-};
-
-// Water slows a dog to this share of its top speed: a 4 or below is slowed
-// more than by off-track ground, a 10 swims at close to full speed
-const WATER_SPEED = [0.4, 0.95];
-const WATER_ACCELERATION = [0.5, 1];
-
-// One colour per seat in a game (the server gives each player a `slot`)
-const PLAYER_COLORS = ['#ff6b6b', '#4dabf7', '#ffd43b', '#b197fc', '#63e6be'];
-
-function playerColor(player) {
-  return PLAYER_COLORS[(player?.slot ?? 0) % PLAYER_COLORS.length];
-}
-
-const STAT_LABELS = [
-  ['speed', 'Speed'],
-  ['acceleration', 'Accel'],
-  ['agility', 'Agility'],
-  ['swimming', 'Swim']
-];
-
-function statScale(value, perPoint) {
-  return Math.max(0.4, 1 + ((value ?? 7) - 7) * perPoint);
-}
-
-function swimShare(swimming, [poor, strong]) {
-  return THREE.MathUtils.lerp(
-    poor,
-    strong,
-    THREE.MathUtils.clamp(((swimming ?? 4) - 4) / 6, 0, 1)
-  );
-}
-
-// ---------------------------------
-// DOGS BUMPING INTO EACH OTHER
-// ---------------------------------
-// Each player's game moves only its own dog, so each game works out the
-// knocks its own dog takes from where it last saw the others.
-
-const CONTACT = {
-  radius: 0.7,        // a dog is two circles this size, one over the shoulders, one over the hips
-  spacing: 0.75,      // how far ahead of and behind its middle those circles sit
-  bounce: 0.4,        // how much harder than a dead stop a hit throws a dog
-  fade: 4,            // how quickly a knock dies away: higher = shorter shove
-  maxKnock: 14,       // fastest a knock can throw a dog
-  clearHeight: 1.7,   // jump this far above a dog (times its size) and you pass over it
-  staleAfter: 0.3     // seconds without news before another dog counts as standing still
-};
-
-// Heavier dogs shove lighter ones further: a dog's weight follows its size
-function dogMass(config) {
-  return Math.pow(config?.size ?? 1, 1.5);
-}
-
-// The deepest overlap between two dogs seen from above, as the direction
-// to push dog A (x, z) and how far, or null if they are not touching
-function dogOverlap(positionA, yawA, sizeA, positionB, yawB, sizeB) {
-  const reach = CONTACT.radius * (sizeA + sizeB);
-  let best = null;
-
-  for (const a of [-1, 1]) {
-    const ax = positionA.x + Math.sin(yawA) * CONTACT.spacing * sizeA * a;
-    const az = positionA.z + Math.cos(yawA) * CONTACT.spacing * sizeA * a;
-
-    for (const b of [-1, 1]) {
-      const x = ax - (positionB.x + Math.sin(yawB) * CONTACT.spacing * sizeB * b);
-      const z = az - (positionB.z + Math.cos(yawB) * CONTACT.spacing * sizeB * b);
-      const distance = Math.hypot(x, z);
-      const depth = reach - distance;
-
-      if (depth > 0 && (!best || depth > best.depth)) {
-        best = distance > 1e-4
-          ? { x: x / distance, z: z / distance, depth }
-          : { x: Math.cos(yawA), z: -Math.sin(yawA), depth };
-      }
-    }
-  }
-
-  return best;
-}
-
-const GAITS = new Set(['Walk', 'Trot', 'Run', 'Sprint']);
-
-// Above this speed a jump is a running leap: no crouch first, no pause after
-const RUNNING_JUMP_SPEED = 3.0;
-
-const SERVER_URL =
-  import.meta.env.VITE_SERVER_URL ||
-  window.location.origin;
-
-// Voice chat is switched off for now: no option in the lobby, no microphone, no connections between
-// players.  Build with VITE_VOICE_CHAT=1 (and start the server with VOICE_CHAT=1) to bring it back.
-const VOICE_CHAT = import.meta.env.VITE_VOICE_CHAT === '1';
-
-// ---------------------------------
-// ANIMATION HELPERS
-// ---------------------------------
-
-function switchAction(actions, current, name) {
-  // Dogs without a walk or trot clip fall back to the next stride up
-  const next =
-    actions[name] ||
-    (name === 'Walk' ? actions.Trot || actions.Run : null) ||
-    (name === 'Trot' ? actions.Run : null);
-
-  if (!next || next === current) {
-    return current;
-  }
-
-  const inStride =
-    current &&
-    GAITS.has(current.getClip().name) &&
-    GAITS.has(next.getClip().name);
-
-  // Coming down from a jump into a stride: pick the stride up just before
-  // the front paws strike (the strides start on a hind paw), and blend quickly
-  const fromJump =
-    current &&
-    current.getClip().name === 'Jump' &&
-    GAITS.has(next.getClip().name);
-
-  const phase = inStride
-    ? (current.time / current.getClip().duration) % 1
-    : fromJump
-      ? 0.15
-      : 0;
-
-  const fade = fromJump ? 0.12 : 0.2;
-
-  if (current) {
-    current.fadeOut(fade);
-  }
-
-  next.reset();
-
-  if (inStride || fromJump) {
-    next.time = phase * next.getClip().duration;
-  }
-
-  next.fadeIn(fade);
-  next.play();
-
-  return next;
-}
-
-function gaitTimeScale(action, speed, config) {
-  const clipName = action.getClip().name;
-  const natural = config.gaitSpeed?.[clipName];
-
-  if (!GAITS.has(clipName) || !natural) {
-    return 1;
-  }
-
-  const rate = THREE.MathUtils.clamp(
-    Math.abs(speed) / (natural * config.scale),
-    0.7,
-    config.maxStrideRate ?? 1.3
-  );
-
-  return speed < 0 ? -rate : rate;
-}
-
-// 0 at an easy run, 1 flat out
-function sprintFraction(speed, runSpeed, sprintSpeed) {
-  return THREE.MathUtils.clamp(
-    (Math.abs(speed) - runSpeed * 0.5) /
-      (sprintSpeed - runSpeed * 0.5),
-    0,
-    1
-  );
-}
-
-function collectBones(root) {
-  const bones = {};
-
-  root.traverse((object) => {
-    if (object.isBone) {
-      bones[object.name] = object;
-    }
-  });
-
-  prepareHeadLook(root, bones);
-  return bones;
-}
-
-// Lean the dog and curve its body into a turn.  Call after the animation
-// mixer has updated.
-// steer: -1 (right) to 1 (left).  effort: 0 to 1, how hard the dog is running.
-function applyTurnPose(model, bones, steer, effort) {
-  if (!model) return;
-
-  model.rotation.z =
-    -steer * HANDLING.lean * (0.35 + 0.65 * effort);
-
-  const bend =
-    steer * HANDLING.bend * (0.5 + 0.5 * effort);
-
-  for (const [name, weight] of BEND_BONES) {
-    const bone = bones[name];
-
-    if (bone) {
-      // The mixer only rewrites a bone whose animated value changed since the
-      // last frame.  A bone the stride holds still would keep last frame's
-      // bend and have this one added on top, twisting further every frame of
-      // a turn, so put such a bone back to its animated pose first.
-      const turn = (bone.userData.turnPose ??= {
-        animated: new THREE.Quaternion(),
-        posed: new THREE.Quaternion(NaN, NaN, NaN, NaN)
-      });
-
-      if (bone.quaternion.equals(turn.posed)) {
-        bone.quaternion.copy(turn.animated);
-      }
-
-      turn.animated.copy(bone.quaternion);
-      bone.rotateZ(BEND_SIGN * bend * weight);
-    }
-  }
-  applyHeadLook(model, steer);
-
-  for (const [name] of BEND_BONES) {
-    const bone = bones[name];
-
-    if (bone) {
-      bone.userData.turnPose.posed.copy(bone.quaternion);
-    }
-  }
-}
-
-function formatTime(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const remaining = (seconds % 60)
-    .toFixed(1)
-    .padStart(4, '0');
-
-  return `${minutes}:${remaining}`;
-}
 
 // ---------------------------------
 // APP
@@ -592,9 +126,9 @@ function App() {
   }, [screen, voiceStatus.enabled]);
   // Countdown and music stop as soon as the player leaves the race screen
   useEffect(() => {
-    if (screen !== 'race') stopRaceAudio();
+    if (screen !== 'race') gameAudio.stopRace();
   }, [screen]);
-  useEffect(() => stopRaceAudio, []);
+  useEffect(() => () => gameAudio.stopRace(), []);
   const voteDeadlineRef = useRef(0);
   const [voteSecondsLeft, setVoteSecondsLeft] = useState(15);
   useEffect(() => {
@@ -640,7 +174,7 @@ function App() {
 
     function handleRaceStarted(data) {
       console.log('Race loading:', data);
-      loadRaceAudio(data.mapId ?? DEFAULT_MAP);
+      gameAudio.loadRace(data.mapId ?? DEFAULT_MAP);
 
       raceGoRef.current = false;
       raceFinishedRef.current = false;
@@ -670,7 +204,7 @@ function App() {
 
     function handleRaceCountdown(data) {
       console.log('Countdown:', data.number);
-      if (data.number === 3) playRaceAudio('countdown');
+      if (data.number === 3) gameAudio.playRace('countdown');
       setRacePhase(String(data.number));
     }
 
@@ -679,7 +213,7 @@ function App() {
 
       raceStartRef.current = performance.now();
       raceGoRef.current = true;
-      playRaceAudio('music');
+      gameAudio.playRace('music');
 
       setRacePhase('GO!');
     }
@@ -956,7 +490,7 @@ function App() {
           return;
         }
 
-        playSelectionSound(dogId);
+        gameAudio.playSelection(dogId);
 
         // Multiplayer: stay on character select (the dog can still be changed) until
         // everyone has picked or the host presses Next; then the map vote takes over
