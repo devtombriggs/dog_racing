@@ -1,8 +1,14 @@
 import frostpeak from './frostpeak.json' with { type: 'json' };
 import { TREAT_ROAD } from './treatRoadData.js';
 import { MODBURY_HEIGHTS } from './modburyData.js';
+import { FARMYARD } from './farmData.js';
 
-export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS };
+export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD };
+const PROCEDURAL_DESCRIPTIONS = {
+  treat_road: '1.45 km of sky road · catapult gap · landing boost',
+  modbury_heights: '3.12 km coastal circuit · clifftops · broken bridges to jump · water crossing',
+  farmyard: '1.67 km round the farm · through the barn · dodge the tractor, the sheep and the sails',
+};
 
 const STARTING_GRID = [
   [-4, 0, 4.2],
@@ -57,9 +63,7 @@ export const MAPS = {
   },
   ...Object.fromEntries(Object.entries(PROCEDURAL_TRACKS).map(([id, track]) => [id, {
     name: track.name,
-    description: id === 'modbury_heights'
-      ? '3.12 km coastal circuit · clifftops · broken bridges to jump · water crossing'
-      : '1.45 km of sky road · catapult gap · landing boost',
+    description: PROCEDURAL_DESCRIPTIONS[id],
     procedural: true,
     startPositions: track.startPositions,
     checkpoints: track.checkpoints.slice(1).map(({ position, halfWidth, rotationY, launchLanding }) => ({

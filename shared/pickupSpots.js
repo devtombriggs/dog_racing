@@ -10,6 +10,7 @@ import frostpeak from './frostpeak.json' with { type: 'json' };
 import wendover from './wendoverPath.json' with { type: 'json' };
 import { TREAT_ROAD } from './treatRoadData.js';
 import { MODBURY_HEIGHTS } from './modburyData.js';
+import { FARMYARD } from './farmData.js';
 
 const START_CLEAR = 60;        // metres either side of the start/finish line kept clear
 const MIN_GAP = 70;            // metres between any two pickup spots
@@ -30,6 +31,20 @@ export const PICKUP_PATHS = {
       [MODBURY_HEIGHTS.samples.s[MODBURY_HEIGHTS.boardwalk.firstIndex] - 15, MODBURY_HEIGHTS.samples.s[MODBURY_HEIGHTS.boardwalk.lastIndex] + 15],
       // nothing to steer for on the run-up to a broken bridge, or on the landing
       ...MODBURY_HEIGHTS.chasms.map(c => [c.ravineStart - 35, c.ravineEnd + 20]),
+    ],
+  },
+  farmyard: {
+    length: FARMYARD.length, pointAt: FARMYARD.pointAt,
+    // nothing where something has to be dodged or jumped: the barn doors, the bales in the road, the
+    // lanes the sheep and the tractor cross, the sails, the pigs, the scarecrow, Bale Hill, the pond
+    hazards: [
+      [FARMYARD.barn.start - 12, FARMYARD.barn.end + 6],
+      [FARMYARD.obstacles[0].s - 22, FARMYARD.obstacles[5].s + 12],
+      around(FARMYARD.hazardZones.sheep, 22), around(FARMYARD.hazardZones.mill, 24), around(FARMYARD.hazardZones.tractor, 24),
+      [FARMYARD.hazardZones.pigs[0] - 20, FARMYARD.hazardZones.pigs[1] + 14],
+      around(FARMYARD.obstacles.find(o => o.kind === 'scarecrow').s, 18),
+      around(FARMYARD.hazardZones.bales, FARMYARD.baleRun.spacing + 20),
+      [FARMYARD.chasms[0].ravineStart - 35, FARMYARD.chasms[0].ravineEnd + 20],
     ],
   },
   wendover: {
@@ -187,6 +202,7 @@ const PLAN = {
   // the two long courses get more, so there is always something coming up
   // (even: stay near each target where the road allows, so they are spread along the lap)
   frostpeak:       { custom: true },   // see frostpeakPickups(): 4 rows + 3 bones before the cannon, 12 rows + 30 bones on the black run
+  farmyard:        { rows: [0.07, 0.24, 0.42, 0.66, 0.86],             bones: [0.14, 0.31, 0.50, 0.59, 0.74, 0.95], even: true },
   modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91],
                      bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.97], even: true,
                      // The Cliff Climb (340 to 960 m) is a long slow pull: more to go for on the way up.

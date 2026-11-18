@@ -86,3 +86,27 @@ When a race ends the whole room goes back to the dog-select lobby together, with
 - When the race is over the finish panel counts down 15 seconds to the lobby. **Back to Lobby** takes everyone there at once (any player can press it); **Main Menu** leaves the room as before.
 
 `FINISH_GRACE_MS` and `LOBBY_RETURN_MS` on the server change the two waits (useful for testing). The server side is "AFTER THE RACE" in `server/server.js`.
+
+## Muddy Paws Farm
+
+A fifth map (`farmyard`): a 1.67 km lap round a farm, generated at runtime like Treat Road and Modbury (no model file), about 92,000 triangles.
+
+| Part of the lap | What happens there |
+| --- | --- |
+| The Farmyard | Start and finish in front of the farmhouse; chickens run from the dogs |
+| The Big Red Barn | The road goes straight through it, walls either side |
+| Hay Bale Alley | Six round bales standing in the road to weave through |
+| The Orchard | Five sheep amble across the road in file and back (a jump clears a sheep) |
+| Windmill Corner | The sails sweep low over the inside of the bend; the outside is always safe |
+| Tractor Lane | A tractor and trailer drive across the road and back |
+| The Pig Pen | Five mud wallows (60% speed) with a pig trotting round each; the other side of the road is dry |
+| The Maize Maze | A narrow path between walls of corn, with a scarecrow standing in the middle |
+| Bale Hill | Round bales roll down the hill and across the road, one after another |
+| The Duck Pond | A plank bridge with a 6.5 m break in the middle: jump it or fall in and go back to the checkpoint |
+
+Anything that moves knocks a dog over like a tennis ball does (1.1 s). The farm is fenced all the way round, so the pond is the only place to fall.
+
+- **Rules and layout:** `shared/farmData.js`. Everything that moves is a function of the time since GO (`hazardsAt`), so the server and every player agree on where things are without sending positions; the server decides who is hit (`hazardHit`, called from `updateProceduralRace`).
+- **Scenery:** `src/tracks/farm/FarmTrack.js` (`createFarm`); `world.triangles()` reports the triangle count.
+- **Pickups:** five box rows and six golden bones, kept clear of every hazard (`shared/pickupSpots.js`).
+- **Map card:** `public/maps/farmyard.jpg`.

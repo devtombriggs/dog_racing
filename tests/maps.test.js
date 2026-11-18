@@ -7,6 +7,8 @@ import { MAPS, crossedFinishLine, sampleGroundHeight } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
+import { FARMYARD as FARM } from '../shared/farmData.js';
+import { GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { FROSTPEAK_CANNON, FROSTPEAK_SLALOM, FROSTPEAK_SKI_SLOPE } from '../shared/frostpeakCannon.js';
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
 
@@ -274,4 +276,109 @@ test('Modbury ravines: a broken bridge on a straight after every checkpoint run-
   for (const box of TREAT_BOXES_BY_MAP.modbury_heights) {
     assert.ok(!T.chasms.some(c => box.s > c.ravineStart - 30 && box.s < c.ravineEnd + 15), `box at ${box.s.toFixed(0)}`);
   }
+});
+
+test('Muddy Paws Farm: a fenced lap with a barn to run through, things standing in the road, mud and a pond to jump', () => {
+  const T = FARM, s = T.samples;
+  assert.equal(MAPS.farmyard.procedural, true);
+  assert.equal(MAPS.farmyard.startPositions.length, 5);
+  assert.ok(Math.abs(T.length - 1670) < 10, `lap of ${T.length.toFixed(0)} m`);
+  assert.deepEqual(T.sections.map(sec => sec.id).join(''), 'ABCDEFGHIJA', 'all ten parts of the farm, in order');
+  const bridge = T.chasms[0];
+  for (let i = 0; i < T.sampleCount; i++) {
+    const q = T.query(s.x[i], s.z[i]);
+    assert.ok(q.onTrack && !q.fall, 'nowhere to fall off: the farm is fenced');
+    const onObstacle = T.obstacles.some(o => Math.hypot(o.x - s.x[i], o.z - s.z[i]) < o.radius + 0.7);
+    assert.equal(q.blocked, onObstacle, `centreline at ${s.s[i].toFixed(0)} m`);
+    const overPond = i > bridge.firstIndex && i < bridge.lastIndex;
+    if (!overPond) assert.ok(Math.abs(T.terrainHeight(s.x[i], s.z[i]) - s.y[i]) < 0.5, 'the ground is at the road');
+    assert.ok(Math.abs(s.grade[i]) < 0.08, 'gentle hills only');
+    // fences (or the barn walls, the corn, the bridge rails): no way off the side, either side
+    for (const side of [1, -1]) {
+      const out = T.pointAt(s.s[i], side * (s.width[i] / 2 + 9)), fenced = T.query(out.x, out.z);
+      assert.ok(fenced.blocked, `fenced at ${s.s[i].toFixed(0)} m`);
+      assert.ok(T.query(fenced.clampX, fenced.clampZ).distance < s.width[i] / 2 + 4.5);
+    }
+  }
+  for (const { position } of T.startPositions) {
+    const q = T.query(position[0], position[2]);
+    assert.ok(q.onTrack && !q.blocked && !q.mud && Math.abs(q.y - position[1]) < 0.1);
+  }
+  // the barn: walls close in either side
+  const inBarn = T.pointAt(T.barn.s, T.barn.inside + 1.5), walled = T.query(inBarn.x, inBarn.z);
+  assert.ok(walled.inBarn && walled.blocked);
+  assert.ok(T.pointAt(T.barn.s).halfWidth > T.barn.inside - 0.6, 'the road fills the barn');
+  // bales and the scarecrow stand in the road: a dog is kept to their edge, and there is room to pass
+  for (const o of T.obstacles) {
+    const q = T.query(o.x + 0.2, o.z);
+    assert.ok(q.blocked, o.id);
+    assert.ok(Math.hypot(q.clampX - o.x, q.clampZ - o.z) >= o.radius + 0.69, `${o.id} pushes the dog out to its edge`);
+    if (o.kind === 'mill') continue;
+    const c = T.pointAt(o.s), free = c.halfWidth - Math.abs(o.lateral) - o.radius - 0.7 + (o.lateral === 0 ? 0 : c.halfWidth + Math.abs(o.lateral) - o.radius - 0.7);
+    assert.ok(o.lateral === 0 ? c.halfWidth - o.radius - 0.7 > 2.2 : free > 4, `${o.id}: room to get past`);
+  }
+  // mud slows a dog; the other side of the road at each wallow is dry
+  for (const patch of T.mud) {
+    const wet = T.query(patch.x, patch.z), dry = T.pointAt(patch.s, -patch.lateral * 1.6), other = T.query(dry.x, dry.z);
+    assert.ok(wet.mud && T.speedFactor(wet) < 0.65);
+    assert.ok(!other.mud && !other.blocked, 'a dry line past each wallow');
+  }
+  // the pond: a railed bridge with a break in the middle, a real drop into the water, a run-up from the last checkpoint
+  const mid = T.pointAt(bridge.s), gap = T.query(mid.x, mid.z);
+  assert.ok(gap.gap && gap.onBridge && Math.abs(gap.y - mid.y) < 0.05);
+  assert.ok(T.terrainHeight(mid.x, mid.z) < mid.y - 2.5);
+  for (const sOn of [bridge.ravineStart + 0.5, bridge.gapStart - 0.1, bridge.gapEnd + 0.1, bridge.ravineEnd - 0.5]) {
+    const p = T.pointAt(sOn), on = T.query(p.x, p.z);
+    assert.ok(on.onBridge && !on.gap);
+  }
+  const before = T.checkpoints.filter(cp => cp.s < bridge.ravineStart).at(-1);
+  assert.ok(bridge.gapStart - before.s > 45 && bridge.gap <= 7);
+  assert.ok(T.length - bridge.ravineEnd > 60, 'the bridge is well clear of the starting grid');
+  // pickups: on the road, clear of everything that has to be dodged
+  for (const [x, y, z] of [...TREAT_BOXES_BY_MAP.farmyard.map(b => b.groundPosition), ...GOLDEN_BONE_SPOTS.farmyard.map(b => [b.x, b.y, b.z])]) {
+    const q = T.query(x, z);
+    assert.ok(q.onTrack && !q.blocked && !q.gap && !q.inBarn && Math.abs(q.y - y) < 0.3, `pickup at ${q.s.toFixed(0)} m`);
+    for (let t = 0; t < 40; t += 0.5) assert.equal(T.hazardHit([x, y, z], t), null, `nothing runs over the pickup at ${q.s.toFixed(0)} m`);
+  }
+});
+
+test('Muddy Paws Farm hazards: the same for everyone at the same moment, they cross the road, and a jump clears the small ones', () => {
+  const T = FARM;
+  assert.deepEqual(T.hazardsAt(12.34), T.hazardsAt(12.34), 'a pure function of the time since GO');
+  const kinds = new Set(T.hazardsAt(0).map(h => h.kind));
+  assert.deepEqual([...kinds].sort(), ['pig', 'rolling', 'sails', 'sheep', 'tractor', 'trailer']);
+  // each kind is on the road some of the time and off it (or switched off) some of the time
+  const onRoad = {}, total = {};
+  for (let t = 0; t < 120; t += 0.25) for (const h of T.hazardsAt(t)) {
+    const q = T.query(h.x, h.z);
+    total[h.kind] = (total[h.kind] ?? 0) + 1;
+    if (h.active && Math.abs(q.lateral) < q.halfWidth) onRoad[h.kind] = (onRoad[h.kind] ?? 0) + 1;
+  }
+  for (const kind of ['tractor', 'sheep', 'rolling', 'sails']) {
+    const share = onRoad[kind] / total[kind];
+    assert.ok(share > 0.08 && share < 0.6, `${kind}: on the road ${(share * 100).toFixed(0)} % of the time`);
+  }
+  assert.equal(onRoad.pig, total.pig, 'the pigs never leave their wallows');
+  // nothing ever reaches the starting grid or a checkpoint (where a fallen dog is put back)
+  for (const position of [...T.startPositions.map(p => p.position), ...T.checkpoints.map(cp => cp.position)]) {
+    for (let t = 0; t < 60; t += 0.25) assert.equal(T.hazardHit(position, t), null);
+  }
+  // standing in the tractor's way when it comes: hit.  In the air above it: still hit.  Above a sheep: clear.
+  const at = (kind, t) => T.hazardsAt(t).find(h => h.kind === kind);
+  let when = 0; while (Math.abs(T.query(at('tractor', when).x, at('tractor', when).z).lateral) > 0.5) when += 0.05;
+  const tractor = at('tractor', when);
+  assert.equal(T.hazardHit([tractor.x, tractor.y, tractor.z], when).kind, 'tractor');
+  assert.equal(T.hazardHit([tractor.x, tractor.y + 1.5, tractor.z], when).kind, 'tractor', 'no jumping a tractor');
+  assert.equal(T.hazardHit([tractor.x, tractor.y, tractor.z], when + 4), null, 'it has gone by');
+  const sheep = at('sheep', 3);
+  assert.equal(T.hazardHit([sheep.x, sheep.y, sheep.z], 3).kind, 'sheep');
+  assert.equal(T.hazardHit([sheep.x, sheep.y + 1.4, sheep.z], 3), null, 'a jump clears a sheep');
+  // the sails: only the inside of the road, and only while a blade is passing the bottom
+  const mill = T.pointAt(T.mill.s), inside = T.pointAt(T.mill.s, T.mill.side * (mill.halfWidth - 1.7)), outside = T.pointAt(T.mill.s, -T.mill.side * (mill.halfWidth - 1.7));
+  let swept = 0;
+  for (let t = 0; t < 12; t += 0.1) {
+    if (T.hazardHit([inside.x, inside.y, inside.z], t)?.kind === 'sails') swept++;
+    assert.equal(T.hazardHit([outside.x, outside.y, outside.z], t), null, 'the outside of the bend is always safe');
+  }
+  assert.ok(swept > 30 && swept < 70, `the inside is swept ${swept} tenths of a second in twelve`);
 });

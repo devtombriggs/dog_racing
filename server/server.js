@@ -202,7 +202,16 @@ function updateProceduralRace(room, player, data) {
   }
   player.position = position;
   player.rotation = data.rotation;
-  // a broken bridge (Modbury Heights): over the missing planks a dog has to be in the air.  A dog in the
+  // things that move about the track and knock a dog over (the farm's tractor, sheep, pigs, sails and
+  // rolling bales): where they are is a function of the time since GO, so the server can tell who is hit
+  if (track.hazardHit && now >= player.hitImmuneUntil) {
+    const hazard = track.hazardHit(data.position, (now - room.startedAt) / 1000);
+    if (hazard) {
+      io.to(room.code).emit('hazardHit', { playerId: player.id, hazard: hazard.id, kind: hazard.kind });
+      hitPlayer(room, player, null, hazard.kind);
+    }
+  }
+  // a broken bridge (Modbury Heights, the farm's pond): over the missing planks a dog has to be in the air.  A dog in the
   // middle of its special cannot jump, so its special carries it over.
   const inGap = ground.gap && y < ground.y + track.rules.gapClearance && !activeSpecials.has(player);
   if (!ground.onTrack || inGap || (!ground.blocked && y < ground.y - track.rules.fallStartsBelow)) {

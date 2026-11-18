@@ -5,6 +5,7 @@ import { TREAT_BOXES, TREAT_BOXES_BY_MAP, touchesTreatBox } from '../shared/trea
 import { PICKUP_PATHS, BOX_ROW_S, BONE_S, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS } from '../shared/modburyData.js';
+import { FARMYARD } from '../shared/farmData.js';
 import { MAPS, sampleGroundHeight } from '../shared/maps.js';
 import { FROSTPEAK_SLALOM } from '../shared/frostpeakCannon.js';
 
@@ -72,7 +73,7 @@ test('Frostpeak black run: 30 bones and 12 box rows, none inside a slalom obstac
 });
 
 test('boxes and bones sit on the road on the procedural maps', () => {
-  for (const [mapId, track] of [['treat_road', TREAT_ROAD], ['modbury_heights', MODBURY_HEIGHTS]]) {
+  for (const [mapId, track] of [['treat_road', TREAT_ROAD], ['modbury_heights', MODBURY_HEIGHTS], ['farmyard', FARMYARD]]) {
     const ground = [...TREAT_BOXES_BY_MAP[mapId].map(b => b.groundPosition), ...GOLDEN_BONE_SPOTS[mapId].map(b => [b.x, b.y, b.z])];
     for (const [x, y, z] of ground) {
       const q = track.query(x, z);

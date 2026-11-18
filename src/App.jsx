@@ -1352,7 +1352,9 @@ function App() {
     if (proceduralTrack) {
       const worldRequest = currentRoom.mapId === 'modbury_heights'
         ? import('./tracks/modburyHeights/ModburyHeightsTrack.js').then(module => module.createModburyHeights)
-        : import('./tracks/treatRoad/TreatRoadTrack.js').then(module => module.createTreatRoad);
+        : currentRoom.mapId === 'farmyard'
+          ? import('./tracks/farm/FarmTrack.js').then(module => module.createFarm)
+          : import('./tracks/treatRoad/TreatRoadTrack.js').then(module => module.createTreatRoad);
       worldRequest.then(createWorld => {
         if (!isMounted) return;
         proceduralWorld = createWorld();
@@ -1523,7 +1525,7 @@ function App() {
           dogConfig.scale
         );
 
-        if (woodland || currentRoom.mapId === 'modbury_heights') {
+        if (woodland || currentRoom.mapId === 'modbury_heights' || currentRoom.mapId === 'farmyard') {
           dog.traverse(object => { if (object.isMesh) object.castShadow = true; });
         }
         player.add(dog);
@@ -1676,7 +1678,7 @@ function App() {
             config.scale
           );
 
-          if (woodland || currentRoom.mapId === 'modbury_heights') {
+          if (woodland || currentRoom.mapId === 'modbury_heights' || currentRoom.mapId === 'farmyard') {
             dog.traverse(object => { if (object.isMesh) object.castShadow = true; });
           }
           group.add(dog);
@@ -2215,7 +2217,10 @@ function App() {
         timer.getDelta(),
         0.05
       );
-      proceduralWorld?.update(performance.now() / 1000, player.position);
+      // (the third number is the time since GO: the farm's tractor, animals and sails are placed by it,
+      // exactly where the server has them)
+      proceduralWorld?.update(performance.now() / 1000, player.position,
+        raceStartRef.current !== null ? (performance.now() - raceStartRef.current) / 1000 : 0);
       woodlandWorld?.update(performance.now() / 1000, player.position,
         [player.position, ...[...remotePlayers.values()].filter(r => r.group.visible).map(r => r.group.position)]);
       treatBoxes.update(performance.now() / 1000);
@@ -2899,9 +2904,10 @@ function App() {
             : offTrack ? 'OFF THE EDGE'
             : coastalSurface?.movement === 'swim' ? 'SWIMMING'
             : coastalSurface?.movement === 'wade' ? 'WADING'
-            : coastalSurface?.surface === 'shoulder' ? 'SOFT GROUND — SLOWDOWN' : 'ON TRACK';
+            : coastalSurface?.mud ? 'MUD — SLOW GOING'
+            : coastalSurface?.surface === 'shoulder' || coastalSurface?.surface === 'verge' ? 'SOFT GROUND — SLOWDOWN' : 'ON TRACK';
           surfaceDisplayRef.current.style.color = coastalSurface?.inWater ? '#8fd0ff'
-            : offTrack || coastalSurface?.surface === 'shoulder' ? '#ffbc75' : '#9fe49b';
+            : offTrack || coastalSurface?.mud || coastalSurface?.surface === 'shoulder' || coastalSurface?.surface === 'verge' ? '#ffbc75' : '#9fe49b';
         }
         if (special && surfaceDisplayRef.current) {
           surfaceDisplayRef.current.textContent = `${special.name.toUpperCase()}!`;
@@ -3695,6 +3701,7 @@ function App() {
           {room?.mapId === 'wendover' && <div>Amber burrows boost Ralph · Poppy swims fastest</div>}
           {room?.mapId === 'treat_road' && <div>Cyan pad launches automatically · falls return to checkpoints</div>}
           {room?.mapId === 'modbury_heights' && <div>Follow the trail · falls return you to a checkpoint</div>}
+          {room?.mapId === 'farmyard' && <div>Dodge the tractor, sheep, pigs, sails and rolling bales · jump the pond bridge</div>}
           {room?.mapId === 'frostpeak' && <div>Run into the cannon · it fires you to the summit · eat the bones down the black run</div>}
         </div>
       </div>

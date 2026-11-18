@@ -4,6 +4,7 @@ import { env } from 'node:process';
 import { MAPS } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
+import { FARMYARD as FARM } from '../shared/farmData.js';
 import { TREAT_BOXES, TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { forwardOf } from '../shared/items.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
@@ -1155,4 +1156,44 @@ test('after the race: the rest get 90 s once the first dog is home, then everyon
   race();
   assert.equal(state().status, 'racing');
   for (const p of [tom, berri, watcher]) p.call('leaveGame');
+});
+
+test('Muddy Paws Farm: the tractor knocks over a dog in its way, a dog is not hit twice running, and the pond break is a fall', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const host = client();
+  const room = host.call('hostGame', { mapId: 'farmyard', singlePlayer: true }).room;
+  host.call('selectDog', { dog: 'gsp' });
+  host.call('setReady', { ready: true });
+  assert.equal(host.call('startRace').success, true);
+  host.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  let revision = 0;
+  const move = (position, lift = 0) => host.call('playerMove', { position: [position[0], position[1] + lift, position[2]], rotation: 0, animation: 'Sprint', respawnRevision: revision });
+  // the race clock starts at GO: find when the tractor is on the middle of the road, and be standing there
+  const tractorAt = t => FARM.hazardsAt(t).find(h => h.kind === 'tractor');
+  let when = 0; while (Math.abs(FARM.query(tractorAt(when).x, tractorAt(when).z).lateral) > 0.5) when += 0.05;
+  const spot = tractorAt(when), road = FARM.pointAt(FARM.query(spot.x, spot.z).s);
+  move([road.x, road.y, road.z]);
+  assert.equal(events('playerHit').length, 0, 'the tractor is not there yet');
+  context.mock.timers.tick(Math.round(when * 1000));
+  move([road.x, road.y, road.z]);
+  assert.deepEqual(events('hazardHit').at(-1), { playerId: host.id, hazard: 'tractor', kind: 'tractor' });
+  assert.deepEqual({ ...events('playerHit').at(-1) }, { playerId: host.id, by: null, item: 'tractor', stunMs: 1100 });
+  context.mock.timers.tick(200);
+  move([road.x, road.y, road.z]);
+  assert.equal(events('playerHit').length, 1, 'not hit again while recovering');
+  // the pond: across the planks, into the break at deck height: a fall, and back to the checkpoint
+  const c = FARM.chasms[0], p = s => { const q = FARM.pointAt(s); return [q.x, q.y, q.z]; };
+  context.mock.timers.tick(3000);
+  move(p(c.gapStart - 0.5));
+  assert.equal(events('playerFell').length, 0);
+  move(p(c.s), 1.3);
+  assert.equal(events('playerFell').length, 0, 'a jump carries over');
+  move(p(c.s));
+  assert.equal(events('playerFell').length, 1);
+  context.mock.timers.tick(1000);
+  move(p(c.s));
+  assert.ok(FARM.query(...[events('playerRespawned').at(-1).position[0], events('playerRespawned').at(-1).position[2]]).onTrack);
+  host.call('leaveGame');
 });
