@@ -17,6 +17,7 @@ export function Standings({ standings, socketId }) {
           <span className="race-standings__name">
             {entry.name} — {DOGS[entry.dog]?.displayName ?? 'Dog'}
           </span>
+          {entry.away && !entry.finished && <span className="race-standings__flag" title="Lost connection: the dog is running itself" aria-label="lost connection">📡</span>}
           {entry.finished && <span className="race-standings__flag" aria-label="finished">🏁</span>}
         </li>
       ))}

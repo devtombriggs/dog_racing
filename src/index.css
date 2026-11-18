@@ -677,3 +677,38 @@ html, body, #root {
 @media (prefers-reduced-motion: reduce) {
   .race-incoming { animation: none; }
 }
+
+/* ---------- connection: lost (this player) and news of the others ---------- */
+.connection-lost,
+.connection-notice {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.connection-lost {
+  top: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: #7a1f1fee;
+  border: 1px solid #ff8a8a;
+  color: #fff;
+}
+
+.connection-lost strong { font-size: 18px; }
+
+.connection-notice {
+  top: 64px;
+  background: #0a190fdd;
+  border: 1px solid #ffffff30;
+  color: #ffd257;
+  font-weight: bold;
+}

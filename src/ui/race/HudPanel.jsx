@@ -133,6 +133,7 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef }) {
             <div>Space or scroll down to jump · Shift to use an item</div>
           </>
         )}
+        <div>Controller: RT go · LT brake · stick steer · A jump · X use an item</div>
         {VOICE_CHAT && room && !room.singlePlayer && (
           <div style={{ color: voiceStatus.enabled && !voiceStatus.muted ? '#9fe49b' : '#b4c9b5' }}>
             {voiceStatus.error ? `Voice chat: ${voiceStatus.error}`

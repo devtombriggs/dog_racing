@@ -12,13 +12,17 @@ import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverD
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
 import { GRAND_PRIX, pointsForPlace } from '../shared/grandPrix.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
-import { createBot } from './bots.js';
+import { createBot, AWAY_DRIVER } from './bots.js';
 import { BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { readFileSync } from 'node:fs';
 
 const PORT = Number(env.PORT || 3001);
 
 const io = new Server(PORT, {
+  // (ask each game every 5 s whether it is still there, and give up on one that has not answered in 5:
+  // a dead connection is noticed in about ten seconds; socket.io's own settings take up to 45)
+  pingInterval: 5000,
+  pingTimeout: 5000,
   cors: {
     origin: true,
     methods: ['GET', 'POST']
@@ -47,6 +51,9 @@ const LOBBY_RETURN_MS = Number(env.LOBBY_RETURN_MS) || 15000;
 // Computer-controlled dogs a single-player game starts with (the player can change it): a full field
 // unless SOLO_BOTS says otherwise.
 const SOLO_BOTS = env.SOLO_BOTS === undefined ? MAX_PLAYERS - 1 : Math.max(0, Math.min(MAX_PLAYERS - 1, Number(env.SOLO_BOTS) || 0));
+// ...and a room of players: enough to fill the grid, always (two players race three computer dogs),
+// unless ROOM_BOTS says otherwise.  The game does not offer players the number, only how good they are.
+const ROOM_BOTS = env.ROOM_BOTS === undefined ? MAX_PLAYERS - 1 : Math.max(0, Math.min(MAX_PLAYERS - 1, Number(env.ROOM_BOTS) || 0));
 
 const rooms = new Map();
 const playerRooms = new Map();
@@ -65,6 +72,8 @@ const burrowsUsed = new WeakMap();
 const botDrivers = new WeakMap();
 const dogSpeeds = new WeakMap();
 const BOT_TICK_MS = 50;            // a computer dog moves as often as a player's game reports in
+// How long a player whose connection has dropped keeps their seat and their dog (see HELD SEATS)
+const SEAT_HOLD_MS = Number(env.SEAT_HOLD_MS) || 60000;
 
 // Ground heights, for balls that skim down a slope instead of flying level (Frostpeak's black run)
 const BALL_GROUND = {};
@@ -1007,7 +1016,8 @@ function createPlayer(socketId, name, slot = 0) {
     item: null,
     voice: false,            // microphone on for voice chat (the players talk to each other directly)
     hitImmuneUntil: 0,
-    shieldUntil: 0           // wearing the golden collar: shielded from everything but specials until then
+    shieldUntil: 0,          // wearing the golden collar: shielded from everything but specials until then
+    away: false              // their connection has dropped and their seat is being held (see HELD SEATS)
   };
 }
 
@@ -1059,7 +1069,8 @@ function raceStandings(room) {
       name: player.name,
       dog: player.dog,
       place: index + 1,
-      finished: player.finished
+      finished: player.finished,
+      away: Boolean(player.away)         // their connection has dropped or gone quiet: the dog is running itself
     }));
 }
 
@@ -1072,7 +1083,7 @@ function beginCountdown(room) {
   if (room.status !== 'loading') return;
 
   const everyoneLoaded = [...room.players.values()]
-    .every((player) => player.loaded);
+    .every((player) => player.loaded || player.away);
 
   if (!everyoneLoaded) return;
 
@@ -1095,6 +1106,9 @@ function beginCountdown(room) {
       });
       broadcastStandings(room);
       startBots(room);
+      clearInterval(room.stallTimer);
+      room.stallTimer = setInterval(() => watchForStalls(room), 1000);
+      room.stallTimer.unref?.();
       if (ALWAYS_SPECIAL || FORCE_ITEM) for (const player of room.players.values()) grantItem(room, player);
 
       updateLobby(room);
@@ -1183,6 +1197,92 @@ function checkRaceProgress(room, player, previousPosition) {
     playerId: player.id,
     lap: player.lap
   });
+}
+
+// ---------------------------------
+// HELD SEATS: a player whose connection drops (a refresh, a wobble in the wifi) keeps their place and
+// their dog for SEAT_HOLD_MS.  In a race the dog jogs on along the road by itself meanwhile, driven as
+// a computer dog is (server/bots.js, AWAY_DRIVER).  If the same browser comes back in time it gets the
+// seat again ('resume'); if not, the player leaves as they would have.
+// ---------------------------------
+const heldSeats = new Map();       // the browser's token -> { roomCode, playerId, timer }
+// The connections that have said who they are: token -> { playerId(), supersede() }.  A browser that
+// reconnects before the server has noticed its old connection is dead takes the seat over from it.
+const liveSeats = new Map();
+// A player still connected but silent in a race (a hidden tab, a stalled connection) for this long has
+// their dog driven for them until they are heard from again
+const stalledAfterMs = () => Number(env.STALLED_AFTER_MS) || 3000;
+const IN_A_RACE = ['loading', 'countdown', 'racing', 'finished'];
+
+function holdSeat(room, player, token) {
+  const already = player.away;
+  player.away = true;
+  if (room.status === 'racing' && !player.finished && !(already && botDrivers.has(player))) driveAway(room, player);
+  const timer = setTimeout(() => {
+    heldSeats.delete(token);
+    if (rooms.get(room.code) !== room || room.players.get(player.id) !== player || !player.away) return;
+    player.away = false;
+    botDrivers.delete(player);
+    leaveRoom(null, player.id);
+  }, SEAT_HOLD_MS);
+  timer.unref?.();
+  heldSeats.set(token, { roomCode: room.code, playerId: player.id, timer });
+  io.to(room.code).emit('playerAway', { playerId: player.id, away: true });
+  if (room.status === 'loading') beginCountdown(room);          // (nobody waits for a game that is not there)
+  if (room.status === 'racing' || room.status === 'finished') broadcastStandings(room);
+  updateLobby(room);
+}
+
+// Once a second through a race: any player who is connected but has gone quiet has their dog driven
+// for them.  Their own next move takes it back (see the playerMove handler).
+function watchForStalls(room) {
+  if (rooms.get(room.code) !== room || room.status !== 'racing') { clearInterval(room.stallTimer); room.stallTimer = null; return; }
+  const now = Date.now();
+  for (const player of room.players.values()) {
+    if (player.bot || player.away || player.finished || carriedBy(room, player)) continue;
+    if (now - Math.max(dogSpeeds.get(player)?.at ?? 0, room.startedAt) < stalledAfterMs()) continue;
+    player.away = 'stalled';
+    driveAway(room, player);
+    io.to(room.code).emit('playerAway', { playerId: player.id, away: true });
+    broadcastStandings(room);
+    updateLobby(room);
+  }
+}
+
+// A stalled player's game is sending moves again: the dog is theirs from where it now is
+function backFromStall(room, player) {
+  player.away = false;
+  botDrivers.delete(player);
+  const state = raceStateOf(room, player);
+  if (state) state.revision += 1;                               // (their game takes the server's position, as after a rescue)
+  dogSpeeds.set(player, { at: Date.now(), speed: 0 });
+  io.to(room.code).emit('playerAway', { playerId: player.id, away: false });
+  io.to(room.code).emit('playerRespawned', { playerId: player.id, position: player.position, rotation: player.rotation,
+    respawnRevision: state?.revision ?? 0, penaltySeconds: 0, rescued: true });
+  broadcastStandings(room);
+  updateLobby(room);
+}
+
+// The dog of a player who is away runs itself
+function driveAway(room, player) {
+  const driver = createBot({ mapId: room.mapId, dog: player.dog, level: AWAY_DRIVER, seed: Date.now() >>> 0, heightAt: BALL_GROUND[room.mapId] ?? null });
+  driver.place(player.position, player.rotation);
+  botDrivers.set(player, driver);
+  if (!room.botTimer) { room.botTickedAt = Date.now(); room.botTimer = setInterval(() => tickBots(room), BOT_TICK_MS); room.botTimer.unref?.(); }
+}
+
+// Everything a game needs to put a player back into a race that is already going (null in the lobby)
+function raceSnapshot(room, player) {
+  if (!IN_A_RACE.includes(room.status)) return null;
+  return {
+    status: room.status, mapId: room.mapId, totalCheckpoints: MAPS[room.mapId].checkpoints.length, totalLaps: TOTAL_LAPS,
+    grandPrix: grandPrixInfo(room), players: [...room.players.values()],
+    raceMs: room.startedAt ? Date.now() - room.startedAt : null,
+    you: { position: player.position, rotation: player.rotation, lap: player.lap, checkpoint: player.checkpoint, item: player.item,
+      finished: player.finished, finishTime: player.finishTime, respawnRevision: raceStateOf(room, player)?.revision ?? 0 },
+    boxesTaken: [...room.treatBoxTimers.keys()], bonesTaken: [...(room.boneTimers?.keys() ?? [])],
+    toys: [...room.hazards.values()].map(toy => ({ id: toy.id, owner: toy.owner, position: toy.position, rotationY: toy.rotationY })),
+  };
 }
 
 // A dog says where it now is (a player's game, or the driver of a computer dog): the server checks the
@@ -1284,11 +1384,11 @@ function removeBots(room) {
 
 function startBots(room) {
   stopBots(room);
-  const bots = [...room.players.values()].filter(player => player.bot);
+  const bots = [...room.players.values()].filter(player => player.bot || player.away);
   if (!bots.length) return;
   bots.forEach((player, index) => {
     const driver = createBot({
-      mapId: room.mapId, dog: player.dog, level: player.level,
+      mapId: room.mapId, dog: player.dog, level: player.bot ? player.level : AWAY_DRIVER,
       seed: (Date.now() + index * 7919) >>> 0, heightAt: BALL_GROUND[room.mapId] ?? null
     });
     driver.place(player.position, player.rotation);
@@ -1351,7 +1451,7 @@ function tickBots(room) {
   const standings = room.status === 'racing' ? raceStandings(room) : [];
   let running = room.status === 'racing';
   for (const player of [...room.players.values()]) {
-    const driver = player.bot && botDrivers.get(player);
+    const driver = (player.bot || player.away) && botDrivers.get(player);       // (a computer dog, or the dog of a player who is away)
     if (!driver) continue;
     // home (or the race is over): it runs on a little way, slowing, and stops
     if (player.finished || room.status !== 'racing') {
@@ -1407,26 +1507,26 @@ function tickBots(room) {
   if (!running) stopBots(room);          // the race is over and they have all pulled up
 }
 
-function leaveRoom(socket) {
-  const roomCode = playerRooms.get(socket.id);
+function leaveRoom(socket, id = id) {
+  const roomCode = playerRooms.get(id);
   if (!roomCode) return;
 
   const room = rooms.get(roomCode);
 
-  playerRooms.delete(socket.id);
-  socket.leave(roomCode);
+  playerRooms.delete(id);
+  socket?.leave(roomCode);
 
   if (!room) return;
 
-  const leaving = room.players.get(socket.id);
+  const leaving = room.players.get(id);
   if (leaving) { clearTimeout(activeSpecials.get(leaving)?.timer); activeSpecials.delete(leaving); }
-  room.players.delete(socket.id);
+  room.players.delete(id);
 
   io.to(roomCode).emit('playerLeft', {
-    playerId: socket.id
+    playerId: id
   });
 
-  room.votes?.delete(socket.id);
+  room.votes?.delete(id);
 
   if (humans(room).length === 0) {
     stopBots(room);
@@ -1445,7 +1545,7 @@ function leaveRoom(socket) {
     return;
   }
 
-  if (room.hostId === socket.id) {
+  if (room.hostId === id) {
     room.hostId = humans(room)[0].id;
   }
 
@@ -1468,6 +1568,55 @@ function leaveRoom(socket) {
 
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
+  // Who this connection is.  Usually itself; a browser that has come back after a refresh takes up the
+  // seat (and the id) it had before.  seatToken is the secret that browser proves it with.
+  let playerId = socket.id, seatToken = null, superseded = false;
+
+  // COMING BACK AFTER A REFRESH: the browser says who it was; if its seat is being held, it has it again
+  socket.on('resume', (data, callback) => {
+    const token = typeof data?.token === 'string' && data.token.length >= 16 && data.token.length <= 64 ? data.token : null;
+    if (!token) return callback?.({ success: false });
+    seatToken = token;
+    let seat = heldSeats.get(token);
+    if (seat) { clearTimeout(seat.timer); heldSeats.delete(token); }
+    // (the same browser on a new connection while the old one still looks alive: the old one is dropped,
+    // and this is treated as the player having been away)
+    const live = liveSeats.get(token);
+    if (!seat && live && live.socket !== socket) {
+      const id = live.playerId(), liveRoom = rooms.get(playerRooms.get(id)), livePlayer = liveRoom?.players.get(id);
+      live.supersede();
+      if (livePlayer && !livePlayer.bot) {
+        if (!livePlayer.away && liveRoom.status === 'racing' && !livePlayer.finished) driveAway(liveRoom, livePlayer);
+        livePlayer.away = true;
+        seat = { roomCode: liveRoom.code, playerId: id };
+      }
+    }
+    liveSeats.set(token, { socket, playerId: () => playerId, supersede: () => { superseded = true; socket.disconnect?.(true); } });
+    const room = seat && rooms.get(seat.roomCode), player = room?.players.get(seat.playerId);
+    if (!player?.away) return callback?.({ success: false });
+    playerId = player.id;
+    socket.join(room.code);
+    socket.join(playerId);                        // (messages sent to the player by id still reach them)
+    // In the lobby they are simply back.  In a race their dog runs on by itself until their game has
+    // loaded the map and says so (backInRace).
+    const race = raceSnapshot(room, player);
+    if (!race) player.away = false;
+    console.log(`${player.name} is back in ${room.code}`);
+    callback?.({ success: true, playerId, room: getRoomData(room), race });
+    if (!race) { io.to(room.code).emit('playerAway', { playerId, away: false }); updateLobby(room); }
+  });
+
+  // ...their game has the race on screen again: the dog is theirs from here
+  socket.on('backInRace', (callback) => {
+    const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);
+    if (!room || !player?.away) return callback?.({ success: false });
+    player.away = false;
+    botDrivers.delete(player);
+    io.to(room.code).emit('playerAway', { playerId, away: false });
+    callback?.({ success: true, race: raceSnapshot(room, player) });
+    updateLobby(room);
+  });
+
 
   socket.on('watchLobbies', () => {
     socket.join(LOBBY_BROWSER);
@@ -1489,19 +1638,18 @@ io.on('connection', (socket) => {
     }
     if (typeof callback !== 'function') return;
 
-    leaveRoom(socket);
+    leaveRoom(socket, playerId);
 
     const roomCode = generateRoomCode();
-    const player = createPlayer(socket.id, playerName(data?.name, 'Host'));
+    const player = createPlayer(playerId, playerName(data?.name, 'Host'));
 
     const room = {
       code: roomCode,
-      hostId: socket.id,
+      hostId: playerId,
       status: 'lobby',
       singlePlayer: data?.singlePlayer === true,
-      // computer-controlled dogs: a full field for someone racing alone, none in a room of players
-      // until the host asks for them
-      bots: { count: data?.singlePlayer === true ? SOLO_BOTS : 0, level: 'medium' },
+      // computer-controlled dogs: enough to fill the grid
+      bots: { count: data?.singlePlayer === true ? SOLO_BOTS : ROOM_BOTS, level: 'medium' },
       botTimer: null,
       grandPrix: null,         // the Grand Prix being run: { id, round, points }
       mapId,
@@ -1519,11 +1667,11 @@ io.on('connection', (socket) => {
       hazards: new Map(),
       balls: new Map(),
       nextItemId: 1,
-      players: new Map([[socket.id, player]])
+      players: new Map([[playerId, player]])
     };
 
     rooms.set(roomCode, room);
-    playerRooms.set(socket.id, roomCode);
+    playerRooms.set(playerId, roomCode);
     socket.join(roomCode);
 
     callback({
@@ -1554,7 +1702,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    if (room.singlePlayer && room.hostId !== socket.id) {
+    if (room.singlePlayer && room.hostId !== playerId) {
       return callback({ success: false, error: 'This is a single-player game' });
     }
 
@@ -1565,7 +1713,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    if (playerRooms.get(socket.id) === roomCode) {
+    if (playerRooms.get(playerId) === roomCode) {
       return callback({
         success: true,
         room: getRoomData(room)
@@ -1579,20 +1727,20 @@ io.on('connection', (socket) => {
       });
     }
 
-    leaveRoom(socket);
+    leaveRoom(socket, playerId);
 
     const seats = new Set([...room.players.values()].map((other) => other.slot));
     let slot = 0;
     while (seats.has(slot)) slot += 1;
 
     const player = createPlayer(
-      socket.id,
+      playerId,
       playerName(data?.name, `Player ${room.players.size + 1}`),
       slot
     );
 
-    room.players.set(socket.id, player);
-    playerRooms.set(socket.id, roomCode);
+    room.players.set(playerId, player);
+    playerRooms.set(playerId, roomCode);
     socket.join(roomCode);
 
     callback({
@@ -1605,11 +1753,11 @@ io.on('connection', (socket) => {
 
   // Only the host can change the course, and only before loading starts.
   socket.on('selectMap', (data, callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
+    const room = rooms.get(playerRooms.get(playerId));
     if (!room || room.status !== 'lobby') {
       return callback?.({ success: false, error: 'Not in a lobby' });
     }
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== playerId) {
       return callback?.({ success: false, error: 'Only the host can select the map' });
     }
     if (!Object.hasOwn(MAPS, data?.mapId)) {
@@ -1624,11 +1772,11 @@ io.on('connection', (socket) => {
   // COMPUTER-CONTROLLED DOGS: how many, and how good (the host's choice, in the lobby)
 
   socket.on('setBots', (data, callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
+    const room = rooms.get(playerRooms.get(playerId));
     if (!room || room.status !== 'lobby') {
       return callback?.({ success: false, error: 'Not in a lobby' });
     }
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== playerId) {
       return callback?.({ success: false, error: 'Only the host can change the computer dogs' });
     }
     const count = Number.isInteger(data?.count) ? Math.max(0, Math.min(MAX_PLAYERS - 1, data.count)) : room.bots.count;
@@ -1641,7 +1789,7 @@ io.on('connection', (socket) => {
   // SELECT DOG
 
   socket.on('selectDog', (data, callback) => {
-    const roomCode = playerRooms.get(socket.id);
+    const roomCode = playerRooms.get(playerId);
     const room = rooms.get(roomCode);
 
     if (!room || room.status !== 'lobby') {
@@ -1660,7 +1808,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    const player = room.players.get(socket.id);
+    const player = room.players.get(playerId);
 
     if (!player) {
       return callback?.({
@@ -1671,7 +1819,7 @@ io.on('connection', (socket) => {
 
     // One of each dog per race: the first to pick it has it.
     const takenBy = [...room.players.values()].find(
-      (other) => other.id !== socket.id && other.dog === dog
+      (other) => other.id !== playerId && other.dog === dog
     );
 
     if (takenBy) {
@@ -1695,11 +1843,11 @@ io.on('connection', (socket) => {
   // NEXT (host): go to the map vote now; anyone without a dog is given a free one at random
 
   socket.on('skipToMapVote', (callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
+    const room = rooms.get(playerRooms.get(playerId));
     if (!room || room.status !== 'lobby' || room.singlePlayer) {
       return callback?.({ success: false, error: 'Not in a lobby' });
     }
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== playerId) {
       return callback?.({ success: false, error: 'Only the host can move everyone on' });
     }
     for (const player of room.players.values()) {
@@ -1716,14 +1864,14 @@ io.on('connection', (socket) => {
   // VOTE FOR A MAP
 
   socket.on('voteMap', (data, callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
-    if (!room || room.status !== 'voting' || !room.players.has(socket.id)) {
+    const room = rooms.get(playerRooms.get(playerId));
+    if (!room || room.status !== 'voting' || !room.players.has(playerId)) {
       return callback?.({ success: false, error: 'There is no map vote running' });
     }
     if (!Object.hasOwn(MAPS, data?.mapId) && !Object.hasOwn(GRAND_PRIX, data?.mapId)) {
       return callback?.({ success: false, error: 'Invalid map selection' });
     }
-    room.votes.set(socket.id, data.mapId);
+    room.votes.set(playerId, data.mapId);
     callback?.({ success: true });
     updateLobby(room);
   });
@@ -1731,8 +1879,8 @@ io.on('connection', (socket) => {
   // Which dog a player is looking at on the select screen, shown to the others
 
   socket.on('hoverDog', (data) => {
-    const room = rooms.get(playerRooms.get(socket.id));
-    const player = room?.players.get(socket.id);
+    const room = rooms.get(playerRooms.get(playerId));
+    const player = room?.players.get(playerId);
     const dog = DOGS.includes(data?.dog) ? data.dog : null;
 
     if (!room || room.status !== 'lobby' || !player || player.hover === dog) {
@@ -1746,8 +1894,8 @@ io.on('connection', (socket) => {
   // CHANGE DOG: hand the dog back so someone else can take it
 
   socket.on('changeDog', (callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
-    const player = room?.players.get(socket.id);
+    const room = rooms.get(playerRooms.get(playerId));
+    const player = room?.players.get(playerId);
 
     if (!room || room.status !== 'lobby' || !player) {
       return callback?.({
@@ -1766,7 +1914,7 @@ io.on('connection', (socket) => {
   // READY / NOT READY
 
   socket.on('setReady', (data, callback) => {
-    const roomCode = playerRooms.get(socket.id);
+    const roomCode = playerRooms.get(playerId);
     const room = rooms.get(roomCode);
 
     if (!room || room.status !== 'lobby') {
@@ -1776,7 +1924,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    const player = room.players.get(socket.id);
+    const player = room.players.get(playerId);
 
     if (!player?.dog) {
       return callback?.({
@@ -1794,7 +1942,7 @@ io.on('connection', (socket) => {
   // START RACE
 
   socket.on('startRace', (callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
+    const room = rooms.get(playerRooms.get(playerId));
 
     if (!room || (room.status !== 'lobby' && room.status !== 'voting')) {
       return callback?.({
@@ -1803,7 +1951,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== playerId) {
       return callback?.({
         success: false,
         error: 'Only the host can start the race'
@@ -1817,11 +1965,11 @@ io.on('connection', (socket) => {
   // START A GRAND PRIX (host): four races, starting now
 
   socket.on('startGrandPrix', (data, callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
+    const room = rooms.get(playerRooms.get(playerId));
     if (!room || (room.status !== 'lobby' && room.status !== 'voting')) {
       return callback?.({ success: false, error: 'Room not available' });
     }
-    if (room.hostId !== socket.id) {
+    if (room.hostId !== playerId) {
       return callback?.({ success: false, error: 'Only the host can start the race' });
     }
     if (!Object.hasOwn(GRAND_PRIX, data?.id)) {
@@ -1836,18 +1984,18 @@ io.on('connection', (socket) => {
   // CLIENT FINISHED LOADING
 
   socket.on('raceLoaded', () => {
-    const roomCode = playerRooms.get(socket.id);
+    const roomCode = playerRooms.get(playerId);
     const room = rooms.get(roomCode);
 
     if (!room || room.status !== 'loading') return;
 
-    const player = room.players.get(socket.id);
+    const player = room.players.get(playerId);
 
     if (!player || player.loaded) return;
 
     player.loaded = true;
 
-    console.log(`Player loaded: ${socket.id}`);
+    console.log(`Player loaded: ${playerId}`);
 
     updateLobby(room);
     beginCountdown(room);
@@ -1856,18 +2004,20 @@ io.on('connection', (socket) => {
   // PLAYER MOVEMENT
 
   socket.on('playerMove', (data) => {
-    const roomCode = playerRooms.get(socket.id);
+    const roomCode = playerRooms.get(playerId);
     const room = rooms.get(roomCode);
 
     // Movement is blocked until GO.
     if (!room || room.status !== 'racing') return;
 
-    const player = room.players.get(socket.id);
+    const player = room.players.get(playerId);
 
-    if (!player || player.finished || !applyMove(room, player, data)) return;
+    if (!player || player.finished) return;
+    if (player.away === 'stalled') { backFromStall(room, player); return; }       // heard from again: the dog is theirs
+    if (player.away || !applyMove(room, player, data)) return;
 
     socket.to(roomCode).emit('playerMoved', {
-      playerId: socket.id,
+      playerId: playerId,
       position: player.position,
       rotation: player.rotation,
       animation: player.animation
@@ -1878,8 +2028,8 @@ io.on('connection', (socket) => {
 
   // Lost for 5 s (the game counts): put the dog back at its last checkpoint
   socket.on('requestRescue', (callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
-    const player = room?.players.get(socket.id);
+    const room = rooms.get(playerRooms.get(playerId));
+    const player = room?.players.get(playerId);
     if (!room || room.status !== 'racing' || !player || player.finished) {
       return callback?.({ success: false });
     }
@@ -1888,9 +2038,9 @@ io.on('connection', (socket) => {
 
   // Fire / drop / eat whatever the dog is holding.
   socket.on('useItem', () => {
-    const room = rooms.get(playerRooms.get(socket.id));
+    const room = rooms.get(playerRooms.get(playerId));
     if (!room || room.status !== 'racing') return;
-    const player = room.players.get(socket.id);
+    const player = room.players.get(playerId);
     if (!player || player.finished || !player.item || burrowRides.has(player)) return;
     useItem(room, player);
   });
@@ -1902,25 +2052,25 @@ io.on('connection', (socket) => {
   const voiceChatOn = () => env.VOICE_CHAT !== '0';
   socket.on('setVoice', (data) => {
     if (!voiceChatOn()) return;
-    const room = rooms.get(playerRooms.get(socket.id));
-    const player = room?.players.get(socket.id);
+    const room = rooms.get(playerRooms.get(playerId));
+    const player = room?.players.get(playerId);
     if (!player || room.singlePlayer) return;
     player.voice = data?.enabled === true;
-    io.to(room.code).emit('voiceChanged', { playerId: socket.id, enabled: player.voice });
+    io.to(room.code).emit('voiceChanged', { playerId: playerId, enabled: player.voice });
   });
 
   socket.on('voiceSignal', (data) => {
     if (!voiceChatOn()) return;
-    const room = rooms.get(playerRooms.get(socket.id));
-    if (!room || typeof data?.to !== 'string' || data.to === socket.id || !room.players.has(data.to)) return;
+    const room = rooms.get(playerRooms.get(playerId));
+    if (!room || typeof data?.to !== 'string' || data.to === playerId || !room.players.has(data.to)) return;
     if (data.signal === null || typeof data.signal !== 'object') return;
-    io.to(data.to).emit('voiceSignal', { from: socket.id, signal: data.signal });
+    io.to(data.to).emit('voiceSignal', { from: playerId, signal: data.signal });
   });
 
   // The race is over: take the whole room back to the lobby now rather than waiting for the timer.
   socket.on('returnToLobby', (callback) => {
-    const room = rooms.get(playerRooms.get(socket.id));
-    if (!room || !room.players.has(socket.id) || room.status !== 'finished') {
+    const room = rooms.get(playerRooms.get(playerId));
+    if (!room || !room.players.has(playerId) || room.status !== 'finished') {
       return callback?.({ success: false, error: 'The race is not over yet' });
     }
     const gp = room.grandPrix;
@@ -1932,15 +2082,20 @@ io.on('connection', (socket) => {
   });
 
   socket.on('leaveGame', (callback) => {
-    leaveRoom(socket);
+    leaveRoom(socket, playerId);
     callback?.({ success: true });
   });
 
   // DISCONNECT
 
   socket.on('disconnect', () => {
-    console.log('Player disconnected:', socket.id);
-    leaveRoom(socket);
+    console.log('Player disconnected:', playerId);
+    if (superseded) return;                      // (the same browser has already taken this seat over on a new connection)
+    if (seatToken && liveSeats.get(seatToken)?.socket === socket) liveSeats.delete(seatToken);
+    const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);
+    // a browser that said who it is has its seat held for a while (a refresh is a disconnection too)
+    if (seatToken && player) holdSeat(room, player, seatToken);
+    else leaveRoom(socket, playerId);
   });
 });
 

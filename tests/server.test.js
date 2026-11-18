@@ -23,6 +23,9 @@ class TestServer {
 mock.module('socket.io', { exports: { Server: TestServer } });
 // (a single-player game starts with four computer dogs: the tests of the rules race alone unless they ask for them)
 env.SOLO_BOTS = '0';
+env.ROOM_BOTS = '0';
+// (the players in these tests stand still for minutes at a time: they are not to be taken for stalled)
+env.STALLED_AFTER_MS = '86400000';
 await import('../server/server.js');
 
 let nextId = 0;
@@ -504,7 +507,7 @@ test('race standings rank by lap, checkpoint and distance, follow overtakes, and
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
   const atGo = latest(room.code, 'raceStandings').standings;
   assert.equal(atGo.length, 3, 'the board appears at GO');
-  assert.deepEqual(Object.keys(atGo[0]).sort(), ['dog', 'finished', 'name', 'place', 'playerId']);
+  assert.deepEqual(Object.keys(atGo[0]).sort(), ['away', 'dog', 'finished', 'name', 'place', 'playerId']);
 
   const order = () => latest(room.code, 'raceStandings').standings.map(s => s.name);
   const cp0 = map.checkpoints[0], len = Math.hypot(cp0.x, cp0.z);
@@ -1675,4 +1678,142 @@ test('Grand Prix: it can win the map vote like any map', context => {
   assert.equal(start.mapId, 'farmyard');
   assert.deepEqual(start.grandPrix, { id: 'gp2', name: 'Grand Prix 2', round: 1, of: 4 });
   for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+test('a refresh: the seat is held for a minute, the dog jogs on by itself, and the same browser comes back to the same dog', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const token = 'a-secret-only-this-browser-has';
+  assert.equal(berri.call('resume', { token }).success, false, 'nothing to come back to yet');
+  assert.equal(client().call('resume', { token: 'short' }).success, false);
+  const room = tom.call('hostGame', { mapId: 'farmyard', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  tom.call('startRace');
+  for (const p of [tom, berri]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const berriAt = () => server.events.findLast(e => e.room === room.code && e.event === 'playerMoved' && e.data.playerId === berri.id)?.data.position;
+  const along = position => FARM.query(position[0], position[2]).s;
+
+  // Berri's page reloads: she is not gone, and her dog carries on up the road at a jog
+  berri.call('disconnect');
+  assert.equal(events('playerLeft').length, 0);
+  assert.deepEqual(events('playerAway').at(-1), { playerId: berri.id, away: true });
+  assert.equal(latest(room.code, 'lobbyUpdated').players.find(p => p.id === berri.id).away, true);
+  for (let i = 0; i < 200; i++) context.mock.timers.tick(50);
+  const jogged = along(berriAt());
+  assert.ok(jogged > 40 && jogged < 130, `ten seconds on she is ${jogged} m up the road: a jog, not a sprint`);
+  assert.ok(FARM.query(berriAt()[0], berriAt()[2]).onTrack);
+
+  // the page is back: a new connection with the same token is Berri again, on Pablo, told how the race stands
+  const back = client();
+  const resumed = back.call('resume', { token });
+  assert.equal(resumed.success, true);
+  assert.equal(resumed.playerId, berri.id, 'the same player, whatever the new connection is called');
+  assert.equal(resumed.race.mapId, 'farmyard');
+  assert.equal(resumed.race.status, 'racing');
+  assert.equal(resumed.room.players.find(p => p.id === berri.id).dog, 'pablo');
+  // ...the dog runs on while her game loads the map, and is hers again when it says so
+  context.mock.timers.tick(1000);
+  assert.ok(along(berriAt()) > jogged);
+  const taken = back.call('backInRace');
+  assert.equal(taken.success, true);
+  assert.deepEqual(taken.race.you.position, berriAt());
+  assert.deepEqual(events('playerAway').at(-1), { playerId: berri.id, away: false });
+  const stoodAt = berriAt();
+  context.mock.timers.tick(1000);
+  assert.deepEqual(berriAt(), stoodAt, 'the server has let go of the dog');
+  const ahead = FARM.pointAt(along(stoodAt) + 3);
+  back.call('playerMove', { position: [ahead.x, ahead.y, ahead.z], rotation: 0, animation: 'Run', respawnRevision: taken.race.you.respawnRevision });
+  assert.equal(latest(room.code, 'playerMoved').playerId, berri.id, 'her moves count again, under her own id');
+
+  // gone for more than a minute: then she has left, as before
+  back.call('disconnect');
+  assert.equal(events('playerLeft').length, 0);
+  context.mock.timers.tick(59999);
+  assert.equal(events('playerLeft').length, 0);
+  context.mock.timers.tick(1);
+  assert.deepEqual(events('playerLeft').at(-1), { playerId: berri.id });
+  assert.equal(client().call('resume', { token }).success, false, 'too late');
+  // a browser that never said who it was leaves at once (and Tom leaving the usual way empties the room)
+  tom.call('leaveGame');
+  assert.ok(!lobbies().some(lobby => lobby.code === room.code));
+});
+
+test('a refresh in the lobby: same seat and same dog, and everyone is told', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const token = 'another-secret-for-the-lobby';
+  berri.call('resume', { token });
+  const room = tom.call('hostGame', { name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  berri.call('selectDog', { dog: 'ralph' });
+  berri.call('disconnect');
+  assert.equal(latest(room.code, 'lobbyUpdated').players.length, 2);
+  assert.equal(tom.call('selectDog', { dog: 'ralph' }).success, false, 'her dog is still hers');
+  const back = client(), resumed = back.call('resume', { token });
+  assert.deepEqual([resumed.success, resumed.playerId, resumed.race], [true, berri.id, null]);
+  assert.equal(resumed.room.players.find(p => p.id === berri.id).dog, 'ralph');
+  assert.equal(latest(room.code, 'lobbyUpdated').players.find(p => p.id === berri.id).away, false);
+  assert.equal(back.call('changeDog').success, true, 'and she can carry on as herself');
+  for (const p of [tom, back]) p.call('leaveGame');
+});
+
+test('a frozen dog: a player who goes quiet in a race has their dog driven, everyone is told, and their next move takes it back', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'farmyard', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  tom.call('startRace');
+  for (const p of [tom, berri]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const grid = id => latest(room.code, 'raceStarted').players.find(p => p.id === id).position;
+  const move = (who, position, revision = 0) => who.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: revision });
+  env.STALLED_AFTER_MS = '3000';
+  context.after(() => { env.STALLED_AFTER_MS = '86400000'; });
+  // Tom keeps reporting in; Berri's game goes quiet (a hidden tab, a stalled connection) but is still connected
+  const second = () => { move(tom, grid(tom.id)); for (let i = 0; i < 20; i++) context.mock.timers.tick(50); };
+  for (let t = 0; t < 5; t++) second();
+  assert.deepEqual(events('playerAway'), [{ playerId: berri.id, away: true }], 'Berri, and only Berri');
+  assert.equal(latest(room.code, 'raceStandings').standings.find(e => e.playerId === berri.id).away, true);
+  assert.equal(latest(room.code, 'raceStandings').standings.find(e => e.playerId === tom.id).away, false);
+  const before = FARM.query(...[grid(berri.id)[0], grid(berri.id)[2]]).s;
+  for (let t = 0; t < 4; t++) second();
+  const driven = server.events.findLast(e => e.room === room.code && e.event === 'playerMoved' && e.data.playerId === berri.id).data.position;
+  const progress = ((FARM.query(driven[0], driven[2]).s - before) % FARM.length + FARM.length) % FARM.length;
+  assert.ok(progress > 15, `her dog has run on ${progress} m by itself`);
+  // her game wakes up and sends a move from where it thought she was: she is put where her dog now is, and carries on from there
+  move(berri, grid(berri.id));
+  assert.deepEqual(events('playerAway').at(-1), { playerId: berri.id, away: false });
+  const back = events('playerRespawned').at(-1);
+  assert.deepEqual([back.playerId, back.rescued, back.penaltySeconds, back.respawnRevision], [berri.id, true, 0, 1]);
+  assert.deepEqual(back.position, driven);
+  const ahead = FARM.pointAt(FARM.query(driven[0], driven[2]).s + 3);
+  move(berri, [ahead.x, ahead.y, ahead.z], 1);
+  assert.deepEqual(server.events.findLast(e => e.event === 'playerMoved' && e.data.playerId === berri.id).data.position, [ahead.x, ahead.y, ahead.z]);
+  for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+test('reconnecting before the server has noticed the old connection is dead: the new connection takes the seat over', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const tom = client(), berri = client(), token = 'a-token-for-the-take-over-case';
+  berri.call('resume', { token });
+  const room = tom.call('hostGame', { name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  berri.call('selectDog', { dog: 'ralph' });
+  // her network dropped and came back: a new connection, while the old one still looks alive to the server
+  const again = client(), resumed = again.call('resume', { token });
+  assert.deepEqual([resumed.success, resumed.playerId], [true, berri.id]);
+  assert.equal(resumed.room.players.find(p => p.id === berri.id).dog, 'ralph');
+  // the old connection finally drops: nothing happens, she is not removed and no seat is put on hold
+  const before = server.events.length;
+  berri.call('disconnect');
+  assert.equal(server.events.length, before);
+  assert.equal(again.call('changeDog').success, true, 'the new connection is her');
+  context.mock.timers.tick(61000);
+  assert.equal(latest(room.code, 'lobbyUpdated').players.length, 2, 'still there a minute on');
+  for (const p of [tom, again]) p.call('leaveGame');
 });

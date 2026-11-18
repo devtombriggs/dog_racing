@@ -24,7 +24,7 @@ export class LocalDog extends DogAvatar {
   // race: the Race this dog is running in.  player: this player as the server describes them
   constructor(race, player) {
     const dogId = player?.dog || 'gsp';
-    super({ id: race.socket.id, dogId, config: DOGS[dogId], scene: race.stage.scene });
+    super({ id: race.myId, dogId, config: DOGS[dogId], scene: race.stage.scene });
     this.race = race;
 
     if (player) {
@@ -71,7 +71,7 @@ export class LocalDog extends DogAvatar {
     this.burrowBoostUntil = 0;
     this.burrowBoost = 1.3;         // how much faster he comes out of a burrow (each burrow says)
     this.recoveryUntil = 0;         // slowed after a respawn until then
-    this.respawnRevision = 0;
+    this.respawnRevision = player?.respawnRevision ?? 0;      // (not 0 for a player coming back into a race)
     this.stunUntil = 0;
     this.stunLength = 1;
 

@@ -47,11 +47,38 @@ Modbury Heights is a 3.12 km coastal circuit with a beach start, switchback clim
 Its shared data is `shared/modburyData.js`, and its on-demand scenery is `src/tracks/modburyHeights/ModburyHeightsTrack.js`, copied from `../modbury_heights/src/tracks/modburyHeights/` with the visual data import redirected to `shared/`. Refresh both when regenerating the source map. Tests cover supported spawns, terrain continuity, water, natural boundaries, cliff recovery, stale movement, and a complete three-lap multiplayer race.
 
 
+## Refreshing the page, or losing the connection
+
+A player whose connection drops keeps their seat and their dog for one minute (`SEAT_HOLD_MS` on the server). If the same browser tab comes back in that time, by a refresh or by reconnecting, it is the same player again: back in the lobby on the dog they picked, or back in the race where their dog now is.
+
+- **While they are away in a race** their dog jogs on up the road by itself at half its top speed, steering round what is in the way and jumping what has to be jumped, and uses no items (`AWAY_DRIVER` in `server/bots.js`). It keeps going while their game reloads the map, and is theirs again when the map is on screen.
+- **After a minute** they have left, as before.
+- **Frozen dogs:** a player who is still connected but has gone quiet in a race for three seconds (a hidden tab, a stalled connection) has their dog driven the same way; the first move their game sends takes it back, from wherever the dog has got to. A dead connection is noticed in about ten seconds.
+- **Everyone is told:** the player sees "Connection lost · Reconnecting…" until they are back; the others see "Berri lost connection: their dog is running itself" and a 📡 beside the name on the board.
+- **Reconnecting** is automatic. A browser that reconnects before the server has noticed its old connection is dead takes its seat over at once.
+- **How:** the tab keeps a random token for its lifetime (`sessionStorage`) and sends it on every connection (`resume`); the server knows a player by their first connection's id from then on, whatever connection they are on (`HELD SEATS` in `server/server.js`). A new tab is a new player.
+
+## Controller
+
+A controller works in the race beside the keyboard, laid out like an Xbox 360 pad (`src/game/PlayerInput.js`):
+
+| Button | What it does |
+|---|---|
+| Right trigger | Go |
+| Left trigger | Brake / reverse |
+| Left stick or D-pad | Steer (the stick gives part turns) |
+| A | Jump |
+| X, B or either bumper | Use the item |
+
+The menus, dog select and map screens still need a mouse or keyboard.
+
 ## Voice chat
 
 Voice chat is **on**. Nobody's microphone comes on unless they tick the box, and single-player games have no voice chat. To take it out, build the game with `VITE_VOICE_CHAT=0` and start the server with `VOICE_CHAT=0`. On a public server, note that hosted rooms are listed for anyone to join, and everyone in a room is in its voice chat.
 
 In a multiplayer lobby, the **Voice chat** box on the dog-select screen turns your microphone on; it stays on through the map vote and the race, and **M** mutes and unmutes during the race. Players who leave it off still hear the ones who turned it on. The option is not remembered between visits, so a microphone only comes on because the box was ticked that time.
+
+What is sent is the microphone through a noise gate (`gateMicrophone` in `src/voiceChat.js`): rumble is filtered out, and nothing goes out unless the level has been above the room's background for 60 ms, so key clicks, mouse clicks and a noisy room are not heard between words. The numbers are in `GATE`.
 
 While a player is connected to anyone in voice chat, their music plays at 30% of its usual volume so the voices come through (`MUSIC_UNDER_VOICES` in `src/audio/GameAudio.js`).
 
@@ -73,7 +100,7 @@ Treat Boxes give one of six items (rules and odds in `shared/items.js`): tennis 
 
 ## Computer-controlled dogs
 
-The host chooses how many computer dogs fill the empty places on the grid (0 to 4) and how good they are, on the character select screen; a single-player game starts with four at Medium, a room of players with none. They join when the race starts, on the dogs nobody picked, and leave when the room goes back to the lobby. The race is over when every player is home: computer dogs still running are placed in the order they were in.
+A room of players always races a full grid: computer dogs take every empty place (two players race three of them), and the host chooses only how good they are, on the character select screen. Alone, a player can also have fewer, or none; a single-player game starts with four at Medium. They join when the race starts, on the dogs nobody picked, and leave when the room goes back to the lobby. The race is over when every player is home: computer dogs still running are placed in the order they were in.
 
 The server drives them (`server/bots.js`). Each is one of the five dogs with that dog's own stats, special and item rules, and its moves go through the same checks as a player's. The three levels (`shared/botLevels.js`) differ in how the dog is driven, not in what it can do, and none is sped up or slowed down behind the scenes:
 
@@ -85,7 +112,7 @@ The server drives them (`server/bots.js`). Each is one of the five dogs with tha
 | Misjudges a broken bridge | about 1 in 8 | 1 in 25 | 1 in 200 |
 | Items | used at random | used when they will do some good | aimed, and the collar kept for something coming |
 
-Start the server with `SOLO_BOTS=0` (or any number up to 4) to change how many a single-player game starts with.
+Start the server with `SOLO_BOTS=0` (or any number up to 4) to change how many a single-player game starts with, and `ROOM_BOTS` for how many a room of players is filled up with.
 
 ## Course map
 

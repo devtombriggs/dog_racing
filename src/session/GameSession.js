@@ -21,6 +21,19 @@ const NO_RACE = {
   grandPrixResults: null
 };
 
+// The secret this browser tab proves itself with after a refresh (kept for the tab's life only, so two
+// tabs are two players)
+function seatToken() {
+  try {
+    let token = sessionStorage.getItem('dog-racing-seat');
+    if (!token) {
+      token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+      sessionStorage.setItem('dog-racing-seat', token);
+    }
+    return token;
+  } catch { return null; }          // storage blocked: no coming back after a refresh
+}
+
 // One player's visit to the game: the connection to the server, the room they are in, which screen
 // they are on and how their race is going.  The screens read `state` (through useSession) and call
 // the methods here; the race (game/Race.js) reads the race clock and reports back through `set`.
@@ -38,6 +51,7 @@ export class GameSession {
   state = {
     screen: 'menu',          // 'menu' | 'join' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
     raceNumber: 0,           // counts the races this visit: each one gets a fresh race screen
+    notice: '',              // a passing word about someone else ("Berri lost connection"), shown for a few seconds
     room: null,
     playerName: '',
     availableLobbies: null,
@@ -66,6 +80,8 @@ export class GameSession {
     voiceMap: {}             // "room:playerId" -> has a microphone on (as the server tells it)
   };
 
+  #resume = null;
+  #noticeTimer = null;
   #listeners = new Set();
   #joinRequest = 0;
   #events = null;
@@ -144,7 +160,68 @@ export class GameSession {
     else window.removeEventListener('keydown', this.#onMuteKey);
   }
 
+  // The server's answer to 'resume'
+  #resumed(response) {
+    if (!response?.success) {
+      // nothing held: if this game thought it was in a room (the connection dropped for too long), it is not any more
+      if (this.state.room) this.set({ ...NO_RACE, room: null, screen: 'menu', error: 'Connection lost: you were away too long to rejoin' });
+      return;
+    }
+    const { room, race, playerId } = response;
+    this.singlePlayer = room.singlePlayer === true;
+    this.#resetRaceClock();
+    if (!race) {
+      // back in the lobby (or the map vote), same seat, same dog
+      if (room.voteMsLeft != null) this.voteDeadline = performance.now() + room.voteMsLeft;
+      const myDog = room.players.find(player => player.id === playerId)?.dog;
+      this.set({ ...NO_RACE, socketId: playerId, room, error: '',
+        screen: room.status === 'voting' ? 'mapVote' : this.singlePlayer && myDog ? 'mapSelect' : 'selection' });
+      return;
+    }
+    // back in a race: the race screen loads the map, then takes the dog over from the server (backInRace)
+    gameAudio.loadRace(race.mapId);
+    this.#resume = race;                 // (after the clock was reset above, which clears it)
+    this.set({
+      ...NO_RACE, socketId: playerId, error: '',
+      racePhase: 'Rejoining...',
+      totalCheckpoints: race.totalCheckpoints, lap: race.you.lap, checkpoint: race.you.checkpoint, heldItem: race.you.item,
+      room: { ...room, mapId: race.mapId, players: race.players, grandPrix: race.grandPrix },
+      raceNumber: this.state.raceNumber + 1,
+      screen: 'race'
+    });
+  }
+
+  // For the race being built: what the server said about the race this player is coming back into
+  // (null for a race joined at its start).  It stands until the dog is theirs again: the race screen can
+  // be built more than once on the way.
+  get resumeRace() { return this.#resume; }
+
+  // The map is loaded and the dog is this player's again: start the clock from where the race is
+  backInRace = (race) => {
+    this.#resume = null;
+    if (race.you.finished) {
+      this.raceFinished = true;
+      this.set({ finishTime: race.you.finishTime, racePhase: 'FINISHED!', lap: race.you.lap, checkpoint: race.you.checkpoint });
+      return;
+    }
+    if (race.status === 'racing') {
+      this.raceStart = performance.now() - (race.raceMs ?? 0);
+      this.raceGo = true;
+      gameAudio.playRace('music');
+    }
+    // (still loading or counting down: the countdown and GO arrive as they would have)
+    this.set({ racePhase: race.status === 'finished' ? '' : race.status === 'racing' ? '' : 'Loading...', lap: race.you.lap, checkpoint: race.you.checkpoint, heldItem: race.you.item });
+  };
+
+  // A few seconds of words at the top of the screen
+  #say(notice) {
+    clearTimeout(this.#noticeTimer);
+    this.set({ notice });
+    this.#noticeTimer = setTimeout(() => this.set({ notice: '' }), 4000);
+  }
+
   #resetRaceClock() {
+    this.#resume = null;
     this.raceGo = false;
     this.raceFinished = false;
     this.raceStart = null;
@@ -161,6 +238,7 @@ export class GameSession {
     // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
     const voice = VOICE_CHAT ? createVoiceChat({
       socket,
+      selfId: () => this.state.socketId ?? socket.id,
       onChange: (voiceStatus) => {
         this.set({ voiceStatus });
         gameAudio.setVoiceChatActive(voiceStatus.connected > 0);      // voices over the music
@@ -171,7 +249,11 @@ export class GameSession {
     this.#events = {
       connect: () => {
         console.log('Connected:', socket.id);
+        // (socketId is this player's id: the connection's own, unless the server gives back an earlier seat)
         this.set({ connected: true, socketId: socket.id });
+        // Say who this browser is.  After a refresh, or a dropped connection, the server may still be
+        // holding this player's seat: then they are straight back in their room, on the same dog.
+        socket.emit('resume', { token: seatToken() }, response => this.#resumed(response));
       },
 
       disconnect: () => {
@@ -229,7 +311,7 @@ export class GameSession {
       },
 
       raceProgress: (data) => {
-        if (data.playerId !== socket.id) return;
+        if (data.playerId !== this.state.socketId) return;
 
         this.set({ lap: data.lap, checkpoint: data.checkpoint });
         if (data.totalCheckpoints !== undefined) this.set({ totalCheckpoints: data.totalCheckpoints });
@@ -252,6 +334,13 @@ export class GameSession {
 
       grandPrixStandings: (data) => this.set({ grandPrixResults: data }),
 
+      // Another player's connection has dropped or gone quiet (their dog runs itself), or they are back
+      playerAway: ({ playerId, away }) => {
+        if (playerId === this.state.socketId) return;
+        const name = this.state.room?.players.find(player => player.id === playerId)?.name ?? 'A player';
+        this.#say(away ? `${name} lost connection: their dog is running itself` : `${name} is back`);
+      },
+
       raceEnded: (data) => {
         this.raceFinished = true;
         this.raceGo = false;
@@ -266,7 +355,7 @@ export class GameSession {
       },
 
       playerFinished: (data) => {
-        if (data.playerId === socket.id) console.log('Your finish time:', data.finishTime);
+        if (data.playerId === this.state.socketId) console.log('Your finish time:', data.finishTime);
         else console.log(`${data.name} finished in ${data.finishTime}s`);
       }
     };

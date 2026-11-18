@@ -29,7 +29,19 @@ function App() {
 
   const Screen = SCREENS[state.screen] ?? RaceScreen;
   // (each race gets a new race screen, so the next race of a Grand Prix builds its own map)
-  return <Screen key={state.screen === 'race' ? `race-${state.raceNumber}` : state.screen} session={session} state={state} />;
+  return (
+    <>
+      <Screen key={state.screen === 'race' ? `race-${state.raceNumber}` : state.screen} session={session} state={state} />
+      {/* in a room and the connection has gone: say so (the game reconnects by itself and takes the seat back) */}
+      {state.room && !state.connected && (
+        <div className="connection-lost" role="alert">
+          <strong>Connection lost</strong>
+          <span>Reconnecting… your dog is running on by itself and your place is held for a minute.</span>
+        </div>
+      )}
+      {state.notice && <div className="connection-notice" role="status">{state.notice}</div>}
+    </>
+  );
 }
 
 export default App;

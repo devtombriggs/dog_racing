@@ -3,6 +3,9 @@ import { BOT_LEVELS, BOT_LEVEL_IDS, MAX_BOTS } from '../../shared/botLevels.js';
 // Computer-controlled dogs: how many fill the empty places on the grid, and how good they are.
 // The host chooses; everyone else in the room sees what was chosen.
 export function BotSettings({ session, room, canChange }) {
+  // In a room of players the grid is always filled: only how good the computer dogs are is a choice.
+  // Alone, the player can also have fewer of them, or none.
+  const chooseCount = room?.singlePlayer === true;
   const bots = room?.bots ?? { count: 0, level: 'medium' };
   const places = Math.max(0, MAX_BOTS + 1 - (room?.players.length ?? 1));     // empty places on the grid
   const racing = Math.min(bots.count, places);
@@ -18,13 +21,14 @@ export function BotSettings({ session, room, canChange }) {
     <div className="bot-settings" role="group" aria-label="Computer-controlled dogs">
       <span className="bot-settings__label">
         Computer dogs
-        <small>{bots.count > places ? `${racing} will race: the room has ${places} empty ${places === 1 ? 'place' : 'places'}` : 'Fill the empty places on the grid'}</small>
+        <small>{!chooseCount ? `${racing} will race: they fill the empty places on the grid`
+          : bots.count > places ? `${racing} will race: the room has ${places} empty ${places === 1 ? 'place' : 'places'}` : 'Fill the empty places on the grid'}</small>
       </span>
-      <span className="bot-settings__count">
+      {chooseCount && <span className="bot-settings__count">
         <button onClick={() => session.setBots({ count: bots.count - 1 })} disabled={bots.count <= 0} aria-label="One fewer computer dog">−</button>
         <output aria-live="polite">{bots.count}</output>
         <button onClick={() => session.setBots({ count: bots.count + 1 })} disabled={bots.count >= MAX_BOTS} aria-label="One more computer dog">+</button>
-      </span>
+      </span>}
       <span className="bot-settings__levels" role="radiogroup" aria-label="How good the computer dogs are">
         {BOT_LEVEL_IDS.map(id => (
           <button

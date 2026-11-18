@@ -26,6 +26,13 @@ import { BURROWS } from '../shared/burrows.js';
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
 import { BOT_LEVELS } from '../shared/botLevels.js';
 
+// How the dog of a player who has dropped out for a moment is driven until they are back: a steady jog
+// up the middle of the road, round what is in the way and over what has to be jumped, touching nothing.
+export const AWAY_DRIVER = {
+  name: 'Away', pace: 0.5, line: 0, wander: 0, foresight: 0.7, jumpMiss: 0, reaction: [0, 0],
+  itemDelay: [1e9, 1e9], itemSense: 1, pickups: 0, dodges: true,
+};
+
 const BRAKING = 14;            // m/s² a dog sheds when it has to slow (a player's dog: 11 easing off for a turn, 22 braking)
 const EDGE_MARGIN = 1.1;       // metres it keeps from the edge of the road
 const CLEARANCE = 1.25;        // metres it leaves round something it is steering past (on top of the thing's own radius)
@@ -209,11 +216,11 @@ function buildRoute(mapId) {
 // ---------------------------------
 
 /**
- * mapId, dog: where it races and which dog it is.  level: 'easy' | 'medium' | 'hard'.  seed: for its own
+ * mapId, dog: where it races and which dog it is.  level: 'easy' | 'medium' | 'hard' (or a level of its own, like AWAY_DRIVER).  seed: for its own
  * dice.  heightAt(x, z): the ground height where the map has a height map (Frostpeak).
  */
 export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = null }) {
-  const route = botRoute(mapId), L = BOT_LEVELS[level] ?? BOT_LEVELS.medium, random = randomFrom(seed);
+  const route = botRoute(mapId), L = (typeof level === 'object' ? level : BOT_LEVELS[level]) ?? BOT_LEVELS.medium, random = randomFrom(seed);
   const stats = DOG_STATS[dog] ?? DOG_STATS.gsp, special = SPECIALS[dog] ?? null;
   const speedScale = statScale(stats.speed, STAT_EFFECT.speed);
   const runSpeed = BASE_SPEED.run * speedScale, sprintSpeed = BASE_SPEED.sprint * speedScale;

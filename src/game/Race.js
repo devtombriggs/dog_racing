@@ -53,7 +53,12 @@ export class Race {
     // DOGS AND MAP
     // ---------------------------------
 
-    this.localPlayer = room.players.find((p) => p.id === socket.id);
+    // This player's id: the server's name for them (it outlasts a refresh, so it is not the connection's id)
+    const myId = this.myId = session.state.socketId;
+    // Coming back into a race that is already going (after a refresh): what the server said about it
+    const resume = this.resume = session.resumeRace;
+    this.localPlayer = room.players.find((p) => p.id === myId);
+    if (resume && this.localPlayer) this.localPlayer.respawnRevision = resume.you.respawnRevision;
     this.local = new LocalDog(this, this.localPlayer);
     this.remotes = new Map();
     this.world = new TrackWorld({ mapId, stage: this.stage, dogId: this.local.dogId, dogSize: this.local.size });
@@ -76,7 +81,7 @@ export class Race {
     // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
     this.specials = createSpecials({
       scene,
-      resolve: id => (id === socket.id ? this.local.group : this.remotes.get(id)?.group ?? null)
+      resolve: id => (id === myId ? this.local.group : this.remotes.get(id)?.group ?? null)
     });
     // The course map, bottom left: the whole lap from above with a dot for every dog (src/minimap.js)
     this.minimap = createMinimap({
@@ -84,6 +89,14 @@ export class Race {
       marks: (PROCEDURAL_TRACKS[mapId]?.chasms ?? []).map(chasm => chasm.s)    // Modbury's broken bridges
     });
     this.myItem = null;
+    if (resume) {
+      // the race as it stands: boxes and bones already taken, chew toys on the road, what each dog is holding
+      for (const id of resume.boxesTaken) this.treatBoxes.setVisible(id, false);
+      for (const index of resume.bonesTaken) this.goldenBones.take(index);
+      for (const toy of resume.toys) this.items.placeHazard(toy);
+      for (const player of resume.players) if (player.item) this.items.setHeld(player.id, player.item);
+      this.myItem = resume.you.item;
+    }
     this.rescue = new RescueWatch({ mapId, socket, hud });
 
     // ---------------------------------
@@ -101,7 +114,7 @@ export class Race {
       castShadow: this.world.castsShadows,
       wanted: () => !this.#disposed,
       onLoaded: () => {
-        this.specials.register(socket.id, this.local.specialsEntry);
+        this.specials.register(myId, this.local.specialsEntry);
         this.#dogLoaded = true;
         this.#notifyLoaded();
       },
@@ -160,6 +173,17 @@ export class Race {
     }
 
     this.#readySent = true;
+    if (this.resume) {
+      // back in a race that is going: the server has been running the dog; take it over where it now is
+      this.socket.emit('backInRace', (response) => {
+        if (this.#disposed || !response?.success) return;
+        const { you } = response.race;
+        this.local.respawned({ position: you.position, rotation: you.rotation, respawnRevision: you.respawnRevision, penaltySeconds: 0 });
+        this.myItem = you.item;
+        this.session.backInRace(response.race);
+      });
+      return;
+    }
     console.log('All models loaded. Ready for countdown.');
     this.socket.emit('raceLoaded');
   }
@@ -171,7 +195,7 @@ export class Race {
   }
 
   #spawnRemote(data) {
-    if (data.id === this.socket.id || this.remotes.has(data.id)) return;
+    if (data.id === this.myId || this.remotes.has(data.id)) return;
 
     const remote = new RemoteDog(data, this.stage.scene);
     this.remotes.set(data.id, remote);
@@ -194,8 +218,8 @@ export class Race {
   // ---------------------------------
 
   #serverEvents() {
-    const { socket, local, remotes, world, items, goldenBones, specials, treatBoxes, session, fireworks, shields } = this;
-    const mine = id => id === socket.id;
+    const { local, remotes, world, items, goldenBones, specials, treatBoxes, session, fireworks, shields } = this;
+    const mine = id => id === this.myId;
 
     const playerRespawned = (data) => {
       if (!world.proceduralTrack && !data.rescued) return;
@@ -389,13 +413,14 @@ export class Race {
       { x: player.position.x, z: player.position.z, rotation: player.rotation.y, color: local.config.accent, me: true },
       ...visibleRemotes().map(remote => ({ x: remote.position.x, z: remote.position.z, color: remote.config.accent }))
     ]);
-    const itemAnchors = new Map([[socket.id, local.bones.head ?? player]]);
+    const itemAnchors = new Map([[this.myId, local.bones.head ?? player]]);
     remotes.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
     this.items.update(delta, itemAnchors, world.ballGround);
     this.fireworks.update(delta);
-    this.shields.update(delta, id => (id === socket.id ? local : remotes.get(id)));
+    this.shields.update(delta, id => (id === this.myId ? local : remotes.get(id)));
     local.spinIfStunned();
 
+    this.input.update();
     const canMove = session.raceGo && !session.raceFinished;
 
     // Golden Bones: running through one is the whole pickup, no button needed.  Your own boost starts
