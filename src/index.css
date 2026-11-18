@@ -339,6 +339,95 @@ html, body, #root {
   color: #a5e69c;
 }
 
+/* ---------- Grand Prix cards: two wide ones above the maps, each a strip of its four maps ---------- */
+.map-select__grid.map-select__grid--cups {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.map-card.map-card--cup {
+  aspect-ratio: 32 / 7;
+  border-color: #ffd25766;
+}
+
+.map-card__strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  height: 100%;
+}
+
+/* ---------- computer-controlled dogs: how many and how good ---------- */
+.bot-settings {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 12px;
+  border: 1px solid #ffffff35;
+  border-radius: 7px;
+  background: #ffffff08;
+  color: #e8f3ea;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.character-select__footer p.bot-settings--fixed {
+  display: block;
+  color: #a8beb0;
+  font-weight: normal;
+  text-align: left;
+}
+
+.bot-settings--fixed strong { color: #e8f3ea; }
+
+.bot-settings__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bot-settings__label small {
+  color: #a8beb0;
+  font-size: 11px;
+  font-weight: normal;
+}
+
+.bot-settings__count,
+.bot-settings__levels {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bot-settings__count output {
+  min-width: 20px;
+  font-size: 16px;
+  text-align: center;
+}
+
+.bot-settings button {
+  min-width: 30px;
+  padding: 6px 9px;
+  border: 1px solid #ffffff35;
+  border-radius: 6px;
+  background: #ffffff08;
+  color: #e2ece5;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.bot-settings button:hover:enabled { background: #ffffff1c; }
+.bot-settings button:disabled { opacity: 0.4; cursor: default; }
+.bot-settings button:focus-visible { outline: 2px solid #b2ff9c; outline-offset: 2px; }
+
+.bot-settings button.bot-settings__level--on {
+  border-color: #a5e69c;
+  background: #a5e69c26;
+  color: #d9ffd3;
+  font-weight: bold;
+}
+
 /* ---------- map select / vote ---------- */
 
 .map-select__timer {

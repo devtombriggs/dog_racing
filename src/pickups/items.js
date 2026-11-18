@@ -3,7 +3,7 @@
 // The server decides everything (shared/items.js); this only draws it.
 //
 //   const items = createItems({ scene, renderer });
-//   items.setHeld(playerId, 'ball' | 'toy' | 'bone' | null);
+//   items.setHeld(playerId, 'ball' | 'toy' | 'bone' | 'frisbee' | 'firework' | 'collar' | 'special' | null);
 //   items.throwBall({ id, origin, direction });   items.removeBall(id, position);
 //   items.placeHazard({ id, position, rotationY }); items.removeHazard(id, burst);
 //   items.throwFrisbee({ id, position, yaw });  items.moveFrisbees([{ id, position, yaw }]);  items.removeFrisbee(id, position);
@@ -13,6 +13,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { BALL, ballPositionAt } from '../../shared/items.js';
+import { buildRocket } from './firework.js';
+import { buildCollar } from './collar.js';
 
 const MODELS = { ball: '/models/tennis_ball.glb', toy: '/models/chew_toy.glb', bone: '/models/golden_bone.glb', frisbee: '/models/frisbee.glb' };
 // Size shown above a dog's head, a vertical nudge to centre it, the glow colour (as on the HUD sheet),
@@ -23,6 +25,8 @@ const HELD = {
   toy: { scale: 0.6, lift: -0.36, glow: 0xb45cff, tilt: 0 },
   bone: { scale: 1.4, lift: 0, glow: 0xffc040, tilt: 0 },
   frisbee: { scale: 1.3, lift: 0, glow: 0xff3b3b, tilt: Math.PI / 2 - 0.3 },   // stood up like a coin
+  firework: { scale: 1.25, lift: 0.1, glow: 0xff7a2e, tilt: -1.0 },            // nose up, ready to go
+  collar: { scale: 1.6, lift: 0, glow: 0xffc233, tilt: Math.PI / 2 - 0.35 },   // stood up like a coin
   special: { scale: 1.5, lift: 0, glow: 0x7df9ff },        // the dog's own special: the crackling paw badge, not a model
 };
 const SPECIAL_ICON = '/icons/special.png';
@@ -57,6 +61,11 @@ export function createItems({ scene, renderer }) {
   specialTex.colorSpace = THREE.SRGBColorSpace; owned.push(specialTex);
   const specialMat = new THREE.SpriteMaterial({ map: specialTex, transparent: true, depthWrite: false, toneMapped: false });
   owned.push(specialMat);
+
+  // the firework and the golden collar are built here rather than loaded
+  templates.firework = buildRocket();
+  templates.collar = buildCollar(envTex);
+  for (const built of [templates.firework, templates.collar]) built.traverse(o => { if (o.isMesh) owned.push(o.geometry, o.material); });
 
   const loader = new GLTFLoader();
   for (const [id, url] of Object.entries(MODELS)) {
@@ -111,6 +120,8 @@ export function createItems({ scene, renderer }) {
 
   const anchorPos = new THREE.Vector3();
   return {
+    envMap: envTex,                            // for anything else golden (the collar a dog is wearing)
+
     throwFrisbee({ id, position, yaw }) {
       frisbees.set(id, { from: [...position], to: [...position], yaw, at: performance.now(), object: null });
     },

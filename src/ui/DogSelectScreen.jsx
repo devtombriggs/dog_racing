@@ -1,5 +1,6 @@
 import { DOGS, STAT_LABELS, playerColor } from '../config/dogs.js';
 import { VOICE_CHAT } from '../config/env.js';
+import { BotSettings } from './BotSettings.jsx';
 
 // Character select: one of each dog per race, and everyone can see who is looking at what
 export function DogSelectScreen({ session, state }) {
@@ -102,6 +103,7 @@ export function DogSelectScreen({ session, state }) {
               <small>Runs for you · ↑ jump · ↓ use item</small>
             </span>
           </label>
+          <BotSettings session={session} room={room} canChange={connected && room?.hostId === socketId} />
           {VOICE_CHAT && multiplayer && (
             <label className="character-select__accessibility">
               <input

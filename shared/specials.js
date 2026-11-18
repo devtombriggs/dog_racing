@@ -9,16 +9,17 @@
 //                            seconds, so it only hits who happens to be in the way
 //
 // The dog in first place never gets one; for everyone else the chance rises the further back they are.
-// A dog using a special that is knocked over by anything loses it on the spot (Ralph cannot be hit while flying).
+// Nothing knocks a dog out of its special: while it lasts, whatever is thrown, dropped or driven at
+// the dog (another dog's special included) bounces off.  A fall or a catapult still ends it.
 
 export const SPECIAL_ITEM = 'special';
 
 export const SPECIALS = {
   ralph: { kind: 'jet', name: 'Rocket Paws', durationMs: 15000, speed: 1.5, flyHeight: 3.2, immune: true },
-  pablo: { kind: 'sled', name: 'Pack Rush', durationMs: 10000, speed: 1.4, hitRadius: 2.2, reach: 6 },
+  pablo: { kind: 'sled', name: 'Pack Rush', durationMs: 10000, speed: 1.65, hitRadius: 2.2, reach: 6 },
   second_dog: { kind: 'zoomies', name: 'Zoomies', durationMs: 5000, speed: 1.35, hitRadius: 3.0, reach: 0 },
   gsp: { kind: 'flush', name: 'Pheasant Flush', durationMs: 900 },
-  black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.6, hitRadius: 2.8, reach: 2, steerLocked: true },
+  black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true },
 };
 
 export const SPECIAL_HIT = {

@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { racingLineAt } from '../../../shared/pickupSpots.js';
 import { SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
-import { DOGS, STAT_EFFECT, WATER_SPEED, WATER_ACCELERATION, statScale, swimShare } from '../../config/dogs.js';
+import { BASE_SPEED } from '../../../shared/dogStats.js';
+import { JUMP, STEEP_JUMP } from '../../../shared/handling.js';
+import { DOGS, STAT_EFFECT, WATER_SPEED, WATER_ACCELERATION, statScale, swimShare, turnSpeedLoss, pickupShare } from '../../config/dogs.js';
 import { HANDLING, RUNNING_JUMP_SPEED } from '../../config/handling.js';
 import { CONTACT, dogMass, dogOverlap } from './contact.js';
 import { gaitTimeScale, sprintFraction, applyTurnPose } from './animation.js';
@@ -13,12 +15,6 @@ const OFF_TRACK_ACCELERATION_MULTIPLIER = 0.6;
 const REVERSE_SPEED = 2.5;
 const BRAKING = 22;
 const FRICTION = 9;
-const JUMP_FORCE = 7;
-const GRAVITY = 16;
-// On Frostpeak's black run a normal jump at full speed sails 25 m down the mountain: there the
-// dog does a short, snappy hop instead: about 2 m high (clears the padded slalom gates, solid to
-// 1.7 m; the snowmen are too tall and must be steered round) and 0.6 s in the air
-const STEEP_JUMP = { force: 12.9, gravity: 41.6, below: -0.12 };
 const FORWARD = new THREE.Vector3(0, 0, 1);
 
 // The player's own dog.  This game alone moves it: the keys drive it, the ground, the water and the
@@ -52,7 +48,7 @@ export class LocalDog extends DogAvatar {
     this.knock = new THREE.Vector3();
 
     this.verticalVelocity = 0;
-    this.jumpGravity = GRAVITY;
+    this.jumpGravity = JUMP.gravity;
     this.isJumping = false;
     this.isLanding = false;
 
@@ -62,6 +58,7 @@ export class LocalDog extends DogAvatar {
     // slowdown, and with it every slow stretch (the pools, the hay bales) can be skipped round the side.
     this.jumpedFromOffTrack = false;
     this.inBog = false;             // on the boggy bank beside a Wendover pool (shared/wendoverData.js)
+    this.ringHop = 0;               // bouncing off one of the Water Park's rubber rings: the speed it carries the dog at
 
     // ---------------------------------
     // WHAT THE SERVER HAS DONE TO IT
@@ -72,6 +69,7 @@ export class LocalDog extends DogAvatar {
     this.tunnelRide = null;         // underground in a burrow: { tunnel, startedAt }
     this.launchBoostUntil = 0;
     this.burrowBoostUntil = 0;
+    this.burrowBoost = 1.3;         // how much faster he comes out of a burrow (each burrow says)
     this.recoveryUntil = 0;         // slowed after a respawn until then
     this.respawnRevision = 0;
     this.stunUntil = 0;
@@ -85,13 +83,15 @@ export class LocalDog extends DogAvatar {
     // ...then each dog's own stats on top (STAT_EFFECT)
     const stats = this.stats = this.config.stats ?? {};
     const speedScale = statScale(stats.speed, STAT_EFFECT.speed);
-    this.runSpeed = 11 * speedScale;
-    this.sprintSpeed = 17 * speedScale;
+    this.runSpeed = BASE_SPEED.run * speedScale;
+    this.sprintSpeed = BASE_SPEED.sprint * speedScale;
 
-    this.acceleration = 14 * statScale(stats.acceleration, STAT_EFFECT.acceleration);
+    this.acceleration = BASE_SPEED.acceleration * statScale(stats.acceleration, STAT_EFFECT.acceleration);
     this.turnRateSlow = HANDLING.turnRateSlow * statScale(stats.agility, STAT_EFFECT.agilityTurnSlow);
     this.turnRateSprint = HANDLING.turnRateSprint * statScale(stats.agility, STAT_EFFECT.agilityTurn);
     this.gripSprint = HANDLING.gripSprint * statScale(stats.agility, STAT_EFFECT.agilityGrip);
+    // A turn at a sprint costs speed, more for a less agile dog
+    this.turnSpeedLoss = turnSpeedLoss(stats.agility, HANDLING.turnSpeedLoss);
     // The supplied coastal map uses 0–1 stats; existing dog stats use 1–10.
     this.coastalStats = {
       stamina: stats.stamina == null ? 0.5 : THREE.MathUtils.clamp(stats.stamina / 10, 0, 1),
@@ -166,8 +166,8 @@ export class LocalDog extends DogAvatar {
     this.isLanding = false;
     this.jumpedFromOffTrack = this.offTrack || this.inBog;
     const steepHop = world.steepRun && this.slope < STEEP_JUMP.below;
-    this.verticalVelocity = steepHop ? STEEP_JUMP.force : JUMP_FORCE;
-    this.jumpGravity = steepHop ? STEEP_JUMP.gravity : GRAVITY;
+    this.verticalVelocity = steepHop ? STEEP_JUMP.force : JUMP.force;
+    this.jumpGravity = steepHop ? STEEP_JUMP.gravity : JUMP.gravity;
     this.play('Jump');
 
     // A running dog takes off in stride: skip the standing crouch.
@@ -263,6 +263,7 @@ export class LocalDog extends DogAvatar {
   // ...and out of the far end at a sprint (after respawned() has put the dog there)
   leftBurrow(data) {
     this.burrowBoostUntil = performance.now() + data.boostSeconds * 1000;
+    this.burrowBoost = data.speedMultiplier;
     this.currentSpeed = this.sprintSpeed * data.speedMultiplier;
     this.play('Sprint');
   }
@@ -279,7 +280,7 @@ export class LocalDog extends DogAvatar {
   specialStarted() {
     const spec = SPECIALS[this.race.localPlayer?.dog];
     if (spec?.speed && this.currentSpeed > 0) this.currentSpeed = Math.max(this.currentSpeed, this.sprintSpeed);   // straight up to full pace
-    if (spec?.flyHeight) { this.jumpGravity = GRAVITY; this.verticalVelocity = 0; }
+    if (spec?.flyHeight) { this.jumpGravity = JUMP.gravity; this.verticalVelocity = 0; }
   }
 
   // The kick of speed a golden bone gives a dog that is already running
@@ -395,7 +396,7 @@ export class LocalDog extends DogAvatar {
     const terrainMultiplier = inWater && woodlandSurface
       ? woodlandSwimMultiplier(stats.swimming)
       : coastalGround
-      ? coastalTrack.speedFactor(coastalGround, this.coastalStats)
+      ? coastalTrack.speedFactor(coastalGround, this.coastalStats, this.isJumping)
       : this.inBog
       ? BOG_SPEED
       : inWater
@@ -406,17 +407,23 @@ export class LocalDog extends DogAvatar {
     const hillMultiplier = coastalTrack || (inWater && woodlandSurface) ? 1
       : steepRun && slope < 0 ? Math.min(1.75, 1 - 1.7 * slope)
       : THREE.MathUtils.clamp(1 - HANDLING.hillEffect * slope, 0.8, 1.08);
+    frame.terrainMultiplier = terrainMultiplier;
+    // Wet ground (the mud run): a dog slides where it was going and is slow to pick up speed
+    const wet = coastalTrack?.rules.slip, slip = frame.slip = wet && !this.isJumping ? coastalGround.slippery ?? 0 : 0;
     const maxSpeed = frame.maxSpeed =
       sprintSpeed *
       terrainMultiplier *
       hillMultiplier *
-      (performance.now() < this.burrowBoostUntil ? 1.3 : 1) *
+      (performance.now() < this.burrowBoostUntil ? this.burrowBoost : 1) *
       (performance.now() < this.launchBoostUntil ? world.launchTrack.launch.exitSpeedMultiplier : 1) *
       (world.proceduralTrack && performance.now() < this.recoveryUntil ? world.proceduralTrack.rules.respawnSpeedMultiplier : 1) *
       goldenBones.speedMultiplier() *
       (special?.speed ?? 1) *
       (performance.now() < this.stunUntil ? 0.15 : 1);
+    // (the last of a dog's speed comes slowly, and an agile dog is back up to speed sooner)
     const effectiveAcceleration = this.acceleration *
+      (slip ? 1 - (1 - wet.acceleration) * slip : 1) *
+      pickupShare(stats.agility, HANDLING.topEndAcceleration, sprintFraction(this.currentSpeed, this.runSpeed, sprintSpeed)) *
       (special?.speed ? 2.5 : 1) *
       goldenBones.accelerationMultiplier() *
       (steepRun && slope < 0 ? 1 - 4 * slope : 1) *      // gravity does the work going down the black run
@@ -488,7 +495,7 @@ export class LocalDog extends DogAvatar {
     }
 
     // Turning hard at speed costs speed
-    const turnLimit = maxSpeed * (1 - HANDLING.turnSpeedLoss * Math.abs(this.steer) * effort);
+    const turnLimit = maxSpeed * (1 - this.turnSpeedLoss * Math.abs(this.steer) * effort);
 
     if (this.currentSpeed > turnLimit) {
       this.currentSpeed = Math.max(turnLimit, this.currentSpeed - BRAKING * 0.5 * delta);
@@ -504,9 +511,14 @@ export class LocalDog extends DogAvatar {
     const { world } = this.race;
     const { group, position } = this;
 
+    // thrown on by a rubber ring: carried at the ring's pace until it comes down
+    if (this.ringHop && this.isJumping && performance.now() >= this.stunUntil) this.currentSpeed = this.ringHop;
+    else this.ringHop = 0;
+
     // The dog travels where its momentum takes it, which trails the way
     // its nose points: at a sprint it drifts a little through a turn
-    const grip = THREE.MathUtils.lerp(HANDLING.gripSlow, this.gripSprint, effort);
+    const wet = world.coastalTrack?.rules.slip;
+    const grip = THREE.MathUtils.lerp(HANDLING.gripSlow, this.gripSprint, effort) * (wet && frame.slip ? 1 - (1 - wet.grip) * frame.slip : 1);
 
     this.travelYaw +=
       Math.atan2(
@@ -612,14 +624,16 @@ export class LocalDog extends DogAvatar {
       coastalSurface = coastalTrack.query(position.x, position.z);
     }
     if (coastalSurface) {
-      this.currentSpeed = Math.min(this.currentSpeed, sprintSpeed * coastalTrack.speedFactor(coastalSurface, this.coastalStats)
-        * (performance.now() < this.recoveryUntil ? coastalTrack.rules.respawnSpeedMultiplier : 1));
+      // The ground the dog has just run on to sets its pace at once (mud, water, a climb).  Everything
+      // else that makes up its top speed still counts: a golden bone, a special, a landing boost.
+      const groundNow = coastalTrack.speedFactor(coastalSurface, this.coastalStats, this.isJumping);
+      this.currentSpeed = Math.min(this.currentSpeed, frame.maxSpeed * groundNow / Math.max(frame.terrainMultiplier, 0.05));
     }
 
     // Recheck at the new location, so the slowdown begins immediately.
     this.offTrack = !this.#clearOfGround && !world.isTrackSurface(position);
     const poolNow = world.poolAt(position);
-    const swimming = Boolean(poolNow?.swimming) && !this.isJumping;
+    const swimming = (Boolean(poolNow?.swimming) || coastalSurface?.movement === 'swim') && !this.isJumping;
     const wading = !this.isJumping && (poolNow?.inWater || (this.offTrack && world.isOverWater(position)));
     if (poolNow?.inWater && !this.isJumping) {
       this.currentSpeed = Math.min(this.currentSpeed, sprintSpeed * woodlandSwimMultiplier(stats.swimming)
@@ -650,6 +664,22 @@ export class LocalDog extends DogAvatar {
   #rise(frame) {
     const { delta, special } = frame;
 
+    // The Water Park's rubber rings: a dog that comes down on one (or swims into it) is thrown up and
+    // on, at no less than its full pace, which carries it to the next ring
+    const { proceduralTrack } = this.race.world, bounce = proceduralTrack?.rules.bounce;
+    if (bounce && !special && this.jumpHeight < 0.5 && this.verticalVelocity <= 0
+      && proceduralTrack.ringAt(this.position.x, this.position.z)) {
+      this.isJumping = true;
+      this.isLanding = false;
+      this.jumpedFromOffTrack = false;
+      this.verticalVelocity = bounce.force;
+      this.jumpGravity = bounce.gravity;
+      this.ringHop = bounce.pace;                 // (the same hop for every dog: it comes down on the next ring)
+      this.bouncedAt = performance.now();
+      this.play('Jump');
+      if (this.currentAction === this.actions.Jump) this.currentAction.time = 0.2;      // straight into the leap
+    }
+
     if (special?.flyHeight) {
       // Ralph's rocket paws: up to flying height and held there, over the other dogs and
       // anything on the road; when they go out he drops and lands in his stride
@@ -657,7 +687,7 @@ export class LocalDog extends DogAvatar {
       this.isLanding = false;
       this.jumpedFromOffTrack = false;          // flying is flying, wherever he took off
       this.verticalVelocity = 0;
-      this.jumpGravity = GRAVITY;
+      this.jumpGravity = JUMP.gravity;
       this.jumpHeight += (special.flyHeight - this.jumpHeight) * (1 - Math.exp(-4 * delta));
     } else if (this.isJumping) {
       this.verticalVelocity -= this.jumpGravity * delta;
@@ -667,6 +697,7 @@ export class LocalDog extends DogAvatar {
         this.jumpHeight = 0;
         this.verticalVelocity = 0;
         this.isJumping = false;
+        this.ringHop = 0;
 
         // Landing at a run goes straight back into the stride; only a
         // standing jump plays the settle-and-stand landing
@@ -813,9 +844,13 @@ export class LocalDog extends DogAvatar {
           : now < this.launchBoostUntil ? 'LANDING BOOST!'
           : goldenBones.isBoosting() ? 'GOLDEN BONE BOOST!'
           : offTrack ? 'OFF THE EDGE'
+          : now - (this.bouncedAt ?? -1e9) < 700 ? 'BOING!'
+          : coastalSurface?.slide ? world.proceduralTrack.slipAt ? 'MUDSLIDE!' : 'WATER SLIDE!'
+          : coastalSurface?.slippery > 0.6 ? 'WET CLAY — SLIPPERY!'
           : coastalSurface?.movement === 'swim' ? 'SWIMMING'
           : coastalSurface?.movement === 'wade' ? 'WADING'
-          : coastalSurface?.mud ? 'MUD — SLOW GOING'
+          : coastalSurface?.escalator ? 'ESCALATOR — GOING UP!'
+          : coastalSurface?.mud ? coastalSurface.slowName ?? 'MUD — SLOW GOING'
           : soft ? 'SOFT GROUND — SLOWDOWN' : 'ON TRACK',
         coastalSurface?.inWater ? '#8fd0ff'
           : offTrack || coastalSurface?.mud || soft ? '#ffbc75' : '#9fe49b'

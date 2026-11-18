@@ -86,7 +86,7 @@ export function entersBurrow(previous,current,tunnel) {
   const x=previous[0]+(current[0]-previous[0])*t-tunnel.entry[0];
   const z=previous[2]+(current[2]-previous[2])*t-tunnel.entry[2];
   const y=previous[1]+(current[1]-previous[1])*t-tunnel.entry[1];
-  return Math.abs(x*cos-z*sin)<tunnel.halfWidth && y>-0.6 && y<0.7;
+  return Math.abs(x*cos-z*sin)<tunnel.halfWidth && y>-(tunnel.below??0.6) && y<(tunnel.above??0.7);
 }
 
 // Find the checkpoint's distance round the lap, including the finish seam.

@@ -64,11 +64,14 @@ export function RaceScreen({ session, state }) {
 
       {/* Lost: off the track or the wrong way, counting down to the rescue */}
       <div ref={rescueRef} className="race-rescue" role="status" hidden />
-      {state.frisbeesIncoming.length > 0 && <div className="race-incoming" role="alert">FRISBEE INCOMING!</div>}
+      {state.fireworksIncoming.length > 0
+        ? <div className="race-incoming" role="alert">FIREWORK INCOMING!</div>
+        : state.frisbeesIncoming.length > 0 && <div className="race-incoming" role="alert">FRISBEE INCOMING!</div>}
 
       <HudPanel state={state} speedRef={speedRef} timerRef={timerRef} surfaceRef={surfaceRef} />
       <CountdownOverlay racePhase={state.racePhase} />
-      <ResultsPanel session={session} finishTime={state.finishTime} lobbyReturnAt={state.lobbyReturnAt} />
+      <ResultsPanel session={session} finishTime={state.finishTime} lobbyReturnAt={state.lobbyReturnAt}
+        raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} />
     </div>
   );
 }

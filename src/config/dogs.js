@@ -1,15 +1,18 @@
 // The dogs: who they are, how they are rated and what each rating does to their handling
 import * as THREE from 'three';
+import { DOG_STATS, DOG_NAMES, DOG_STRIDE_BANDS, STAT_EFFECT, statScale, turnSpeedLoss, pickupShare } from '../../shared/dogStats.js';
+
+export { STAT_EFFECT, statScale, turnSpeedLoss, pickupShare };
 
 export const DOGS = {
   gsp: {
     name: 'Pippa (German Shorthaired Pointer)',
-    displayName: 'Pippa',
+    displayName: DOG_NAMES.gsp,
     breed: 'German Shorthaired Pointer',
     portrait: '/portraits/pippa.png?v=2',
     accent: '#ff72dd',
     model: '/models/gsp_female.glb',
-    stats: { speed: 8, acceleration: 8, agility: 7, swimming: 6 },
+    stats: DOG_STATS.gsp,
     scale: 3,
     // Speed (model metres per second) at which each stride plays at its
     // natural rhythm: the top of the speed band that stride is used in
@@ -24,12 +27,12 @@ export const DOGS = {
   },
   second_dog: {
     name: 'Meela (Greyhound)',
-    displayName: 'Meela',
+    displayName: DOG_NAMES.second_dog,
     breed: 'Greyhound',
     portrait: '/portraits/meela.png?v=2',
     accent: '#cf88ff',
     model: '/models/meela_greyhound.glb',
-    stats: { speed: 10, acceleration: 9, agility: 5, swimming: 4 },
+    stats: DOG_STATS.second_dog,
     scale: 3,
     // meela_greyhound/clip_info.json
     gaitSpeed: {
@@ -41,12 +44,12 @@ export const DOGS = {
   },
   black_lab: {
     name: 'Poppy (Black Labrador)',
-    displayName: 'Poppy',
+    displayName: DOG_NAMES.black_lab,
     breed: 'Black Labrador',
     portrait: '/portraits/poppy.png?v=2',
     accent: '#55aaff',
     model: '/models/black_lab.glb',
-    stats: { speed: 7, acceleration: 7, agility: 8, swimming: 10 },
+    stats: DOG_STATS.black_lab,
     scale: 3,
     // black_lab/clip_info.json
     gaitSpeed: {
@@ -58,15 +61,15 @@ export const DOGS = {
   },
   pablo: {
     name: 'Pablo (Alaskan Klee Kai)',
-    displayName: 'Pablo',
+    displayName: DOG_NAMES.pablo,
     breed: 'Alaskan Klee Kai',
     portrait: '/portraits/pablo.png?v=2',
     accent: '#63efff',
     model: '/models/pablo.glb',
-    stats: { speed: 7, acceleration: 9, agility: 10, swimming: 5 },
+    stats: DOG_STATS.pablo,
     scale: 3,
     size: 0.7,
-    strideBands: 0.7,
+    strideBands: DOG_STRIDE_BANDS.pablo,
     maxStrideRate: 1.6,
     cameraOffset: [0, 3.1, -6.4],
     cameraLookHeight: 1.3,
@@ -80,19 +83,19 @@ export const DOGS = {
   },
   ralph: {
     name: 'Ralph (Dachshund)',
-    displayName: 'Ralph',
+    displayName: DOG_NAMES.ralph,
     breed: 'Dachshund',
     portrait: '/portraits/ralph.png?v=2',
     accent: '#ffad57',
     model: '/models/ralph.glb',
-    stats: { speed: 6, acceleration: 10, agility: 9, swimming: 4 },
+    stats: DOG_STATS.ralph,
     scale: 3,
     // A dachshund stands about a third as tall as the pointer.  `size`
     // scales the collision rays (so he fits the small-dog tunnel), and the
     // speeds at which he changes stride: short legs break into a gallop
     // much sooner.  His legs also turn over faster than a big dog's can.
     size: 0.45,
-    strideBands: 0.5,
+    strideBands: DOG_STRIDE_BANDS.ralph,
     maxStrideRate: 2.0,
     cameraOffset: [0, 2.6, -5.6],
     cameraLookHeight: 0.9,
@@ -106,20 +109,7 @@ export const DOGS = {
   }
 };
 
-// ---------------------------------
-// DOG STATS
-// ---------------------------------
-// Each dog is rated 1 to 10 (see `stats` in DOGS).  A 7 is the handling the
-// game was tuned around; every point above or below changes it by the share
-// given here.  Raise a share to make the dogs feel more different.
-
-export const STAT_EFFECT = {
-  speed: 0.06,         // top speed per point
-  acceleration: 0.1,   // how quickly speed builds per point
-  agilityTurn: 0.14,   // turning speed flat out per point
-  agilityTurnSlow: 0.06, // ...and at a walk or trot
-  agilityGrip: 0.2     // how tightly travel follows the nose per point: lower drifts wide
-};
+// The ratings themselves, and what each point does, are in shared/dogStats.js (the server uses them too)
 
 // Water slows a dog to this share of its top speed: a 4 or below is slowed
 // more than by off-track ground, a 10 swims at close to full speed
@@ -139,10 +129,6 @@ export const STAT_LABELS = [
   ['agility', 'Agility'],
   ['swimming', 'Swim']
 ];
-
-export function statScale(value, perPoint) {
-  return Math.max(0.4, 1 + ((value ?? 7) - 7) * perPoint);
-}
 
 export function swimShare(swimming, [poor, strong]) {
   return THREE.MathUtils.lerp(

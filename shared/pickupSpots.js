@@ -11,6 +11,9 @@ import wendover from './wendoverPath.json' with { type: 'json' };
 import { TREAT_ROAD } from './treatRoadData.js';
 import { MODBURY_HEIGHTS } from './modburyData.js';
 import { FARMYARD } from './farmData.js';
+import { WATER_PARK } from './waterParkData.js';
+import { PET_MALL } from './petMallData.js';
+import { MUD_PARK } from './mudParkData.js';
 
 const START_CLEAR = 60;        // metres either side of the start/finish line kept clear
 const MIN_GAP = 70;            // metres between any two pickup spots
@@ -45,6 +48,40 @@ export const PICKUP_PATHS = {
       around(FARMYARD.obstacles.find(o => o.kind === 'scarecrow').s, 18),
       around(FARMYARD.hazardZones.bales, FARMYARD.baleRun.spacing + 20),
       [FARMYARD.chasms[0].ravineStart - 35, FARMYARD.chasms[0].ravineEnd + 20],
+    ],
+  },
+  mud_park: {
+    length: MUD_PARK.length, pointAt: MUD_PARK.pointAt,
+    // nothing in the bog, where the quad bike or the logs cross, among the tyres, or on the mudslide, its leap and the landing
+    hazards: [
+      [MUD_PARK.mud[0].s - 14, MUD_PARK.mud.at(-1).s + 12],
+      [MUD_PARK.hazardZones.quad - 20, MUD_PARK.hazardZones.quad + 16],
+      [MUD_PARK.hazardZones.logs[0] - 18, MUD_PARK.hazardZones.logs.at(-1) + 14],
+      [MUD_PARK.obstacles[0].s - 16, MUD_PARK.obstacles.at(-1).s + 12],
+      [MUD_PARK.slide.sStart - 10, MUD_PARK.launch.landingS + 28],
+    ],
+  },
+  pet_mall: {
+    length: PET_MALL.length, pointAt: PET_MALL.pointAt,
+    // nothing among the cats, the puddles, the trolleys, the tins or the hamster balls, or on the leap and its landing
+    hazards: [
+      [PET_MALL.hazardZones.cats[0] - 18, PET_MALL.hazardZones.cats.at(-1) + 14],
+      [PET_MALL.mud[0].s - 14, PET_MALL.mud.at(-1).s + 12],
+      [PET_MALL.hazardZones.trolleys[0] - 18, PET_MALL.hazardZones.trolleys.at(-1) + 14],
+      [PET_MALL.obstacles[0].s - 16, PET_MALL.obstacles.at(-1).s + 12],
+      [PET_MALL.hazardZones.hamsters[0] - 16, PET_MALL.hazardZones.hamsters[1] + 12],
+      [PET_MALL.launch.padStart - 22, PET_MALL.launch.landingS + 28],
+    ],
+  },
+  water_park: {
+    length: WATER_PARK.length, pointAt: WATER_PARK.pointAt,
+    // nothing in the water (the rings are the thing to steer for there), among the beach balls or the
+    // jets, or on the slide, its jump and the landing
+    hazards: [
+      ...WATER_PARK.pools.map(pool => [pool.sStart - 12, pool.sEnd + 12]),
+      [WATER_PARK.hazardZones.balls[0] - 20, WATER_PARK.hazardZones.balls.at(-1) + 16],
+      [WATER_PARK.hazardZones.jets[0] - 20, WATER_PARK.hazardZones.jets[1] + 16],
+      [WATER_PARK.slide.sStart - 10, WATER_PARK.launch.landingS + 30],
     ],
   },
   wendover: {
@@ -203,6 +240,10 @@ const PLAN = {
   // (even: stay near each target where the road allows, so they are spread along the lap)
   frostpeak:       { custom: true },   // see frostpeakPickups(): 4 rows + 3 bones before the cannon, 12 rows + 30 bones on the black run
   farmyard:        { rows: [0.07, 0.24, 0.42, 0.66, 0.86],             bones: [0.14, 0.31, 0.50, 0.59, 0.74, 0.95], even: true },
+  // (the boxes and bones are on the dry stretches: the plaza, between the hazards, the climb to the slide, the dock)
+  mud_park:        { rows: [0.08, 0.215, 0.33, 0.72],                  bones: [0.135, 0.275, 0.66, 0.965], even: true },
+  pet_mall:        { rows: [0.08, 0.235, 0.385, 0.66],                 bones: [0.135, 0.31, 0.60, 0.965], even: true },
+  water_park:      { rows: [0.06, 0.32, 0.415, 0.575, 0.705],          bones: [0.105, 0.52, 0.64, 0.955], even: true },
   modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91],
                      bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.97], even: true,
                      // The Cliff Climb (340 to 960 m) is a long slow pull: more to go for on the way up.

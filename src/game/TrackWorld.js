@@ -10,6 +10,9 @@ const DOG_COLLISION_RADIUS = 0.65;
 const GENERATED_WORLDS = {
   modbury_heights: () => import('../tracks/modburyHeights/ModburyHeightsTrack.js').then(module => module.createModburyHeights),
   farmyard: () => import('../tracks/farm/FarmTrack.js').then(module => module.createFarm),
+  mud_park: () => import('../tracks/mudPark/MudParkTrack.js').then(module => module.createMudPark),
+  pet_mall: () => import('../tracks/petMall/PetMallTrack.js').then(module => module.createPetMall),
+  water_park: () => import('../tracks/waterPark/WaterParkTrack.js').then(module => module.createWaterPark),
   treat_road: () => import('../tracks/treatRoad/TreatRoadTrack.js').then(module => module.createTreatRoad)
 };
 
@@ -36,7 +39,7 @@ export class TrackWorld {
     // The supplied coastal map has its own surfaces (mud, verges, water) and speeds for them
     this.coastalTrack = this.proceduralTrack?.speedFactor ? this.proceduralTrack : null;
     // Dogs cast shadows on the maps lit for them
-    this.castsShadows = this.woodland || mapId === 'modbury_heights' || mapId === 'farmyard';
+    this.castsShadows = this.woodland || mapId === 'modbury_heights' || mapId === 'farmyard' || mapId === 'water_park' || mapId === 'pet_mall' || mapId === 'mud_park';
 
     this.proceduralWorld = null;
     this.woodlandWorld = null;
@@ -183,6 +186,14 @@ export class TrackWorld {
   // The Wendover pool at this point, if any (how deep, whether the dog must swim)
   poolAt(position) {
     return this.woodland && woodlandWaterAt(position.x, position.z, position.y);
+  }
+
+  // Is a dog at this position swimming?  (For the stroke the other players' dogs are drawn with.)
+  swimmingAt(position) {
+    if (this.woodland) return Boolean(this.poolAt(position)?.swimming);
+    if (!this.coastalTrack) return false;
+    const ground = this.coastalTrack.query(position.x, position.z);
+    return ground.movement === 'swim' && position.y < ground.dogY + 0.4;       // (not one bouncing over the water)
   }
 
   isTrackSurface(position) {

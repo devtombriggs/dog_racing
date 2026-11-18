@@ -22,6 +22,7 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef }) {
         }}
       >
         {MAPS[room?.mapId ?? DEFAULT_MAP].name.toUpperCase()}
+        {room?.grandPrix && <div style={{ color: '#ffd257', marginTop: 3 }}>🏆 {room.grandPrix.name.toUpperCase()} · RACE {room.grandPrix.round}/{room.grandPrix.of}</div>}
       </div>
 
       <div
@@ -142,6 +143,9 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef }) {
         {room?.mapId === 'wendover' && <div>Amber burrows boost Ralph · Poppy swims fastest</div>}
         {room?.mapId === 'treat_road' && <div>Cyan pad launches automatically · falls return to checkpoints</div>}
         {room?.mapId === 'modbury_heights' && <div>Follow the trail · falls return you to a checkpoint</div>}
+        {room?.mapId === 'mud_park' && <div>It is slippery: ease off in the bends · keep out of the deep mud · jump the logs · mind the quad bike</div>}
+        {room?.mapId === 'pet_mall' && <div>Jump the cats and hamster balls · dodge the trolleys and tins · ride the escalator · leap the atrium</div>}
+        {room?.mapId === 'water_park' && <div>Bounce across the rubber rings or swim · dodge the beach balls and the jets · ride the slide</div>}
         {room?.mapId === 'farmyard' && <div>Dodge the tractor, sheep, pigs, sails and rolling bales · jump the pond bridge</div>}
         {room?.mapId === 'frostpeak' && <div>Run into the cannon · it fires you to the summit · eat the bones down the black run</div>}
       </div>

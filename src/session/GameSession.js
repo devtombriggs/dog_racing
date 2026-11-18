@@ -13,7 +13,12 @@ const NO_RACE = {
   lobbyReturnAt: null,
   standings: [],
   frisbeesIncoming: [],
-  heldItem: null
+  fireworksIncoming: [],
+  heldItem: null,
+  // the first dog is home: when the race ends for everyone else (performance clock)
+  raceEndsAt: null,
+  // a Grand Prix race is over: the points table the server sent ({ round, of, final, table, nextMapId })
+  grandPrixResults: null
 };
 
 // One player's visit to the game: the connection to the server, the room they are in, which screen
@@ -32,6 +37,7 @@ export class GameSession {
 
   state = {
     screen: 'menu',          // 'menu' | 'join' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
+    raceNumber: 0,           // counts the races this visit: each one gets a fresh race screen
     room: null,
     playerName: '',
     availableLobbies: null,
@@ -48,7 +54,8 @@ export class GameSession {
     // lobbyReturnAt: the race is over for everyone; when the room goes back to the lobby (performance clock)
     // standings: race order for the board at the top left: [{ playerId, name, dog, place, finished }]
     // frisbeesIncoming: red frisbees chasing me (ids)
-    // heldItem: the item this player is holding from a Treat Box ('ball' | 'toy' | 'bone' | null)
+    // fireworksIncoming: fireworks on their way to me, the leader (ids)
+    // heldItem: the item this player is holding from a Treat Box (an id from shared/items.js, 'special', or null)
     ...NO_RACE,
     // Accessibility mode: the dog runs by itself, Up jumps and Down uses the item
     accessibilityMode: false,
@@ -152,7 +159,13 @@ export class GameSession {
     this.socket = socket;
 
     // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
-    const voice = VOICE_CHAT ? createVoiceChat({ socket, onChange: voiceStatus => this.set({ voiceStatus }) }) : null;
+    const voice = VOICE_CHAT ? createVoiceChat({
+      socket,
+      onChange: (voiceStatus) => {
+        this.set({ voiceStatus });
+        gameAudio.setVoiceChatActive(voiceStatus.connected > 0);      // voices over the music
+      }
+    }) : null;
     this.voice = voice;
 
     this.#events = {
@@ -194,7 +207,9 @@ export class GameSession {
           totalCheckpoints: data.totalCheckpoints ?? MAPS[mapId].checkpoints.length,
           lap: 1,
           checkpoint: 0,
-          room: { ...this.state.room, status: 'loading', mapId, players: data.players },
+          room: { ...this.state.room, status: 'loading', mapId, players: data.players, grandPrix: data.grandPrix ?? null },
+          // (a new race, even straight after another in a Grand Prix: the race screen starts afresh)
+          raceNumber: this.state.raceNumber + 1,
           screen: 'race'
         });
       },
@@ -232,10 +247,15 @@ export class GameSession {
 
       // Everyone is home (or the time allowed after the winner ran out): the race is over for all,
       // and the room goes back to the lobby shortly
+      // The first dog is home: everyone else has this long before the race ends as it stands
+      finishGrace: (data) => this.set({ raceEndsAt: performance.now() + (data?.ms ?? 0) }),
+
+      grandPrixStandings: (data) => this.set({ grandPrixResults: data }),
+
       raceEnded: (data) => {
         this.raceFinished = true;
         this.raceGo = false;
-        this.set({ racePhase: '', lobbyReturnAt: performance.now() + (data?.returnMs ?? 0) });
+        this.set({ racePhase: '', raceEndsAt: null, lobbyReturnAt: performance.now() + (data?.returnMs ?? 0) });
       },
 
       // Back to character select with the same players: the next race starts from there as the first did
@@ -409,6 +429,15 @@ export class GameSession {
     });
   };
 
+  // Host only: how many computer-controlled dogs fill the empty places, and how good they are
+  // ({ count } or { level }: shared/botLevels.js)
+  setBots = (change) => {
+    this.set({ error: '' });
+    this.socket?.emit('setBots', change, (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Could not change the computer dogs' });
+    });
+  };
+
   // Tell the other players which dog this one is looking at
   hoverDog = (dogId) => {
     this.set({ hoveredDog: dogId });
@@ -443,6 +472,14 @@ export class GameSession {
       socket.emit('startRace', (startResponse) => {
         if (!startResponse?.success) this.set({ error: startResponse?.error || 'Failed to start race' });
       });
+    });
+  };
+
+  // Single player: clicking a Grand Prix starts its four races (shared/grandPrix.js)
+  startSoloGrandPrix = (id) => {
+    this.set({ error: '' });
+    this.socket?.emit('startGrandPrix', { id }, (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Failed to start the Grand Prix' });
     });
   };
 

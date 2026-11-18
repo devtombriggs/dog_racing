@@ -47,11 +47,13 @@ Modbury Heights is a 3.12 km coastal circuit with a beach start, switchback clim
 Its shared data is `shared/modburyData.js`, and its on-demand scenery is `src/tracks/modburyHeights/ModburyHeightsTrack.js`, copied from `../modbury_heights/src/tracks/modburyHeights/` with the visual data import redirected to `shared/`. Refresh both when regenerating the source map. Tests cover supported spawns, terrain continuity, water, natural boundaries, cliff recovery, stale movement, and a complete three-lap multiplayer race.
 
 
-## Voice chat (switched off for now)
+## Voice chat
 
-Voice chat is built but **off by default**: the lobby shows no option, no microphone is asked for, no connections are made between players, and the server ignores the voice messages. To bring it back, build the game with `VITE_VOICE_CHAT=1` and start the server with `VOICE_CHAT=1`. Before doing that for a public server, note that hosted rooms are listed for anyone to join, and everyone in a room is in its voice chat.
+Voice chat is **on**. Nobody's microphone comes on unless they tick the box, and single-player games have no voice chat. To take it out, build the game with `VITE_VOICE_CHAT=0` and start the server with `VOICE_CHAT=0`. On a public server, note that hosted rooms are listed for anyone to join, and everyone in a room is in its voice chat.
 
-When it is on: in a multiplayer lobby, the **Voice chat** box on the dog-select screen turns your microphone on; it stays on through the map vote and the race, and **M** mutes and unmutes during the race. Players who leave it off still hear the ones who turned it on. The option is not remembered between visits, so a microphone only comes on because the box was ticked that time.
+In a multiplayer lobby, the **Voice chat** box on the dog-select screen turns your microphone on; it stays on through the map vote and the race, and **M** mutes and unmutes during the race. Players who leave it off still hear the ones who turned it on. The option is not remembered between visits, so a microphone only comes on because the box was ticked that time.
+
+While a player is connected to anyone in voice chat, their music plays at 30% of its usual volume so the voices come through (`MUSIC_UNDER_VOICES` in `src/audio/GameAudio.js`).
 
 The players' browsers send their voices straight to each other (`src/voiceChat.js`, WebRTC); the game server only says who has a microphone on and passes their connection messages across within a room (`setVoice`, `voiceSignal` in `server/server.js`).
 
@@ -62,6 +64,28 @@ The players' browsers send their voices straight to each other (`src/voiceChat.j
 
 Each dog has its own special move from a rare Treat Box item: see `../special_abilities/README.md` ("In the game"). Start the server with `ALWAYS_SPECIAL=1` to try them without waiting for the dice.
 
+Nothing knocks a dog out of its special: while it lasts, anything thrown, dropped or driven at the dog bounces off, another dog's special included. A fall, a catapult or a burrow still ends it.
+
+**Ralph's burrows** (`shared/burrows.js`): Wendover Woods has four long ones in its model, of which he may use any two a lap (2.2 seconds underground for about 100 m of road). Frostpeak, Modbury Heights, the farm and the Water Park each have two short ones (45 m of road in 1.3 seconds, then a short dash), placed automatically on wide, clear stretches; Treat Road has none. Only Ralph can use them, once a lap each. The mouths are drawn by `src/tracks/burrowMouths.js`.
+
+Treat Boxes give one of six items (rules and odds in `shared/items.js`): tennis ball, chew toy, golden bone, red frisbee, firework and golden collar. The dog in first place only ever gets a ball or a chew toy. The **firework** flies up the road to whoever is in first place, knocks over any dog it passes close to on the way and bursts on the leader. The **golden collar** puts a golden shield round the dog for five seconds: nothing knocks it over except another dog's special. A chew toy stops a frisbee (both are gone), a tennis ball that meets one knocks it off the road (and is spent), and a dog in the middle of its special sweeps aside any toy it touches without being knocked over. Start the server with `FORCE_ITEM=firework` (or `collar`, `frisbee`, `ball`, `toy`, `bone`) to be handed that item at GO and again three seconds after each use.
+
+
+## Computer-controlled dogs
+
+The host chooses how many computer dogs fill the empty places on the grid (0 to 4) and how good they are, on the character select screen; a single-player game starts with four at Medium, a room of players with none. They join when the race starts, on the dogs nobody picked, and leave when the room goes back to the lobby. The race is over when every player is home: computer dogs still running are placed in the order they were in.
+
+The server drives them (`server/bots.js`). Each is one of the five dogs with that dog's own stats, special and item rules, and its moves go through the same checks as a player's. The three levels (`shared/botLevels.js`) differ in how the dog is driven, not in what it can do, and none is sped up or slowed down behind the scenes:
+
+| | Easy | Medium | Hard |
+|---|---|---|---|
+| Pace (share of the dog's top speed) | 85% | 93% | 100% |
+| Line through a bend | drifts about, runs wide | fairly tight | tight |
+| Sees a hazard coming | 0.3 s ahead | 0.7 s | 1.2 s |
+| Misjudges a broken bridge | about 1 in 8 | 1 in 25 | 1 in 200 |
+| Items | used at random | used when they will do some good | aimed, and the collar kept for something coming |
+
+Start the server with `SOLO_BOTS=0` (or any number up to 4) to change how many a single-player game starts with.
 
 ## Course map
 
@@ -78,11 +102,25 @@ Five ravines are cut across the clifftop trail (`CHASMS` in `shared/modburyData.
 
 The server decides the fall (`gap` from `query()` and `rules.gapClearance`); the visuals are `buildBridges` in `src/tracks/modburyHeights/ModburyHeightsTrack.js`.
 
+## Grand Prix
+
+On the map screen, above the single maps, are two Grand Prix: four races in a row with the same dogs (computer dogs included), with points for each place and the scores shown after every race. In a room of players a Grand Prix can be voted for like a map.
+
+| | Races, in order |
+|---|---|
+| Grand Prix 1 | Wendover Woods, Water Park, Pet Mall Mayhem, Treat Road |
+| Grand Prix 2 | Muddy Paws Farm, Modbury Heights, Squelch Hollow Mud Run, Frostpeak Alpine Circuit |
+
+- **Points:** 10, 8, 6, 4, 2 for 1st to 5th. A dog that had not finished when the race ended scores for the place it was in.
+- **Between races:** the points table shows for 15 seconds (`LOBBY_RETURN_MS`), then the next race loads by itself.
+- **At the end:** the winner and the final scores show for 30 seconds (`GRAND_PRIX_FINAL_MS`), or until someone presses Back to Lobby.
+- **Where:** the lists and points are in `shared/grandPrix.js`; the server runs it (`endGrandPrixRace`, `nextGrandPrixRace` in `server/server.js`); the table is drawn by `src/ui/race/ResultsPanel.jsx`.
+
 ## After the race
 
 When a race ends the whole room goes back to the dog-select lobby together, with the same players, and the next race starts from there as the first one did. Everyone keeps their dog and can change it; the room is listed again so others can join.
 
-- Once the first dog is home the rest have 90 seconds to finish, so a dog left standing cannot hold everyone up. Dogs still running when it ends see "Race Over".
+- Once the first dog is home the rest have one minute to finish, shown counting down at the top of the screen, so a dog left standing cannot hold everyone up. When it ends everyone keeps the place they were in; dogs still running see "Race Over".
 - When the race is over the finish panel counts down 15 seconds to the lobby. **Back to Lobby** takes everyone there at once (any player can press it); **Main Menu** leaves the room as before.
 
 `FINISH_GRACE_MS` and `LOBBY_RETURN_MS` on the server change the two waits (useful for testing). The server side is "AFTER THE RACE" in `server/server.js`.
@@ -111,6 +149,68 @@ Anything that moves knocks a dog over like a tennis ball does (1.1 s). The farm 
 - **Pickups:** five box rows and six golden bones, kept clear of every hazard (`shared/pickupSpots.js`).
 - **Map card:** `public/maps/farmyard.jpg`.
 
+## Water Park
+
+A 1.72 km lap of pools and slides, generated at runtime like the farm (about 66,000 triangles, no model file). It is Poppy's map: there are two long swims, and she is the only dog as fast in the water as on land.
+
+| Part | What happens there |
+|---|---|
+| Poolside Plaza | Start and finish on the tiles |
+| Ring Lagoon | 186 m of deep water with thirteen rubber rings floating down it. Land on a ring (or swim into one) and it throws the dog up and on to the next, at the same pace for every dog. Miss, and it is a slow swim to the next ring. Poppy can simply swim |
+| Beach Ball Boulevard | Three giant beach balls roll across the road and back |
+| Fountain Square | Five rows of jets shoot up in turn; there is always a way through between them |
+| The Lazy River | 118 m of river flowing the way the race goes: no rings, a swim for everyone |
+| Slide Tower | The climb to the top of the slide, 32 m up |
+| The Big Slide | A flume all the way down at 1.45 times top speed, and off the lip at the bottom |
+| Splash Landing | The jump over the splash pool to the dock, with a landing boost |
+
+A beach ball or a jet knocks a dog over like a tennis ball does (1.1 s). The park is walled all the way round: the only way off the road is the end of the slide, which fires every dog across.
+
+- **Rules and layout:** `shared/waterParkData.js` (`query`, `speedFactor`, `ringAt`, `launchPoint`, `hazardsAt`, `hazardHit`). The slide's jump uses the same server rules as Treat Road's catapult.
+- **Scenery:** `src/tracks/waterPark/WaterParkTrack.js` (`createWaterPark`); `world.triangles()` reports the triangle count.
+- **The bounce:** in `LocalDog` for the player's dog and `server/bots.js` for the computer dogs, from `rules.bounce`.
+- **Map card:** `public/maps/water_park.jpg`.
+
+## Pet Mall Mayhem
+
+A 1.33 km lap of a big pet shopping mall on the day every cage came open, generated at runtime like the farm and the Water Park (about 56,000 triangles, no model file).
+
+| Part | What happens there |
+|---|---|
+| The Grand Atrium | Start and finish under the dome |
+| Cat Alley | Escaped cats dash across the aisle in threes, at two places: jump them or wait |
+| The Aquarium | A narrow tunnel between fish tanks, with puddles from the burst ones (65% speed) |
+| Trolley Run | Three runaway shopping trolleys roll across and back, then six towers of tins to weave through |
+| The Escalator | It is running: 125% of top speed up to the gallery |
+| The Upper Gallery | Four hamsters in exercise balls roll from side to side: over them or round them |
+| The Big Leap | Off the end of the gallery, over the atrium fountain, down on to the dog beds with a landing boost |
+
+A cat, a trolley or a hamster ball knocks a dog over like a tennis ball does (1.1 s). There are shop fronts or glass all the way round: the only way off the road is the leap, which fires every dog across. Rabbits, tortoises, loose birds, tipped cages and spilt kibble are scenery and are out of the dogs' way.
+
+- **Rules and layout:** `shared/petMallData.js`. The leap uses the same server rules as Treat Road's catapult.
+- **Scenery:** `src/tracks/petMall/PetMallTrack.js` (`createPetMall`).
+- **Map card:** `public/maps/pet_mall.jpg`.  **Tests:** `tests/pet-mall.test.js`.
+- **Music:** `public/audio/pet_mall.mp3`.
+
+## Squelch Hollow Mud Run
+
+A 1.45 km mud run in the pouring rain, generated at runtime like the other built maps (about 43,000 triangles, no model file). It is the slippery map: everywhere is wet, so a dog slides a little wherever it turns, and a lot on the clay.
+
+| Part | What happens there |
+|---|---|
+| The Paddock | Start and finish on wet grass, beside the event tents |
+| The Slip ’n’ Slide | Bend after bend of wet clay: a dog carries on the way it was going, and is slow to pick up speed |
+| Bog Hollow | Five patches of deep mud (55% speed) with a firm line between them, then a marshal's quad bike sliding across and back |
+| Log Roll | Three logs roll down the bank and across: jump them. Then six stacks of tyres to weave through |
+| Welly Hill | The long wet climb, 24 m up |
+| The Mudslide | Down again at 135% of top speed, with almost no grip |
+| The Mud Pit | Off the lip at the bottom, over the pit, with a landing boost |
+
+- **Slipperiness:** `slipAt(s)` in `shared/mudParkData.js`, 0.25 everywhere, 1 on the clay, 0.85 on the slide. `rules.slip` says what full slipperiness does: a dog keeps 20% of its grip and 60% of its acceleration. `LocalDog` applies it to the player's dog; the computer dogs ease off more in wet bends.
+- **Hazards:** the quad bike and the logs knock a dog over for 1.1 s; a jump clears a log, nothing clears the quad bike.
+- **Scenery and rain:** `src/tracks/mudPark/MudParkTrack.js` (`createMudPark`). The rain is 1,500 streaks in a box that travels with the player's dog.
+- **Map card:** `public/maps/mud_park.jpg`.  **Tests:** `tests/mud-park.test.js`.  **Music:** `public/audio/mud_park.mp3`.
+
 ## Code layout (client)
 
 `src/App.jsx` only connects the session and shows its current screen. Everything else is in:
@@ -121,7 +221,7 @@ Anything that moves knocks a dog over like a tennis ball does (1.1 s). The farm 
 | `src/ui/` | One component per screen (`MenuScreen`, `JoinScreen`, `DogSelectScreen`, `MapScreen`, `RaceScreen`) and the race overlays in `ui/race/`. |
 | `src/game/` | The race. `Race` builds everything, listens to the server and runs the frame loop. It owns a `RaceScene` (renderer, camera, lights), a `TrackWorld` (the map and its ground, water and obstacle checks), a `ChaseCamera`, `PlayerInput`, `RescueWatch` (lost dogs) and a `RaceHud` (the readouts written every frame). |
 | `src/game/dogs/` | `DogAvatar` (model and clips), `LocalDog` (the player's dog: all the movement) and `RemoteDog` (other players' dogs, following the server). `animation.js` and `contact.js` hold the stride and bumping helpers. |
-| `src/config/` | The dogs and their stats (`dogs.js`), the handling numbers (`handling.js`) and build switches (`env.js`). |
+| `src/config/` | The dogs (`dogs.js`), the handling numbers (`handling.js`) and build switches (`env.js`). The dogs' ratings, the steering and jump numbers and the golden bone's boost are in `shared/` (`dogStats.js`, `handling.js`, `items.js`), because the server drives the computer dogs with them. |
 | `src/audio/` | `GameAudio`: selection sounds, the countdown and map music. |
 
 Tracks, pickups and abilities are where they were (`src/tracks`, `src/pickups`, `src/abilities`).

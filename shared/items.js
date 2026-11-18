@@ -6,13 +6,21 @@
 //   bone  — golden bone: a speed boost for the dog that uses it
 //   frisbee — red frisbee: chases down the dog directly ahead of you (whoever is there right now) and
 //             knocks just that dog over; the tennis ball is the straight shot, this is the homing one
+//   firework — a rocket for the dog in first place, wherever it is: it flies up the road after the
+//             leader, knocks over any dog it passes close to on the way (it does not go looking for
+//             them), and bursts on the leader, catching anyone right beside them too
+//   collar — golden collar: put it on and a golden force shield surrounds you for five seconds.  Nothing
+//             thrown, dropped or driven at you knocks you over while it lasts; only another dog's
+//             special still does
+//
+// The dog in first place never gets a golden bone, a frisbee, a firework or a golden collar.
 //
 // A dog holds one item at a time.  Running through a box while holding one still takes the box,
 // but gives nothing; a new item can only come after the held one is used.
 
-export const ITEM_IDS = ['ball', 'toy', 'bone', 'frisbee'];
+export const ITEM_IDS = ['ball', 'toy', 'bone', 'frisbee', 'firework', 'collar'];
 
-export const ITEM_NAMES = { ball: 'Tennis Ball', toy: 'Chew Toy', bone: 'Golden Bone', frisbee: 'Red Frisbee' };
+export const ITEM_NAMES = { ball: 'Tennis Ball', toy: 'Chew Toy', bone: 'Golden Bone', frisbee: 'Red Frisbee', firework: 'Firework', collar: 'Golden Collar' };
 
 export const BALL = {
   speed: 45,            // m/s, roughly 2.5x a sprinting dog
@@ -33,6 +41,7 @@ export const TOY = {
 export const FRISBEE = {
   speed: 34,            // m/s: faster than a sprinting dog, catchable only by a boosted one for a while
   turnRate: 3.4,        // radians per second it can turn to follow its target round corners
+  closeTurn: 1.3,       // close to its target it turns as sharply as it needs to reach it, and this much over
   duration: 6.0,        // seconds before it gives up
   launchAhead: 2.5,
   height: 1.0,          // flies this far above the dog it is chasing
@@ -42,27 +51,56 @@ export const FRISBEE = {
   tickMs: 50,           // the server moves it (and tells everyone where it is) this often
 };
 
+export const FIREWORK = {
+  speed: 60,            // m/s: over three times a sprinting dog, so the leader's lead does not last long
+  launchAhead: 3,       // starts this far up the road from the dog that lights it
+  height: 1.4,          // flies this far above the road
+  radius: 2.6,          // knocks over a dog whose centre it passes this close to (the road is 11-16 m wide: keep to the side)
+  homeWithin: 35,       // this close to the leader it leaves the road's line and goes straight for them
+  blastRadius: 6,       // the burst catches every dog this close to where it goes off
+  duration: 14,         // seconds before it burns out (about 840 m of road)
+  noTargetSeconds: 1.5, // with nobody to chase (the dog that lit it now leads) it burns out this soon
+  tickMs: 50,           // the server moves it (and tells everyone where it is) this often
+};
+
+export const COLLAR = {
+  durationMs: 5000,     // how long the golden shield lasts once the collar is on
+};
+
+// What a golden bone does to the dog that eats it (the item, or one picked up off the road)
+export const BONE_BOOST = {
+  speedMultiplier: 1.3,       // top speed while boosted (brief: ~1.25; raised to be clearly felt)
+  accelerationMultiplier: 1.8,// so the extra speed arrives quickly
+  instantKick: 0.8,           // share of the extra top speed given at once on pickup
+  duration: 2.0,              // seconds at full boost
+  easeOut: 0.5,               // seconds to blend back to normal afterwards
+};
+
 export const HIT = {
   ballStunMs: 1100,     // how long a hit dog is knocked about
   toyStunMs: 1500,
+  fireworkStunMs: 1800,
   immuneMs: 1500,       // a hit dog cannot be hit again for this long
 };
 
 /**
  * The odds of each item from a Treat Box, by place in the race (kart-racer style: the further back
- * you are, the more likely a golden bone).  The leader (or a solo racer) never gets a bone or a
- * frisbee; last place never gets a chew toy.  `behind` runs 0 (2nd) .. 1 (last) for everyone else:
- *   bone 40 % in 2nd, rising to 70 % in last;  frisbee 25 % (20 % in last);  the rest is split
- *   between ball and chew toy (last place: 10 % ball).
- *   e.g. 5 racers: 1st never a bone, 2nd 40 %, 3rd 50 %, 4th 60 %, last 70 % bone.
+ * you are, the better the help).  The leader (or a solo racer) only ever gets a ball or a chew toy:
+ * never a bone, a frisbee, a firework or a golden collar.  Last place never gets a chew toy.
+ * `behind` runs 0 (2nd) .. 1 (last) for everyone else:
+ *   firework 4 % in 2nd, rising to 12 % in last;  golden collar 10 %;
+ *   the rest is shared out as before: bone 40 % of it in 2nd, rising to 70 % in last; frisbee 25 %
+ *   (20 % in last); what is left split between ball and chew toy (last place: 10 % ball).
+ *   e.g. 5 racers, share of all boxes: firework 0, 4, 7, 9, 12 %; bone 0, 34, 42, 49, 55 %.
  */
 export function itemOdds(place, racers) {
-  if (place <= 1 || racers <= 1) return { ball: 0.5, toy: 0.5, bone: 0, frisbee: 0 };   // nobody ahead to lock on to
+  if (place <= 1 || racers <= 1) return { ball: 0.5, toy: 0.5, bone: 0, frisbee: 0, firework: 0, collar: 0 };   // nobody ahead
   const behind = racers <= 2 ? 1 : (place - 2) / (racers - 2);
+  const firework = 0.04 + 0.08 * behind, collar = 0.1, rest = 1 - firework - collar;
   const bone = place >= racers ? 0.7 : 0.4 + 0.3 * behind;
-  if (place >= racers) return { ball: 0.1, toy: 0, bone, frisbee: 0.2 };
-  const frisbee = 0.25;
-  return { ball: (1 - bone - frisbee) / 2, toy: (1 - bone - frisbee) / 2, bone, frisbee };
+  const frisbee = place >= racers ? 0.2 : 0.25;
+  const ball = place >= racers ? 0.1 : (1 - bone - frisbee) / 2, toy = place >= racers ? 0 : ball;
+  return { ball: ball * rest, toy: toy * rest, bone: bone * rest, frisbee: frisbee * rest, firework, collar };
 }
 
 /** Which items a dog can be given, from its place in the race. */
@@ -107,16 +145,24 @@ export function distanceToSegment(p, a, b) {
 }
 
 /**
- * One step of a frisbee's chase: turn towards the target (at most turnRate), fly on, and ease its
- * height towards the target's.  f = { position: [x, y, z], yaw }; target = [x, y, z] or null (no
- * target: it flies straight).  Returns the new { position, yaw }.
+ * One step of a frisbee's chase: turn towards the target, fly on, and ease its height towards the
+ * target's.  f = { position: [x, y, z], yaw }; target = [x, y, z] or null (no target: it flies
+ * straight).  Returns the new { position, yaw }.
+ *
+ * It turns at turnRate, which at its speed is a circle 10 m in radius: a dog nearer than that and off
+ * to one side (running alongside the thrower, say) is inside the circle, and the frisbee would swing
+ * out wide behind and come round again.  So close in it turns as sharply as it has to to get there.
  */
 export function stepFrisbee(f, target, dt) {
   let yaw = f.yaw, y = f.position[1];
   if (target) {
     const want = Math.atan2(target[0] - f.position[0], target[2] - f.position[2]);
     const turn = Math.atan2(Math.sin(want - yaw), Math.cos(want - yaw));
-    yaw += Math.max(-FRISBEE.turnRate * dt, Math.min(FRISBEE.turnRate * dt, turn));
+    const away = Math.hypot(target[0] - f.position[0], target[2] - f.position[2]);
+    // (a turn of radius r reaches a point `away` off at an angle `turn` if away >= 2 r sin(turn))
+    const sharpest = FRISBEE.speed * 2 * Math.sin(Math.min(Math.abs(turn), Math.PI / 2)) / Math.max(away, 0.5) * FRISBEE.closeTurn;
+    const rate = Math.max(FRISBEE.turnRate, sharpest) * dt;
+    yaw += Math.max(-rate, Math.min(rate, turn));
     y += (target[1] + FRISBEE.height - y) * Math.min(1, FRISBEE.climbRate * dt);
   }
   const d = FRISBEE.speed * dt;

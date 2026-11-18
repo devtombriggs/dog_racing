@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 import { env } from 'node:process';
-import { MAPS } from '../shared/maps.js';
+import { MAPS, PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 import { FARMYARD as FARM } from '../shared/farmData.js';
-import { TREAT_BOXES, TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
+import { TREAT_BOXES, TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { forwardOf } from '../shared/items.js';
-import { racingLineAt, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
+import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
+import { BURROWS, BURROW_CHECKPOINTS } from '../shared/burrows.js';
 
 // Exercise the real socket handlers in memory, without binding a network port.
 let server;
@@ -20,6 +21,8 @@ class TestServer {
   }
 }
 mock.module('socket.io', { exports: { Server: TestServer } });
+// (a single-player game starts with four computer dogs: the tests of the rules race alone unless they ask for them)
+env.SOLO_BOTS = '0';
 await import('../server/server.js');
 
 let nextId = 0;
@@ -237,7 +240,7 @@ for (const [mapId, map] of Object.entries(MAPS)) {
       move([last.x, last.y ?? 0, last.z]);
       for (const checkpoint of map.checkpoints) {
         if (checkpoint.launchLanding) {
-          const T = TREAT_ROAD;
+          const T = PROCEDURAL_TRACKS[mapId];              // (Treat Road's catapult, the Water Park's slide)
           for (const s of [T.launch.padStart + 1, T.launch.takeoffS + 0.1]) {
             const p=T.pointAt(s); move([p.x,p.y,p.z]);
           }
@@ -405,7 +408,7 @@ test('Treat Road launch is forward-only, required, server-controlled and rejects
 });
 
 
-test('treat boxes hide for the whole room for exactly five seconds and can be collected again', context => {
+test('treat boxes hide for the whole room for exactly their respawn time (2.5 s) and can be collected again', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const host = client(), guest = client();
   const room = host.call('hostGame', { mapId: 'treat_road' }).room;
@@ -423,7 +426,8 @@ test('treat boxes hide for the whole room for exactly five seconds and can be co
   const changes = () => server.events.filter(e => e.room === room.code && e.event === 'treatBoxChanged' && e.data.id === box.id);
   move(guest,box.groundPosition);
   assert.equal(changes().length,1,'second player cannot collect or extend a hidden box');
-  context.mock.timers.tick(4999);
+  assert.equal(TREAT_BOX_RESPAWN_MS, 2500);
+  context.mock.timers.tick(TREAT_BOX_RESPAWN_MS - 1);
   assert.equal(changes().length,1);
   context.mock.timers.tick(1);
   assert.deepEqual(changes().at(-1).data,{id:box.id,visible:true});
@@ -563,7 +567,7 @@ test('treat boxes give one item by race place; balls, chew toys and bones do the
   move(tom, boxes[1].groundPosition);
   assert.equal(events('itemChanged').filter(e => e.playerId === tom.id).length, 1, 'a second box gives nothing while holding');
   assert.ok(events('treatBoxChanged').some(e => e.id === boxes[1].id && !e.visible), 'but the box is still taken');
-  roll = 0.5;           // last place: 10 % ball, 70 % bone, 20 % frisbee
+  roll = 0.5;           // last place: ball below 8 %, then bone up to 62 %
   move(sam, boxes[2].groundPosition);
   assert.deepEqual(events('itemChanged').at(-1), { playerId: sam.id, item: 'bone' });
 
@@ -634,7 +638,7 @@ test('red frisbee: chases the dog directly ahead round a corner, flies through a
   // Berri leads (two checkpoints), Tom 2nd (one), Sam last
   move(berri, cp(0)); move(berri, cp(1));
   move(tom, cp(0));
-  context.mock.method(Math, 'random', () => 0.9);          // 2nd of 3: 40 % bone, then 25 % frisbee at the top
+  context.mock.method(Math, 'random', () => 0.8);          // 2nd of 3: ball, toy and bone below 64 %, then frisbee up to 86 %
   move(tom, boxes[0].groundPosition);
   assert.equal(events('itemChanged').at(-1).item, 'frisbee');
   // Tom stands still facing +Z; Berri is 30 m away to the side (+X): it must turn to get her.
@@ -660,6 +664,78 @@ test('red frisbee: chases the dog directly ahead round a corner, flies through a
   for (const p of [tom, berri, sam]) p.call('leaveGame');
 });
 
+test('chew toys: one stops a frisbee, a ball knocks one off the road, and a dog in its special sweeps one aside unharmed', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client(), sam = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  tom.call('selectDog', { dog: 'black_lab' }); berri.call('selectDog', { dog: 'gsp' }); sam.call('selectDog', { dog: 'ralph' });
+  tom.call('startRace');
+  for (const p of [tom, berri, sam]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
+  const ahead = (from, d, side = 0) => [from[0] + side, from[1], from[2] + d];
+  let roll = 0;
+  context.mock.method(Math, 'random', () => roll);
+  // Berri leads (two checkpoints), Tom is 2nd (one), Sam last.  The leader's box is a ball or a chew toy.
+  move(berri, cp(0)); move(berri, cp(1));
+  move(tom, cp(0));
+  const giveBerriToy = (box) => { roll = 0.99; move(berri, box.groundPosition); assert.equal(events('itemChanged').at(-1).item, 'toy'); };
+  const dropToy = (at) => { move(berri, at, 0); berri.call('useItem'); return events('hazardPlaced').at(-1); };
+
+  // ----- a toy between the thrower and the dog the frisbee is after: the frisbee stops there, and both are gone
+  giveBerriToy(boxes[0]);
+  roll = 0.8;                                               // 2nd of 3: the frisbee
+  move(tom, boxes[1].groundPosition, 0);
+  assert.equal(events('itemChanged').at(-1).item, 'frisbee');
+  const spot = boxes[1].groundPosition;
+  let toy = dropToy(ahead(spot, 30));                      // (it lands 3.5 m behind her, on the frisbee's way to her)
+  tom.call('useItem');
+  const frisbee = events('frisbeeThrown').at(-1);
+  assert.equal(frisbee.target, berri.id);
+  for (let i = 0; i < 40 && !events('frisbeeGone').length && !events('frisbeeHit').length; i++) context.mock.timers.tick(50);
+  assert.equal(events('frisbeeHit').length, 0, 'it never reached her');
+  assert.equal(events('frisbeeGone').at(-1).id, frisbee.id);
+  assert.deepEqual(events('hazardRemoved').at(-1), { id: toy.id, hitBy: 'frisbee' });
+  assert.equal(events('playerHit').length, 0);
+
+  // ----- a ball thrown at a toy knocks it off the road, and is spent
+  giveBerriToy(boxes[3]);
+  roll = 0.12;                                              // 2nd of 3: too high for the special (10 %), still a ball (15 %)
+  move(tom, boxes[4].groundPosition, 0);
+  assert.equal(events('itemChanged').at(-1).item, 'ball');
+  toy = dropToy(ahead(boxes[4].groundPosition, 23.5));     // the toy: 20 m in front of Tom
+  tom.call('useItem');
+  const ball = events('ballThrown').at(-1);
+  context.mock.timers.tick(400);
+  move(sam, MAPS.wendover.startPositions[2].position);     // (anyone's move has the server look at what is flying)
+  assert.deepEqual(events('ballHit').at(-1), { id: ball.id, position: events('ballHit').at(-1).position });
+  assert.deepEqual(events('hazardRemoved').at(-1), { id: toy.id, hitBy: 'ball' });
+  assert.equal(events('playerHit').length, 0);
+  // ...so Berri, standing just beyond where the toy was, is not hit by it
+  context.mock.timers.tick(100);
+  move(berri, ahead(boxes[4].groundPosition, 23.5));
+  assert.equal(events('playerHit').length, 0, 'the ball went with the toy');
+
+  // ----- Tom on Poppy's wave passes a toy: within the wave's reach it is swept aside, and he surfs on
+  giveBerriToy(boxes[6]);
+  roll = 0;                                                 // anyone but the leader: the special
+  move(tom, boxes[7].groundPosition, 0);
+  assert.equal(events('itemChanged').at(-1).item, 'special');
+  toy = dropToy(ahead(boxes[7].groundPosition, 40));
+  tom.call('useItem');
+  assert.equal(events('specialStarted').at(-1).kind, 'wave');
+  move(tom, ahead(toy.position, -1, 2.2), 0);              // beside it, wider than a dog would trip on it
+  assert.deepEqual(events('hazardRemoved').at(-1), { id: toy.id, hitBy: tom.id });
+  assert.equal(events('playerHit').length, 0, 'not knocked over');
+  assert.equal(events('specialEnded').length, 0, 'still on the wave');
+  for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
 test('red frisbee: if someone overtakes the thrower while it flies, it goes after them instead', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
   const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
@@ -676,7 +752,7 @@ test('red frisbee: if someone overtakes the thrower while it flies, it goes afte
   const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
   move(berri, cp(0)); move(berri, cp(1)); move(berri, cp(2));       // Berri well ahead
   move(tom, cp(0));                                                   // Tom 2nd, Sam 3rd
-  context.mock.method(Math, 'random', () => 0.9);
+  context.mock.method(Math, 'random', () => 0.8);
   move(tom, boxes[0].groundPosition);
   assert.equal(events('itemChanged').at(-1).item, 'frisbee');
   const at = boxes[0].groundPosition;
@@ -703,7 +779,7 @@ test('red frisbee: gives up after its time if it cannot reach its target', conte
   tom.call('startRace'); tom.call('raceLoaded'); berri.call('raceLoaded');
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
   const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
-  context.mock.method(Math, 'random', () => 0.95);         // 2nd of 2 is last: 20 % frisbee at the top
+  context.mock.method(Math, 'random', () => 0.7);          // 2nd of 2 is last: frisbee from 62 % to 78 %
   berri.call('playerMove', { position: boxes[0].groundPosition, rotation: 0, animation: 'Run' });
   assert.equal(events('itemChanged').at(-1).item, 'frisbee');
   // Berri is 2nd, so it locks on to Tom; Tom is 400 m away, so it runs out of time before it gets there
@@ -714,6 +790,141 @@ test('red frisbee: gives up after its time if it cannot reach its target', conte
   context.mock.timers.tick(6100);
   assert.deepEqual(events('frisbeeGone').map(e => e.id), [thrown.id], 'it gives up');
   assert.equal(events('frisbeeHit').length, 0);
+  for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+test('firework: flies up the road to the leader, knocks over a dog it passes, bursts on the leader, spares the dog that lit it', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client(), sam = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' }); sam.call('selectDog', { dog: 'pablo' });
+  tom.call('startRace');
+  for (const p of [tom, berri, sam]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
+  const road = (s, lateral = 0) => { const p = PICKUP_PATHS.wendover.pointAt(s, lateral); return [p.x, p.y, p.z]; };
+  // Berri leads (two checkpoints), Sam is 2nd (one), Tom last
+  move(berri, cp(0)); move(berri, cp(1));
+  move(sam, cp(0));
+  let roll = 0;
+  context.mock.method(Math, 'random', () => roll);
+  move(berri, boxes[1].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'ball', 'the leader never gets a firework or a collar: the lowest roll is a ball...');
+  berri.call('useItem');
+  context.mock.timers.tick(3000);                          // (that ball flies off and is gone)
+  roll = 0.999;
+  move(berri, boxes[2].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'toy', '...and the highest a chew toy');
+  roll = 0.85;                                             // last of 3: frisbee up to 78 %, firework up to 90 %, then the collar
+  move(tom, boxes[0].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'firework');
+
+  // All three on the road: Tom at 250 m, Sam in the middle of the road at 300 m, Berri out wide at 420 m
+  move(tom, road(250)); move(sam, road(300)); move(berri, road(420, 4));
+  tom.call('useItem');
+  const lit = events('fireworkLaunched').at(-1);
+  assert.equal(lit.owner, tom.id);
+  assert.equal(lit.target, berri.id, 'after the dog in first place, not the one directly ahead');
+  for (let i = 0; i < 100 && !events('fireworkExploded').length; i++) context.mock.timers.tick(50);
+  assert.ok(events('fireworksMoved').length > 3, 'everyone is told where it is as it flies');
+  assert.deepEqual(events('fireworkPassed').map(e => e.playerId), [sam.id], 'Sam was in its way');
+  const burst = events('fireworkExploded').at(-1);
+  assert.equal(burst.id, lit.id);
+  assert.deepEqual(burst.playerIds, [berri.id], 'it reaches the leader even out at the side of the road');
+  const hits = events('playerHit').filter(e => e.item === 'firework');
+  assert.deepEqual(hits.map(e => ({ ...e })), [
+    { playerId: sam.id, by: tom.id, item: 'firework', stunMs: 1800 },
+    { playerId: berri.id, by: tom.id, item: 'firework', stunMs: 1800 },
+  ]);
+  assert.ok(!events('playerHit').some(e => e.playerId === tom.id), 'never the dog that lit it');
+  const moves = events('fireworksMoved').length;
+  context.mock.timers.tick(500);
+  assert.equal(events('fireworksMoved').length, moves, 'no fireworks left: the server stops moving them');
+
+  // A dog keeping to the side of the road is passed by; a dog right beside the leader is caught in the burst
+  context.mock.timers.tick(6000);
+  move(tom, boxes[0].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'firework');
+  move(tom, road(250)); move(sam, road(300, 4.5)); move(berri, road(420));
+  const pablo = sam;
+  tom.call('useItem');
+  context.mock.timers.tick(1000);
+  move(pablo, road(418, 3));                               // Sam arrives beside Berri as it comes in
+  for (let i = 0; i < 100 && events('fireworkExploded').length < 2; i++) context.mock.timers.tick(50);
+  assert.equal(events('fireworkPassed').length, 1, 'it did not turn aside for Sam at the edge of the road');
+  assert.deepEqual(new Set(events('fireworkExploded').at(-1).playerIds), new Set([berri.id, sam.id]), 'the burst catches the dog beside the leader');
+
+  // If the dog that lit it is in front by then, there is nobody to chase: it burns out
+  context.mock.timers.tick(6000);
+  move(tom, boxes[0].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'firework');
+  for (let i = 0; i < map.checkpoints.length; i++) move(tom, cp(i));     // Tom takes the lead
+  tom.call('useItem');
+  assert.equal(events('fireworkLaunched').at(-1).target, null);
+  context.mock.timers.tick(2000);
+  assert.equal(events('fireworkGone').length, 1);
+  assert.equal(events('fireworkExploded').length, 2, 'and hurts nobody');
+  for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
+test('golden collar: five seconds in which nothing thrown knocks you over, but a special still does', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'second_dog' });
+  tom.call('startRace'); tom.call('raceLoaded'); berri.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const at = boxes[0].groundPosition, ahead = d => [at[0], at[1], at[2] + d];
+  // Berri leads; Tom, last of two, rolls a collar
+  move(berri, [map.checkpoints[0].x, 0, map.checkpoints[0].z]);
+  let roll = 0.95;
+  context.mock.method(Math, 'random', () => roll);
+  move(tom, boxes[1].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'collar');
+  // Berri throws a ball at Tom, 20 m in front of her, just after he puts the collar on
+  const throwBallAtTom = () => {
+    roll = 0;
+    move(berri, at, 0);
+    assert.equal(events('itemChanged').at(-1).item, 'ball');
+    move(tom, ahead(20));
+    berri.call('useItem');
+    context.mock.timers.tick(450);
+    move(tom, ahead(20.5));
+  };
+  tom.call('useItem');
+  assert.deepEqual(events('shieldStarted').at(-1), { playerId: tom.id, durationMs: 5000 });
+  throwBallAtTom();
+  assert.equal(events('ballHit').length, 1, 'the ball is used up on the shield');
+  assert.deepEqual(events('hitBlocked').at(-1), { playerId: tom.id, by: berri.id, item: 'ball' });
+  assert.equal(events('playerHit').length, 0, 'and Tom stays on his feet');
+
+  // Meela's Zoomies is a special: it goes straight through the shield
+  roll = 0;                                                // every box now gives the special to a dog that is behind
+  move(tom, [map.checkpoints[0].x, 0, map.checkpoints[0].z]); move(tom, [map.checkpoints[1].x, 0, map.checkpoints[1].z]);   // Tom leads now
+  move(berri, boxes[2].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'special');
+  move(tom, ahead(60)); move(berri, ahead(59));
+  berri.call('useItem');
+  move(berri, ahead(59.5));
+  assert.deepEqual({ ...events('playerHit').at(-1) }, { playerId: tom.id, by: berri.id, item: 'special', stunMs: 1300 });
+
+  // Once the five seconds are up a ball knocks him over again
+  context.mock.timers.tick(6000);
+  for (let i = 0; i < map.checkpoints.length; i++) move(berri, [map.checkpoints[i].x, 0, map.checkpoints[i].z]);   // Berri back in front
+  const before = events('playerHit').length;
+  throwBallAtTom();
+  assert.equal(events('playerHit').length, before + 1);
+  assert.equal(events('playerHit').at(-1).item, 'ball');
+  assert.equal(events('hitBlocked').length, 1);
   for (const p of [tom, berri]) p.call('leaveGame');
 });
 
@@ -885,8 +1096,9 @@ test('rescue on a generated track bumps the move revision so stale packets are i
 
 // Wendover's shortcuts transport only Ralph, credit only the skipped part of the
 // lap, and use revisions just like rescues to discard packets still in flight.
-test('Wendover: Ralph can use all four burrows on all three laps without breaking checkpoints', async context => {
-  const { WENDOVER: W, woodlandDistanceAt } = await import('../shared/wendoverData.js');
+test('Wendover: Ralph can use two of the four burrows on each of the three laps without breaking checkpoints', async context => {
+  const { woodlandDistanceAt } = await import('../shared/wendoverData.js');
+  const entered=()=>server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowEntered').length;
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const host=client(), room=host.call('hostGame',{mapId:'wendover',singlePlayer:true}).room;
   host.call('selectDog',{dog:'ralph'});host.call('startRace');host.call('raceLoaded');
@@ -897,12 +1109,15 @@ test('Wendover: Ralph can use all four burrows on all three laps without breakin
   const approach=(t,d)=>t.entry.map((v,i)=>v+d*(i===0?Math.sin(t.entryYaw):i===2?Math.cos(t.entryYaw):0));
   for(let lap=1;lap<=3;lap++) {
     let cp=0;
-    for(const t of W.tunnels) {
+    for(const [n,t] of BURROWS.wendover.entries()) {
       while(cp<cps.length&&cps[cp].s<t.entryS){const c=cps[cp++];move([c.x,0,c.z]);}
+      const before=entered();
       move(approach(t,-1));move(approach(t,.1));
+      // two a lap: the third and fourth mouths he comes to are just holes in the bank
+      if(n>=2){assert.equal(entered(),before,'two burrows a lap');continue;}
       assert.equal(latest(room.code,'playerBurrowEntered').tunnelId,t.id);
       assert.equal(host.call('requestRescue').success,false,'rescue cannot interrupt a burrow');
-      context.mock.timers.tick(1099);move(t.exit);
+      context.mock.timers.tick(t.duration*1000-1);move(t.exit);
       assert.deepEqual(latest(room.code,'playerMoved').position,t.entry,'cannot escape before transit completes');
       context.mock.timers.tick(1);move(t.entry);
       const exit=latest(room.code,'playerBurrowExited');
@@ -912,9 +1127,9 @@ test('Wendover: Ralph can use all four burrows on all three laps without breakin
       while(cp<cps.length&&cps[cp].s<t.exitS)cp++;
       assert.equal(latest(room.code,'raceProgress').checkpoint,cp);
       assert.equal(latest(room.code,'raceProgress').lap,lap);
-      const count=server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowEntered').length;
+      const count=entered();
       move(approach(t,-1));move(approach(t,.1));
-      assert.equal(server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowEntered').length,count,'one use per lap');
+      assert.equal(entered(),count,'one use per lap');
       move(t.exit);
     }
     while(cp<cps.length){const c=cps[cp++];move([c.x,0,c.z]);}
@@ -922,7 +1137,7 @@ test('Wendover: Ralph can use all four burrows on all three laps without breakin
     move(finish(-2));move(finish(2));
     assert.equal(latest(room.code,'raceProgress').finished,lap===3);
   }
-  assert.equal(server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowExited').length,12);
+  assert.equal(server.events.filter(e=>e.room===room.code&&e.event==='playerBurrowExited').length,6);
   host.call('leaveGame');
 });
 
@@ -1017,19 +1232,20 @@ test('specials: not for the leader; pheasants land on every other dog, Ralph fli
   for (const p of [tom, berri, sam]) p.call('leaveGame');
 });
 
-test('voice chat: off unless the server is started with it; then messages only pass between players in the same room', context => {
+test('voice chat: on unless the server is started with VOICE_CHAT=0; messages only pass between players in the same room', context => {
   const tom = client(), berri = client(), stranger = client();
   const room = tom.call('hostGame', { name: 'Tom' }).room;
   berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
   stranger.call('hostGame', { name: 'Elsewhere' });
   assert.equal(room.players[0].voice, false, 'off until asked for');
-  // switched off (the default): the server says nothing and passes nothing on
+  // switched off (VOICE_CHAT=0): the server says nothing and passes nothing on
+  env.VOICE_CHAT = '0';
+  context.after(() => { delete env.VOICE_CHAT; });
   const quiet = server.events.length;
   tom.call('setVoice', { enabled: true });
   tom.call('voiceSignal', { to: berri.id, signal: { description: { type: 'offer', sdp: 'x' } } });
   assert.equal(server.events.length, quiet, 'ignored while voice chat is off');
-  env.VOICE_CHAT = '1';
-  context.after(() => { delete env.VOICE_CHAT; });
+  delete env.VOICE_CHAT;                                   // the default: on
   tom.call('setVoice', { enabled: true });
   assert.deepEqual(latest(room.code, 'voiceChanged'), { playerId: tom.id, enabled: true });
   const joined = client().call('joinGame', { roomCode: room.code, name: 'Late' });
@@ -1093,7 +1309,7 @@ test('Modbury broken bridges: running into the break is a fall, a jump carries o
   host.call('leaveGame'); guest.call('leaveGame');
 });
 
-test('after the race: the rest get 90 s once the first dog is home, then everyone returns to the lobby together and can race again', context => {
+test('after the race: the rest get a minute once the first dog is home, then everyone returns to the lobby together and can race again', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const map = MAPS.wendover;
   const tom = client(), berri = client(), watcher = client();
@@ -1137,12 +1353,12 @@ test('after the race: the rest get 90 s once the first dog is home, then everyon
   assert.ok(latest(watcher.id, 'lobbiesUpdated').some(l => l.code === room.code), 'the room is listed again for others to join');
   assert.equal(berri.call('selectDog', { dog: 'ralph' }).success, true, 'a dog can be changed for the next race');
 
-  // race two: Berri never finishes; 90 s after Tom is home the race ends anyway, and anyone can skip the wait
+  // race two: Berri never finishes; a minute after Tom is home the race ends anyway, and anyone can skip the wait
   berri.call('setReady', { ready: true });
   race();
   assert.equal(latest(room.code, 'raceStarted').players.length, 2);
   runRace(tom);
-  context.mock.timers.tick(89999);
+  context.mock.timers.tick(59999);
   assert.equal(count('raceEnded'), 1, 'still waiting for Berri');
   context.mock.timers.tick(1);
   assert.equal(count('raceEnded'), 2, 'time is up');
@@ -1196,4 +1412,267 @@ test('Muddy Paws Farm: the tractor knocks over a dog in its way, a dog is not hi
   move(p(c.s));
   assert.ok(FARM.query(...[events('playerRespawned').at(-1).position[0], events('playerRespawned').at(-1).position[2]]).onTrack);
   host.call('leaveGame');
+});
+
+test('computer dogs: the host sets how many and how good, they take the free dogs and seats, race, and leave at the lobby', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const host = client(), guest = client();
+  const room = host.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  assert.deepEqual(room.bots, { count: 0, level: 'medium' }, 'none until the host asks');
+  guest.call('joinGame', { roomCode: room.code, name: 'Sarah' });
+  assert.equal(guest.call('setBots', { count: 2 }).success, false, 'only the host');
+  assert.equal(host.call('setBots', { count: 9, level: 'hard' }).success, true);
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').bots, { count: 4, level: 'hard' }, 'four at most');
+  host.call('setBots', { level: 'impossible' });
+  assert.equal(latest(room.code, 'lobbyUpdated').bots.level, 'hard', 'a level that does not exist is ignored');
+  assert.equal(latest(room.code, 'lobbyUpdated').players.length, 2, 'in the lobby there are only players');
+  host.call('selectDog', { dog: 'gsp' });
+  guest.call('selectDog', { dog: 'ralph' });
+  assert.equal(host.call('startRace').success, true);
+
+  // two players and four asked for: three join, on the three dogs and the three grid places left
+  const start = latest(room.code, 'raceStarted');
+  const bots = start.players.filter(player => player.bot);
+  assert.equal(start.players.length, 5);
+  assert.equal(bots.length, 3);
+  assert.deepEqual(start.players.map(player => player.dog).sort(), ['black_lab', 'gsp', 'pablo', 'ralph', 'second_dog']);
+  assert.deepEqual(start.players.map(player => player.slot).sort(), [0, 1, 2, 3, 4]);
+  start.players.forEach((player, index) => assert.deepEqual(player.position, MAPS.wendover.startPositions[index].position));
+  assert.ok(bots.every(bot => bot.loaded && bot.level === 'hard' && bot.name === 'CPU'));
+  // the countdown waits for the players only
+  host.call('raceLoaded'); guest.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  assert.ok(latest(room.code, 'raceGo'));
+
+  // they run: ten seconds on, each is well up the road, and the board has all five dogs on it
+  for (let i = 0; i < 200; i++) context.mock.timers.tick(50);
+  const moved = id => server.events.findLast(e => e.room === room.code && e.event === 'playerMoved' && e.data.playerId === id)?.data;
+  for (const bot of bots) {
+    const at = moved(bot.id), line = racingLineAt('wendover', at.position[0], at.position[2]);
+    assert.ok(line.s > 60 && line.s < 250, `${bot.dog} is ${line.s} m up the road`);
+    assert.ok(line.distance < line.halfWidth, `${bot.dog} is on the road`);
+  }
+  assert.equal(latest(room.code, 'raceStandings').standings.length, 5);
+  assert.ok(latest(room.code, 'raceStandings').standings.slice(0, 3).every(entry => entry.playerId.startsWith('bot-')), 'ahead of two players standing on the grid');
+
+  // the race is over when the players are home: the computer dogs keep nobody waiting
+  const map = MAPS.wendover;
+  const finishPoint = distance => map.startFinish.position.map((value, axis) => value + distance * map.startFinish.forward[axis]);
+  const lapOf = socket => {
+    const move = position => socket.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: 0 });
+    for (let lap = 1; lap <= 3; lap++) {
+      for (const checkpoint of map.checkpoints) move([checkpoint.x, 0, checkpoint.z]);
+      move(finishPoint(-2)); move(finishPoint(2));
+    }
+  };
+  lapOf(host);
+  assert.equal(server.events.filter(e => e.room === room.code && e.event === 'raceEnded').length, 0, 'Sarah is still racing');
+  lapOf(guest);
+  assert.equal(server.events.filter(e => e.room === room.code && e.event === 'raceEnded').length, 1);
+  const board = latest(room.code, 'raceStandings').standings;
+  assert.deepEqual(board.slice(0, 2).map(entry => entry.name), ['Tom', 'Sarah']);
+  assert.ok(board.slice(2).every(entry => !entry.finished));
+
+  // back in the lobby they are gone, and the room is the two players again
+  host.call('returnToLobby');
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').players.map(player => player.name), ['Tom', 'Sarah']);
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').bots, { count: 4, level: 'hard' }, 'the choice is kept for the next race');
+  // a room with only computer dogs left in it is an empty room
+  assert.equal(host.call('startRace').success, true);
+  host.call('leaveGame'); guest.call('leaveGame');
+  assert.ok(!lobbies().some(lobby => lobby.code === room.code));
+  const before = server.events.length;
+  context.mock.timers.tick(5000);
+  assert.equal(server.events.slice(before).filter(e => e.room === room.code).length, 0, 'nothing runs on in a room everyone has left');
+});
+
+test('nothing knocks a dog out of its special: a ball thrown at Pablo on his sled bounces off and he rides on', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  tom.call('startRace');
+  for (const p of [tom, berri]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  let roll = 0;
+  context.mock.method(Math, 'random', () => roll);
+  // Tom leads and gets a ball; Berri, behind, gets her special and starts it
+  move(tom, [map.checkpoints[0].x, 0, map.checkpoints[0].z]);
+  move(tom, boxes[0].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'ball');
+  move(berri, boxes[3].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'special');
+  berri.call('useItem');
+  assert.equal(events('specialStarted').at(-1).kind, 'sled');
+  // she is 20 m in front of him, in line: the ball reaches her and is gone, and she is not knocked over
+  const at = boxes[0].groundPosition;
+  move(tom, at, 0);
+  move(berri, [at[0], at[1], at[2] + 20]);
+  tom.call('useItem');
+  const ball = events('ballThrown').at(-1);
+  context.mock.timers.tick(450);
+  move(berri, [at[0], at[1], at[2] + 20.5]);
+  assert.equal(events('ballHit').at(-1).id, ball.id, 'the ball is used up');
+  assert.equal(events('playerHit').length, 0);
+  assert.equal(events('specialEnded').length, 0, 'still on the sled');
+  // once it is over she can be knocked over like anyone
+  context.mock.timers.tick(10000);
+  assert.equal(events('specialEnded').at(-1).reason, 'done');
+  for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+test('Ralph has two short burrows on every map but Treat Road: in at the side of the road, out 45 m on, once a lap, nobody else', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const map = MAPS.farmyard, tunnel = BURROWS.farmyard[0], marks = BURROW_CHECKPOINTS.farmyard;
+  const ralph = client(), pippa = client();
+  const room = ralph.call('hostGame', { mapId: 'farmyard', name: 'Ralph' }).room;
+  pippa.call('joinGame', { roomCode: room.code, name: 'Pippa' });
+  ralph.call('selectDog', { dog: 'ralph' }); pippa.call('selectDog', { dog: 'gsp' });
+  ralph.call('startRace');
+  for (const p of [ralph, pippa]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const revision = { [ralph.id]: 0, [pippa.id]: 0 };
+  const move = (who, position) => who.call('playerMove', { position, rotation: tunnel.entryYaw, animation: 'Run', respawnRevision: revision[who.id] });
+  // both run the road as far as the burrow, then through its mouth
+  const before = marks.filter(s => s < tunnel.entryS).length;
+  const approach = d => [tunnel.entry[0] + Math.sin(tunnel.entryYaw) * d, tunnel.entry[1], tunnel.entry[2] + Math.cos(tunnel.entryYaw) * d];
+  for (const who of [pippa, ralph]) {
+    for (const checkpoint of map.checkpoints.slice(0, before)) move(who, [checkpoint.x, checkpoint.y, checkpoint.z]);
+    move(who, approach(-3)); move(who, approach(1));
+  }
+  assert.deepEqual(events('playerBurrowEntered'), [{ playerId: ralph.id, tunnelId: tunnel.id, duration: tunnel.duration }], 'Ralph only');
+  // underground his moves are not used; when the time is up he is at the far end, with the checkpoints he went under
+  move(ralph, approach(6));
+  assert.equal(events('playerBurrowExited').length, 0);
+  context.mock.timers.tick(tunnel.duration * 1000 + 1);
+  move(ralph, approach(6));
+  const out = events('playerBurrowExited').at(-1);
+  assert.deepEqual(out.position, tunnel.exit);
+  assert.equal(out.respawnRevision, 1);
+  assert.equal(out.speedMultiplier, tunnel.speedMultiplier);
+  assert.equal(server.events.findLast(e => e.event === 'raceProgress' && e.data.playerId === ralph.id).data.checkpoint, marks.filter(s => s < tunnel.exitS).length);
+  // not twice in one lap
+  revision[ralph.id] = 1;
+  move(ralph, approach(-3)); move(ralph, approach(1));
+  assert.equal(events('playerBurrowEntered').length, 1);
+  for (const p of [ralph, pippa]) p.call('leaveGame');
+
+  // where they are: two on each of the four maps, none on Treat Road, each on the road and clear of what is on it
+  assert.equal(BURROWS.treat_road, undefined);
+  assert.equal(BURROWS.wendover.length, 4);
+  for (const mapId of ['frostpeak', 'modbury_heights', 'farmyard', 'water_park']) {
+    const path = PICKUP_PATHS[mapId], track = PROCEDURAL_TRACKS[mapId];
+    assert.equal(BURROWS[mapId].length, 2, mapId);
+    for (const burrow of BURROWS[mapId]) {
+      assert.ok(Math.abs(burrow.exitS - burrow.entryS - 45) < 1e-6);
+      for (const [end, s] of [[burrow.entry, burrow.entryS], [burrow.exit, burrow.exitS]]) {
+        const line = racingLineAt(mapId, end[0], end[2], s);
+        assert.ok(line.distance < line.halfWidth && path.pointAt(s).halfWidth >= 5, `${burrow.id} is on the road, where it is wide`);
+        assert.ok(path.hazards.every(([a, b]) => s < a || s > b), `${burrow.id} is clear of the hazards`);
+        if (track) { const q = track.query(end[0], end[2]); assert.ok(q.onTrack && !q.blocked && (q.movement ?? 'run') === 'run', `${burrow.id} can be run to`); }
+        for (const box of TREAT_BOXES_BY_MAP[mapId]) assert.ok(Math.hypot(box.groundPosition[0] - end[0], box.groundPosition[2] - end[2]) > 6);
+      }
+      if (track?.launch) assert.ok(burrow.exitS < track.launch.padStart || burrow.entryS > track.launch.landingS, `${burrow.id} does not go under the jump`);
+    }
+  }
+});
+
+test('Grand Prix: four races in order with the same dogs, 10-8-6-4-2 points a race, a minute for the rest once the first is home, the winner at the end', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'frostpeak', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('setBots', { count: 1, level: 'easy' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  assert.equal(berri.call('startGrandPrix', { id: 'gp1' }).success, false, 'only the host');
+  assert.equal(tom.call('startGrandPrix', { id: 'gp9' }).success, false, 'there are two');
+  assert.equal(tom.call('startGrandPrix', { id: 'gp1' }).success, true);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const revision = { [tom.id]: 0, [berri.id]: 0 };
+  // one dog round its three laps (through Treat Road's catapult, the Water Park's slide and the mall's leap)
+  const race = (who, mapId) => {
+    const map = MAPS[mapId], track = PROCEDURAL_TRACKS[mapId];
+    const move = position => who.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: revision[who.id] });
+    const finish = d => map.startFinish.position.map((v, axis) => v + d * map.startFinish.forward[axis]);
+    for (let lap = 1; lap <= 3; lap++) {
+      for (const checkpoint of map.checkpoints) {
+        if (checkpoint.launchLanding) {
+          for (const s of [track.launch.padStart + 1, track.launch.takeoffS + 0.1]) { const p = track.pointAt(s); move([p.x, p.y, p.z]); }
+          context.mock.timers.tick(track.launch.duration * 1000 + 1);
+          move([checkpoint.x, checkpoint.y, checkpoint.z]);
+          revision[who.id] += 1;
+        }
+        move([checkpoint.x, checkpoint.y ?? 0, checkpoint.z]);
+      }
+      move(finish(-2)); move(finish(2));
+    }
+  };
+  const order = ['wendover', 'water_park', 'pet_mall', 'treat_road'];
+  let botId = null;
+  order.forEach((mapId, round) => {
+    const start = events('raceStarted').at(-1);
+    assert.equal(start.mapId, mapId, `race ${round + 1}`);
+    assert.deepEqual(start.grandPrix, { id: 'gp1', name: 'Grand Prix 1', round: round + 1, of: 4 });
+    assert.equal(start.players.length, 3);
+    const bot = start.players.find(player => player.bot);
+    botId ??= bot.id;
+    assert.equal(bot.id, botId, 'the same computer dog every race');
+    revision[tom.id] = revision[berri.id] = 0;
+    tom.call('raceLoaded'); berri.call('raceLoaded');
+    for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+    // Tom wins the odd races, Berri the even ones; the other is still out there when the minute is up
+    const winner = round % 2 ? berri : tom;
+    race(winner, mapId);
+    assert.equal(events('raceEnded').length, round, 'the others have a minute');
+    assert.deepEqual(events('finishGrace').at(-1), { ms: 60000 });
+    context.mock.timers.tick(60000);
+    assert.equal(events('raceEnded').length, round + 1);
+    const result = events('grandPrixStandings').at(-1);
+    assert.equal(result.round, round + 1);
+    assert.equal(result.final, round === 3);
+    assert.equal(result.nextMapId, order[round + 1] ?? null);
+    assert.equal(result.table.find(row => row.playerId === winner.id).gained, 10);
+    assert.deepEqual(result.table.map(row => row.gained).sort((a, b) => b - a), [10, 8, 6]);
+    if (round < 3) {
+      assert.equal(tom.call('returnToLobby').success, false, 'no leaving for the lobby in the middle of it');
+      context.mock.timers.tick(15000);
+    }
+  });
+  // two wins each: 10 + 10 and two other places apiece; the table is in points order and the winner is on top
+  const final = events('grandPrixStandings').at(-1).table;
+  assert.equal(final.reduce((sum, row) => sum + row.points, 0), 4 * (10 + 8 + 6));
+  for (let i = 1; i < final.length; i++) assert.ok(final[i - 1].points >= final[i].points);
+  assert.ok([tom.id, berri.id].includes(final[0].playerId) && final[0].points >= 32);
+  assert.deepEqual(events('raceEnded').at(-1), { returnMs: 30000, grandPrix: { id: 'gp1', name: 'Grand Prix 1', round: 4, of: 4 }, final: true });
+  // then the lobby, the computer dog gone, and a single race is a single race again
+  context.mock.timers.tick(30000);
+  const lobby = latest(room.code, 'lobbyUpdated');
+  assert.equal(lobby.status, 'lobby');
+  assert.equal(lobby.grandPrix, null);
+  assert.deepEqual(lobby.players.map(player => player.name), ['Tom', 'Berri']);
+  assert.equal(tom.call('startRace').success, true);
+  assert.equal(events('raceStarted').at(-1).grandPrix, null);
+  for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+test('Grand Prix: it can win the map vote like any map', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  tom.call('skipToMapVote');
+  assert.equal(tom.call('voteMap', { mapId: 'gp2' }).success, true);
+  assert.equal(berri.call('voteMap', { mapId: 'gp2' }).success, true);
+  assert.equal(berri.call('voteMap', { mapId: 'gp7' }).success, false);
+  context.mock.timers.tick(15000);
+  const start = latest(room.code, 'raceStarted');
+  assert.equal(start.mapId, 'farmyard');
+  assert.deepEqual(start.grandPrix, { id: 'gp2', name: 'Grand Prix 2', round: 1, of: 4 });
+  for (const p of [tom, berri]) p.call('leaveGame');
 });

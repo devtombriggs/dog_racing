@@ -2,10 +2,13 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { MAPS, DEFAULT_MAP, PROCEDURAL_TRACKS } from '../../shared/maps.js';
 import { GOLDEN_BONE_SPOTS } from '../../shared/pickupSpots.js';
-import { WENDOVER } from '../../shared/wendoverData.js';
+import { BURROWS } from '../../shared/burrows.js';
+import { createBurrowMouths } from '../tracks/burrowMouths.js';
 import { createTreatBoxes } from '../pickups/treatBoxes.js';
 import { createGoldenBones } from '../pickups/goldenBones.js';
 import { createItems } from '../pickups/items.js';
+import { createFireworks } from '../pickups/firework.js';
+import { createShields } from '../pickups/collar.js';
 import { createSpecials } from '../abilities/specials.js';
 import { createMinimap } from '../minimap.js';
 import { formatTime } from '../utils/format.js';
@@ -65,6 +68,11 @@ export class Race {
     this.goldenBones = createGoldenBones({ scene, renderer, placements: GOLDEN_BONE_SPOTS[mapId] ?? [] });
     // Items from the boxes: held above heads, thrown balls, dropped chew toys (the server decides)
     this.items = createItems({ scene, renderer });
+    // Fireworks in flight (the server flies them) and the golden shield round a dog wearing the collar
+    this.fireworks = createFireworks({ scene });
+    this.shields = createShields({ envMap: this.items.envMap });
+    // The mouths of Ralph's burrows (Wendover's are part of its model)
+    this.burrowMouths = createBurrowMouths({ scene, mapId });
     // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
     this.specials = createSpecials({
       scene,
@@ -186,7 +194,7 @@ export class Race {
   // ---------------------------------
 
   #serverEvents() {
-    const { socket, local, remotes, world, items, goldenBones, specials, treatBoxes, session } = this;
+    const { socket, local, remotes, world, items, goldenBones, specials, treatBoxes, session, fireworks, shields } = this;
     const mine = id => id === socket.id;
 
     const playerRespawned = (data) => {
@@ -199,6 +207,8 @@ export class Race {
       items.removeFrisbee(id, position);
       session.update('frisbeesIncoming', list => list.filter(f => f !== id));
     };
+
+    const fireworkEnded = id => session.update('fireworksIncoming', list => list.filter(f => f !== id));
 
     return {
       // ---------------------------------
@@ -217,6 +227,7 @@ export class Race {
         this.stage.scene.remove(remote.group);
         specials.unregister(data.playerId);
         items.setHeld(data.playerId, null);
+        shields.stop(data.playerId);
         remotes.delete(data.playerId);
       },
 
@@ -243,9 +254,8 @@ export class Race {
       },
 
       playerBurrowEntered: (data) => {
-        if (!world.woodland) return;
         if (mine(data.playerId)) {
-          const tunnel = WENDOVER.tunnels.find(t => t.id === data.tunnelId);
+          const tunnel = BURROWS[this.mapId]?.find(t => t.id === data.tunnelId);
           if (tunnel) local.enteredBurrow(tunnel);
         } else {
           remotes.get(data.playerId)?.hide();
@@ -253,7 +263,6 @@ export class Race {
       },
 
       playerBurrowExited: (data) => {
-        if (!world.woodland) return;
         playerRespawned({ ...data, rescued: true, penaltySeconds: 0 });
         if (mine(data.playerId)) local.leftBurrow(data);
       },
@@ -319,6 +328,27 @@ export class Race {
       frisbeeHit: frisbeeEnded,
       frisbeeGone: frisbeeEnded,
 
+      // Firework: the server flies it up the road to the dog in first place; we draw it, and warn that dog
+      fireworkLaunched: (data) => {
+        fireworks.launch(data);
+        if (mine(data.target)) session.update('fireworksIncoming', list => [...list, data.id]);
+      },
+
+      fireworksMoved: (data) => fireworks.move(data.fireworks),
+
+      // the lead changed while it was in the air: it is after the new leader now
+      fireworkTarget: ({ id, target }) => {
+        session.update('fireworksIncoming', list => (mine(target) ? [...new Set([...list, id])] : list.filter(f => f !== id)));
+      },
+
+      fireworkPassed: ({ position }) => fireworks.pass(position),
+      fireworkExploded: ({ id, position }) => { fireworks.explode(id, position); fireworkEnded(id); },
+      fireworkGone: ({ id, position }) => { fireworks.fizzle(id, position); fireworkEnded(id); },
+
+      // Golden collar: a shield round the dog that put it on; anything that bounces off makes it flare
+      shieldStarted: ({ playerId, durationMs }) => shields.start(playerId, durationMs),
+      hitBlocked: ({ playerId }) => shields.blocked(playerId),
+
       // ---------------------------------
       // SPECIAL ABILITIES: the server says when one starts, who it knocks over and when it ends
       // ---------------------------------
@@ -362,6 +392,8 @@ export class Race {
     const itemAnchors = new Map([[socket.id, local.bones.head ?? player]]);
     remotes.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
     this.items.update(delta, itemAnchors, world.ballGround);
+    this.fireworks.update(delta);
+    this.shields.update(delta, id => (id === socket.id ? local : remotes.get(id)));
     local.spinIfStunned();
 
     const canMove = session.raceGo && !session.raceFinished;
@@ -422,7 +454,7 @@ export class Race {
 
     remotes.forEach((remote, id) => {
       remote.update(delta, {
-        swimmingAt: position => world.poolAt(position)?.swimming,
+        swimmingAt: position => world.swimmingAt(position),
         playsOwnClips: specials.animating(id),
         runSpeed: local.runSpeed,
         sprintSpeed: local.sprintSpeed
@@ -450,6 +482,9 @@ export class Race {
     this.burrowOverlay.remove();
     this.treatBoxes.dispose();
     this.items.dispose();
+    this.fireworks.dispose();
+    this.shields.dispose();
+    this.burrowMouths.dispose();
     this.specials.dispose();
     this.minimap.dispose();
     this.goldenBones.dispose();

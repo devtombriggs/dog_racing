@@ -1,7 +1,7 @@
 import { PICKUP_PATHS, BOX_ROW_S } from './pickupSpots.js';
 
 export const TREAT_BOX_SCALE = 1.6;
-export const TREAT_BOX_RESPAWN_MS = 5000;
+export const TREAT_BOX_RESPAWN_MS = 2500;      // a taken box is back this soon
 const BOX_LIFT = 0.5;
 const PICKUP_RADIUS = 1.5;
 const LANES = [-0.66, 0, 0.66];

@@ -4,11 +4,16 @@ import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
 import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
-import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE } from '../shared/items.js';
+import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
+import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
 import { SPECIAL_ITEM, SPECIAL_HIT, specialChance, specialFor, specialTouches, pheasantFlightMs } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
-import { WENDOVER, entersBurrow, woodlandDistanceAt, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
+import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
+import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
+import { GRAND_PRIX, pointsForPlace } from '../shared/grandPrix.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
+import { createBot } from './bots.js';
+import { BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { readFileSync } from 'node:fs';
 
 const PORT = Number(env.PORT || 3001);
@@ -27,11 +32,21 @@ const LOBBY_BROWSER = 'lobby-browser';
 // For trying the specials out: ALWAYS_SPECIAL=1 makes every Treat Box give the special, even to the leader,
 // and hands every dog its special at GO and again three seconds after each use.
 const ALWAYS_SPECIAL = env.ALWAYS_SPECIAL === '1';
+// For trying one item out: FORCE_ITEM=firework (or collar, frisbee, ball, toy, bone) makes every Treat
+// Box give that item, even to the leader, and hands it to every dog at GO and three seconds after each use.
+const FORCE_ITEM = ITEM_IDS.includes(env.FORCE_ITEM) ? env.FORCE_ITEM : null;
 // After a race: once the first dog is home the rest have FINISH_GRACE_MS to finish (a dog left standing
 // cannot hold everyone up), and when the race is over everyone goes back to the lobby together after
 // LOBBY_RETURN_MS, or as soon as anyone asks.
-const FINISH_GRACE_MS = Number(env.FINISH_GRACE_MS) || 90000;      // (both can be shortened for testing)
+const FINISH_GRACE_MS = Number(env.FINISH_GRACE_MS) || 60000;      // (both can be shortened for testing)
+// A Grand Prix (shared/grandPrix.js) goes on to its next race LOBBY_RETURN_MS after each one ends, and
+// shows its final scores for GRAND_PRIX_FINAL_MS before the room goes back to the lobby.
+const GRAND_PRIX_FINAL_MS = Number(env.GRAND_PRIX_FINAL_MS) || 30000;
 const LOBBY_RETURN_MS = Number(env.LOBBY_RETURN_MS) || 15000;
+
+// Computer-controlled dogs a single-player game starts with (the player can change it): a full field
+// unless SOLO_BOTS says otherwise.
+const SOLO_BOTS = env.SOLO_BOTS === undefined ? MAX_PLAYERS - 1 : Math.max(0, Math.min(MAX_PLAYERS - 1, Number(env.SOLO_BOTS) || 0));
 
 const rooms = new Map();
 const playerRooms = new Map();
@@ -41,6 +56,15 @@ const woodlandRaceStates = new WeakMap();
 // sent to the clients as it is (a timer cannot be sent).
 const activeSpecials = new WeakMap();
 const frostpeakRaceStates = new WeakMap();
+// Ralph's burrows: the dogs underground right now ({ tunnel, startedAt }), and which burrows each dog
+// has been down this lap ("lap:id")
+const burrowRides = new WeakMap();
+const burrowsUsed = new WeakMap();
+// The computer-controlled dogs (server/bots.js): the driver of each, and how fast every dog in a race
+// is going (worked out from its moves: the computer dogs look at it)
+const botDrivers = new WeakMap();
+const dogSpeeds = new WeakMap();
+const BOT_TICK_MS = 50;            // a computer dog moves as often as a player's game reports in
 
 // Ground heights, for balls that skim down a slope instead of flying level (Frostpeak's black run)
 const BALL_GROUND = {};
@@ -50,38 +74,56 @@ for (const [mapId, map] of Object.entries(MAPS)) {
   const heights = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
   BALL_GROUND[mapId] = (x, z) => sampleGroundHeight(heights, map.heightmap, x, z);
 }
-const woodlandCheckpointDistances = MAPS.wendover.checkpoints.map(cp => woodlandDistanceAt(cp.x, cp.z));
+
+// Ralph's burrows (shared/burrows.js): he runs into the mouth of one, is underground for a moment, and
+// comes out further up the road.  Returns true while a burrow has him (going in, under, or coming out):
+// the move he sent is not used.
+function rideBurrow(room, player, data) {
+  const tunnels = BURROWS[room.mapId];
+  if (!tunnels) return false;
+  const marks = BURROW_CHECKPOINTS[room.mapId], ride = burrowRides.get(player);
+  if (ride) {
+    const { tunnel, startedAt } = ride;
+    if (Date.now() - startedAt < tunnel.duration * 1000) return true;
+    player.position = [...tunnel.exit]; player.rotation = tunnel.exitYaw; player.animation = 'Sprint';
+    // Only checkpoints along this authorised shortcut are credited. No lap or finish is skipped.
+    while (player.checkpoint < marks.length && marks[player.checkpoint] < tunnel.exitS) player.checkpoint++;
+    burrowRides.delete(player);
+    const state = raceStateOf(room, player);
+    if (state) state.revision++;                  // (moves sent from before he came out are ignored)
+    broadcastProgress(room, player);
+    io.to(room.code).emit('playerBurrowExited', {
+      playerId: player.id, position: player.position, rotation: player.rotation,
+      respawnRevision: state?.revision ?? 0, boostSeconds: tunnel.boostSeconds, speedMultiplier: tunnel.speedMultiplier
+    });
+    return true;
+  }
+  if (player.dog !== 'ralph' || !burrowOpen(room, player)) return false;
+  const used = burrowsUsed.get(player);
+  for (const tunnel of tunnels) {
+    const key = `${player.lap}:${tunnel.id}`;
+    const required = marks.filter(s => s < tunnel.entryS).length;
+    if (!used || used.has(key) || player.checkpoint !== required || !entersBurrow(player.position, data.position, tunnel)) continue;
+    used.add(key);
+    burrowRides.set(player, { tunnel, startedAt: Date.now() });
+    player.position = [...tunnel.entry]; player.rotation = tunnel.entryYaw; player.animation = 'Run';
+    endSpecial(room, player, 'cancelled');
+    io.to(room.code).emit('playerBurrowEntered', { playerId: player.id, tunnelId: tunnel.id, duration: tunnel.duration });
+    return true;
+  }
+  return false;
+}
+
+// May this dog still go down a burrow this lap?  (Wendover allows two of its four.)
+function burrowOpen(room, player) {
+  const used = burrowsUsed.get(player), limit = BURROWS_PER_LAP[room.mapId] ?? Infinity;
+  return Boolean(used) && [...used].filter(key => key.startsWith(`${player.lap}:`)).length < limit;
+}
 
 function updateWoodlandRace(room, player, data) {
   const state = woodlandRaceStates.get(player);
   if ((data.respawnRevision ?? 0) !== state.revision) return false;
-  if (state.tunnel) {
-    const { tunnel, startedAt } = state.tunnel;
-    if (Date.now() - startedAt < tunnel.duration * 1000) return false;
-    player.position = [...tunnel.exit]; player.rotation = tunnel.exitYaw; player.animation = 'Sprint';
-    // Only checkpoints along this authorised shortcut are credited. No lap or finish is skipped.
-    while (player.checkpoint < woodlandCheckpointDistances.length
-      && woodlandCheckpointDistances[player.checkpoint] < tunnel.exitS) player.checkpoint++;
-    state.tunnel = null; state.revision++;
-    broadcastProgress(room, player);
-    io.to(room.code).emit('playerBurrowExited', {
-      playerId: player.id, position: player.position, rotation: player.rotation,
-      respawnRevision: state.revision, boostSeconds: tunnel.boostSeconds, speedMultiplier: tunnel.speedMultiplier
-    });
-    return false;
-  }
-  if (player.dog === 'ralph') {
-    for (const tunnel of WENDOVER.tunnels) {
-      const key = `${player.lap}:${tunnel.id}`;
-      const required = woodlandCheckpointDistances.filter(s => s < tunnel.entryS).length;
-      if (state.used.has(key) || player.checkpoint !== required || !entersBurrow(player.position,data.position,tunnel)) continue;
-      state.used.add(key); state.tunnel = { tunnel, startedAt: Date.now() };
-      player.position = [...tunnel.entry]; player.rotation = tunnel.entryYaw; player.animation = 'Run';
-      endSpecial(room, player, 'cancelled');
-      io.to(room.code).emit('playerBurrowEntered', { playerId: player.id, tunnelId: tunnel.id, duration: tunnel.duration });
-      return false;
-    }
-  }
+  if (rideBurrow(room, player, data)) return false;
   player.position = [...data.position]; player.rotation = data.rotation;
   return true;
 }
@@ -110,6 +152,7 @@ function updateFrostpeakRace(room, player, data) {
     });
     return true;
   }
+  if (rideBurrow(room, player, data)) return false;
   const lateral = FROSTPEAK_CANNON.cannonFired(player.position, data.position);
   if (lateral !== null) {
     state.launch = { startedAt: now, lateral };
@@ -176,6 +219,7 @@ function updateProceduralRace(room, player, data) {
     }
     return false;
   }
+  if (rideBurrow(room, player, data)) return false;
   const [x, y, z] = data.position;
   const ground = track.query(x, z);
   if (track.launch) {
@@ -246,6 +290,7 @@ function collectGoldenBones(room, player, previousPosition) {
   (GOLDEN_BONE_SPOTS[room.mapId] ?? []).forEach((spot, index) => {
     if (room.boneTimers.has(index) || !touchesGoldenBone(previousPosition, player.position, spot)) return;
     io.to(room.code).emit('goldenBoneTaken', { index, playerId: player.id });
+    botDrivers.get(player)?.boost();
     room.boneTimers.set(index, setTimeout(() => {
       if (rooms.get(room.code) !== room) return;
       room.boneTimers.delete(index);
@@ -265,12 +310,13 @@ function grantItem(room, player) {
   const place = standings.find((entry) => entry.playerId === player.id)?.place ?? 1;
   // the dog's own special: never for the leader, more likely the further back (shared/specials.js)
   const special = specialFor(player.dog) && (ALWAYS_SPECIAL || Math.random() < specialChance(place, standings.length));
-  player.item = special ? SPECIAL_ITEM : rollItem(place, standings.length);
+  player.item = FORCE_ITEM ?? (special ? SPECIAL_ITEM : rollItem(place, standings.length));
   io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item });
 }
 
 function resetItems(room) {
   stopFrisbees(room);
+  stopFireworks(room);
   for (const timer of room.boneTimers?.values() ?? []) clearTimeout(timer);
   room.boneTimers = new Map();
   room.hazards = new Map();
@@ -281,6 +327,7 @@ function resetItems(room) {
   for (const player of room.players.values()) {
     player.item = null;
     player.hitImmuneUntil = 0;
+    player.shieldUntil = 0;
     clearTimeout(activeSpecials.get(player)?.timer);
     activeSpecials.delete(player);
   }
@@ -294,6 +341,7 @@ function useItem(room, player) {
   const [x, y, z] = player.position;
   if (item === 'bone') {
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+    botDrivers.get(player)?.boost();
   } else if (item === 'toy') {
     if (room.hazards.size >= TOY.maxPerRoom) {
       const oldest = room.hazards.keys().next().value;
@@ -319,15 +367,24 @@ function useItem(room, player) {
   } else if (item === 'frisbee') {
     throwFrisbee(room, player);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+  } else if (item === 'firework') {
+    launchFirework(room, player);
+    io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+  } else if (item === 'collar') {
+    // the golden shield: see hitPlayer for what it stops
+    player.shieldUntil = Date.now() + COLLAR.durationMs;
+    io.to(room.code).emit('itemUsed', { playerId: player.id, item });
+    io.to(room.code).emit('shieldStarted', { playerId: player.id, durationMs: COLLAR.durationMs });
   } else if (item === SPECIAL_ITEM) {
     startSpecial(room, player);
-    if (ALWAYS_SPECIAL) {
-      const timer = setTimeout(() => {
-        room.specialTimers.delete(timer);
-        if (rooms.get(room.code) === room && room.status === 'racing' && room.players.get(player.id) === player) grantItem(room, player);
-      }, 3000);
-      room.specialTimers.add(timer);
-    }
+  }
+  // trying things out: the same again in three seconds
+  if (item === SPECIAL_ITEM ? ALWAYS_SPECIAL : FORCE_ITEM) {
+    const timer = setTimeout(() => {
+      room.specialTimers.delete(timer);
+      if (rooms.get(room.code) === room && room.status === 'racing' && room.players.get(player.id) === player) grantItem(room, player);
+    }, 3000);
+    room.specialTimers.add(timer);
   }
 }
 
@@ -346,10 +403,10 @@ function startSpecial(room, player) {
       if (rooms.get(room.code) === room && room.players.get(player.id) === player) endSpecial(room, player, 'done');
     }, spec.durationMs)
   });
-  if (spec.immune) player.hitImmuneUntil = Math.max(player.hitImmuneUntil, now + spec.durationMs);
   const started = { playerId: player.id, kind: spec.kind, durationMs: spec.durationMs };
   if (spec.kind === 'flush') started.targets = sendPheasants(room, player);
   io.to(room.code).emit('specialStarted', started);
+  botDrivers.get(player)?.specialStarted();
 }
 
 function endSpecial(room, player, reason) {
@@ -371,7 +428,7 @@ function sendPheasants(room, owner) {
     const timer = setTimeout(() => {
       room.specialTimers.delete(timer);
       if (rooms.get(room.code) !== room || room.status !== 'racing' || room.players.get(victim.id) !== victim) return;
-      const hit = !victim.finished && Date.now() >= victim.hitImmuneUntil && !woodlandRaceStates.get(victim)?.tunnel;
+      const hit = !victim.finished && Date.now() >= victim.hitImmuneUntil && !burrowRides.has(victim) && !activeSpecials.has(victim);
       io.to(room.code).emit('pheasantLanded', { owner: owner.id, playerId: victim.id, hit });
       if (hit) hitPlayer(room, victim, owner.id, SPECIAL_ITEM);
     }, flightMs);
@@ -387,7 +444,7 @@ function checkSpecialContacts(room, mover) {
     const spec = activeSpecials.get(owner)?.spec;
     if (!spec?.hitRadius || owner.finished) continue;
     for (const victim of owner === mover ? room.players.values() : [mover]) {
-      if (victim === owner || victim.finished || now < victim.hitImmuneUntil || woodlandRaceStates.get(victim)?.tunnel) continue;
+      if (victim === owner || victim.finished || now < victim.hitImmuneUntil || burrowRides.has(victim) || activeSpecials.has(victim)) continue;
       if (!specialTouches(spec, owner.position, owner.rotation, victim.position)) continue;
       io.to(room.code).emit('specialHit', { playerId: owner.id, victim: victim.id });
       hitPlayer(room, victim, owner.id, SPECIAL_ITEM);
@@ -435,7 +492,17 @@ function tickFrisbees(room) {
       f.target = target.id;
       io.to(room.code).emit('frisbeeTarget', { id: f.id, target: f.target });
     }
+    const from = f.position;
     Object.assign(f, stepFrisbee(f, target && !target.finished ? target.position : null, dt));
+    // a chew toy in its way stops it: both are gone (drop one behind you to block the frisbee chasing you)
+    const toy = [...room.hazards.values()].find(hazard => thrownItemMeetsToy(from, f.position, hazard));
+    if (toy) {
+      room.frisbees.delete(f.id);
+      room.hazards.delete(toy.id);
+      io.to(room.code).emit('frisbeeGone', { id: f.id, position: f.position });
+      io.to(room.code).emit('hazardRemoved', { id: toy.id, hitBy: 'frisbee' });
+      continue;
+    }
     // only the dog it is chasing: it flies through anyone else
     const victim = target && !target.finished && now >= target.hitImmuneUntil && frisbeeHits(f.position, target.position) ? target : null;
     if (victim) {
@@ -456,13 +523,102 @@ function stopFrisbees(room) {
   room.frisbees = new Map();
 }
 
+// ---------------------------------
+// FIREWORK: goes after the dog in first place, wherever it is.  It flies up the middle of the road
+// (shared/firework.js) faster than any dog, knocks over any dog it passes close to on the way (once
+// each, and never the dog that lit it), and when it reaches the leader it bursts, knocking over every
+// dog within FIREWORK.blastRadius.  If the lead changes while it flies it goes after the new leader;
+// if the dog that lit it takes the lead there is nobody to chase and it burns out.  The server flies
+// it, moving it every FIREWORK.tickMs and telling everyone where it is.
+// ---------------------------------
+function fireworkTarget(room, ownerId) {
+  const leader = raceStandings(room).find(entry => !entry.finished);
+  return leader && leader.playerId !== ownerId ? leader.playerId : null;
+}
+
+function launchFirework(room, player) {
+  const route = fireworkRoute(room.mapId);
+  if (!route) return;
+  const forward = forwardOf(player.rotation);
+  const [x, y, z] = player.position;
+  const firework = {
+    id: `firework-${room.nextItemId++}`, owner: player.id, target: fireworkTarget(room, player.id), firedAt: Date.now(),
+    s: route.sAt(player.position) + FIREWORK.launchAhead, homing: false, passed: new Set(),
+    position: [x + forward[0] * FIREWORK.launchAhead, y + FIREWORK.height, z + forward[2] * FIREWORK.launchAhead], yaw: player.rotation
+  };
+  room.fireworks.set(firework.id, firework);
+  io.to(room.code).emit('fireworkLaunched', { id: firework.id, owner: firework.owner, target: firework.target, position: firework.position, yaw: firework.yaw });
+  room.fireworkTimer ??= setInterval(() => tickFireworks(room), FIREWORK.tickMs);
+}
+
+function tickFireworks(room) {
+  if (rooms.get(room.code) !== room || room.status !== 'racing') { stopFireworks(room); return; }
+  const route = fireworkRoute(room.mapId);
+  const now = Date.now(), dt = FIREWORK.tickMs / 1000, moved = [];
+  const canBeHit = dog => !dog.finished && now >= dog.hitImmuneUntil && !burrowRides.has(dog) && !activeSpecials.has(dog);
+  for (const f of room.fireworks.values()) {
+    const targetId = fireworkTarget(room, f.owner);
+    const target = targetId ? room.players.get(targetId) : null;
+    const age = (now - f.firedAt) / 1000;
+    if (age > FIREWORK.duration || (!target && age > FIREWORK.noTargetSeconds)) {
+      room.fireworks.delete(f.id);
+      io.to(room.code).emit('fireworkGone', { id: f.id, position: f.position });
+      continue;
+    }
+    if (targetId !== f.target) {
+      f.target = targetId;
+      f.homing = false;                                          // back to the road to find the new leader
+      io.to(room.code).emit('fireworkTarget', { id: f.id, target: f.target });
+    }
+    const from = f.position;
+    const step = stepFirework(f, route, target ? target.position : null, dt);
+    f.s = step.s; f.position = step.position; f.yaw = step.yaw; f.homing = step.homing;
+    if (step.arrived) {
+      const caught = [...room.players.values()].filter(dog => dog.id !== f.owner && canBeHit(dog) && inFireworkBlast(f.position, dog.position));
+      room.fireworks.delete(f.id);
+      io.to(room.code).emit('fireworkExploded', { id: f.id, position: f.position, target: targetId, playerIds: caught.map(dog => dog.id) });
+      for (const dog of caught) hitPlayer(room, dog, f.owner, 'firework');
+      continue;
+    }
+    // any dog it passes on the way (it is not looking for them, and goes on to the leader)
+    for (const dog of room.players.values()) {
+      if (dog.id === f.owner || dog.id === targetId || f.passed.has(dog.id) || !fireworkPasses(from, f.position, dog.position)) continue;   // (the leader gets the burst)
+      f.passed.add(dog.id);
+      if (!canBeHit(dog)) continue;
+      io.to(room.code).emit('fireworkPassed', { id: f.id, playerId: dog.id, position: f.position });
+      hitPlayer(room, dog, f.owner, 'firework');
+    }
+    moved.push({ id: f.id, position: f.position, yaw: f.yaw });
+  }
+  if (moved.length) io.to(room.code).emit('fireworksMoved', { fireworks: moved });
+  if (room.fireworks.size === 0) stopFireworks(room);
+}
+
+function stopFireworks(room) {
+  if (room.fireworkTimer) clearInterval(room.fireworkTimer);
+  room.fireworkTimer = null;
+  room.fireworks = new Map();
+}
+
+// Knock a dog over.  A dog wearing the golden collar is not knocked over by anything except another
+// dog's special: the hit is turned away (and whatever was thrown is still used up).  Returns whether
+// the dog went down.
 function hitPlayer(room, player, by, item) {
-  player.hitImmuneUntil = Date.now() + HIT.immuneMs;
+  const now = Date.now();
+  // nothing knocks a dog out of its special, and the golden collar turns away everything but a special
+  if (activeSpecials.has(player) || (item !== SPECIAL_ITEM && now < player.shieldUntil)) {
+    if (now - (player.blockedAt ?? 0) > 300) {                   // a tractor pushing at the shield says so once, not every step
+      player.blockedAt = now;
+      io.to(room.code).emit('hitBlocked', { playerId: player.id, by, item });
+    }
+    return false;
+  }
+  player.hitImmuneUntil = now + HIT.immuneMs;
   endSpecial(room, player, 'hit');                               // knocked over: whatever special it was using is lost
-  io.to(room.code).emit('playerHit', {
-    playerId: player.id, by, item,
-    stunMs: item === SPECIAL_ITEM ? SPECIAL_HIT.stunMs : item === 'toy' ? HIT.toyStunMs : HIT.ballStunMs
-  });
+  const stunMs = item === SPECIAL_ITEM ? SPECIAL_HIT.stunMs : item === 'toy' ? HIT.toyStunMs : item === 'firework' ? HIT.fireworkStunMs : HIT.ballStunMs;
+  io.to(room.code).emit('playerHit', { playerId: player.id, by, item, stunMs });
+  botDrivers.get(player)?.hit(stunMs);
+  return true;
 }
 
 // Checked on each of the dog's own moves: did a ball or a dropped toy get it?
@@ -471,9 +627,18 @@ function checkItemHits(room, player, previousPosition) {
   for (const ball of room.balls.values()) {
     const age = (now - ball.firedAt) / 1000;
     if (age > BALL.duration) { room.balls.delete(ball.id); continue; }
-    if (ball.owner === player.id || now < player.hitImmuneUntil) continue;
     const groundAt = BALL_GROUND[room.mapId];
     const from = ballPositionAt(ball, Math.max(0, age - 0.12), groundAt), to = ballPositionAt(ball, age, groundAt);
+    // a ball that meets a chew toy knocks it off the road, and that is the end of the ball too
+    const toy = [...room.hazards.values()].find(hazard => thrownItemMeetsToy(from, to, hazard));
+    if (toy) {
+      room.balls.delete(ball.id);
+      room.hazards.delete(toy.id);
+      io.to(room.code).emit('ballHit', { id: ball.id, position: to });
+      io.to(room.code).emit('hazardRemoved', { id: toy.id, hitBy: 'ball' });
+      continue;
+    }
+    if (ball.owner === player.id || now < player.hitImmuneUntil) continue;
     if (Math.abs(player.position[1] + 1 - to[1]) <= 3
       && distanceToSegment(player.position, from, to) <= BALL.radius) {
       room.balls.delete(ball.id);
@@ -482,17 +647,25 @@ function checkItemHits(room, player, previousPosition) {
     }
   }
   // A chew toy is gone once any dog runs into it; a dog still recovering from a hit is not
-  // knocked over again, but the toy goes all the same.
+  // knocked over again, but the toy goes all the same.  A dog in the middle of its special sends the
+  // toy flying and carries on: the sled, the spin and the wave sweep up any toy they touch.
+  const special = activeSpecials.get(player)?.spec;
   for (const hazard of room.hazards.values()) {
     if (hazard.owner === player.id && now - hazard.placedAt < TOY.ownerGraceMs) continue;
     const above = player.position[1] - hazard.position[1];
     if (above > TOY.jumpClear || above < -2) continue;              // jumped clean over it
-    if (distanceToSegment(hazard.position, previousPosition, player.position) <= TOY.radius) {
+    const swept = special && specialTouches(special, player.position, player.rotation, hazard.position);
+    if (swept || distanceToSegment(hazard.position, previousPosition, player.position) <= TOY.radius) {
       room.hazards.delete(hazard.id);
       io.to(room.code).emit('hazardRemoved', { id: hazard.id, hitBy: player.id });
-      if (Date.now() >= player.hitImmuneUntil) hitPlayer(room, player, hazard.owner, 'toy');
+      if (!special && Date.now() >= player.hitImmuneUntil) hitPlayer(room, player, hazard.owner, 'toy');
     }
   }
+}
+
+// Does something thrown, flying from one point to the next, run into a chew toy lying on the road?
+function thrownItemMeetsToy(from, to, toy) {
+  return Math.abs(to[1] - toy.position[1]) <= 3 && distanceToSegment(toy.position, from, to) <= TOY.radius;
 }
 
 // ---------------------------------
@@ -517,11 +690,51 @@ function endRace(room) {
   clearRaceEndTimers(room);
   room.status = 'finished';
   for (const player of room.players.values()) endSpecial(room, player, 'done');
+  broadcastStandings(room);
+  if (room.grandPrix) { endGrandPrixRace(room); updateLobby(room); return; }
   room.returnTimer = setTimeout(() => returnToLobby(room), LOBBY_RETURN_MS);
   room.returnTimer.unref?.();
   io.to(room.code).emit('raceEnded', { returnMs: LOBBY_RETURN_MS });
-  broadcastStandings(room);
   updateLobby(room);
+}
+
+// ---------------------------------
+// GRAND PRIX (shared/grandPrix.js): four races with the same dogs (the computer dogs stay on between
+// races), points for each place, and the scores shown after every race and at the end
+// ---------------------------------
+const grandPrixInfo = room => (room.grandPrix
+  ? { id: room.grandPrix.id, name: GRAND_PRIX[room.grandPrix.id].name, round: room.grandPrix.round + 1, of: GRAND_PRIX[room.grandPrix.id].maps.length }
+  : null);
+
+function beginGrandPrix(room, id) {
+  room.grandPrix = { id, round: 0, points: new Map() };
+  room.mapId = GRAND_PRIX[id].maps[0];
+}
+
+// A race of the Grand Prix is over: points for the places, the table to everyone, and then the next
+// race (or, after the last, back to the lobby once the winner has had their moment).
+function endGrandPrixRace(room) {
+  const gp = room.grandPrix, maps = GRAND_PRIX[gp.id].maps, final = gp.round >= maps.length - 1;
+  const gained = new Map(raceStandings(room).map(entry => [entry.playerId, { place: entry.place, points: pointsForPlace(entry.place) }]));
+  for (const [playerId, result] of gained) gp.points.set(playerId, (gp.points.get(playerId) ?? 0) + result.points);
+  const table = [...room.players.values()]
+    .map(player => ({ playerId: player.id, name: player.name, dog: player.dog, bot: Boolean(player.bot), points: gp.points.get(player.id) ?? 0,
+      gained: gained.get(player.id)?.points ?? 0, place: gained.get(player.id)?.place ?? room.players.size }))
+    .sort((a, b) => b.points - a.points || a.place - b.place);
+  const returnMs = final ? GRAND_PRIX_FINAL_MS : LOBBY_RETURN_MS;
+  room.returnTimer = setTimeout(() => (final ? returnToLobby(room) : nextGrandPrixRace(room)), returnMs);
+  room.returnTimer.unref?.();
+  io.to(room.code).emit('grandPrixStandings', { ...grandPrixInfo(room), final, table, nextMapId: final ? null : maps[gp.round + 1] });
+  io.to(room.code).emit('raceEnded', { returnMs, grandPrix: grandPrixInfo(room), final });
+}
+
+function nextGrandPrixRace(room) {
+  if (rooms.get(room.code) !== room || room.status !== 'finished' || !room.grandPrix) return;
+  room.grandPrix.round += 1;
+  room.mapId = GRAND_PRIX[room.grandPrix.id].maps[room.grandPrix.round];
+  for (const timer of room.treatBoxTimers.values()) clearTimeout(timer);
+  room.treatBoxTimers = new Map();
+  startRaceIn(room);
 }
 
 // Back to character select: everyone keeps their dog (and can change it), the room is listed again
@@ -535,6 +748,8 @@ function returnToLobby(room) {
   room.votes = new Map();
   room.startedAt = null;
   room.status = 'lobby';
+  room.grandPrix = null;
+  removeBots(room);
   for (const player of room.players.values()) {
     player.loaded = false;
     player.hover = null;
@@ -552,19 +767,23 @@ function returnToLobby(room) {
 
 // Puts everyone on the grid of room.mapId and tells the clients to load the race.
 function startRaceIn(room) {
-  const players = [...room.players.values()];
-
   // Single player and multiplayer are both supported.
-  if (players.length < 1) {
+  if (humans(room).length < 1) {
     return { success: false, error: 'At least one player is required' };
   }
 
-  if (!players.every((player) => player.dog && player.ready)) {
+  if (!humans(room).every((player) => player.dog && player.ready)) {
     return { success: false, error: 'Everyone needs to choose a dog first' };
   }
 
   clearMapVote(room);
   clearRaceEndTimers(room);
+
+  // the computer dogs take the dogs and the grid places the players have left (and stay on, the same
+  // dogs, for every race of a Grand Prix)
+  if (!room.grandPrix || room.grandPrix.round === 0) addBots(room);
+  else stopBots(room);
+  const players = [...room.players.values()];
 
   players.forEach((player, index) => {
     const start = MAPS[room.mapId].startPositions[index];
@@ -572,12 +791,14 @@ function startRaceIn(room) {
     player.rotation = start.rotationY;
     player.animation = 'Idle';
 
-    player.loaded = false;
+    player.loaded = Boolean(player.bot);       // (nothing to load)
     player.lap = 1;
     player.checkpoint = 0;
     player.finished = false;
     player.finishTime = null;
-    if (room.mapId === 'wendover') woodlandRaceStates.set(player, { revision: 0, tunnel: null, used: new Set() });
+    burrowRides.delete(player);
+    burrowsUsed.set(player, new Set());
+    if (room.mapId === 'wendover') woodlandRaceStates.set(player, { revision: 0 });
     if (room.mapId === 'frostpeak') frostpeakRaceStates.set(player, { revision: 0, launch: null });
     if (MAPS[room.mapId].procedural) {
       proceduralRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
@@ -591,6 +812,7 @@ function startRaceIn(room) {
   io.to(room.code).emit('raceStarted', {
     roomCode: room.code,
     mapId: room.mapId,
+    grandPrix: grandPrixInfo(room),
     totalCheckpoints: MAPS[room.mapId].checkpoints.length,
     players,
     totalLaps: TOTAL_LAPS
@@ -633,7 +855,7 @@ function rescuePlayer(room, player) {
   const state = room.mapId === 'wendover' ? woodlandRaceStates.get(player)
     : room.mapId === 'frostpeak' ? frostpeakRaceStates.get(player)
     : MAPS[room.mapId].procedural ? proceduralRaceStates.get(player) : null;
-  if (state && (state.launch || state.fall || state.tunnel)) return false;      // already being handled
+  if ((state && (state.launch || state.fall)) || burrowRides.has(player)) return false;      // already being handled
   const { position, rotation } = rescuePoint(room, player);
   if (room.mapId === 'wendover') {
     const water = woodlandWaterAt(position[0], position[2]);
@@ -669,6 +891,9 @@ function getRoomData(room) {
     hostId: room.hostId,
     status: room.status,
     singlePlayer: room.singlePlayer === true,
+    // computer-controlled dogs: how many the host has asked for, and how good
+    bots: room.bots,
+    grandPrix: grandPrixInfo(room),
     mapId: room.mapId,
     // map vote: playerId -> mapId, and how long is left (sent as a duration so clocks need not agree)
     votes: Object.fromEntries(room.votes ?? []),
@@ -717,7 +942,10 @@ function finishMapVote(room) {
   const candidates = most > 0
     ? [...counts].filter(([, n]) => n === most).map(([mapId]) => mapId)
     : Object.keys(MAPS);
-  room.mapId = candidates[Math.min(candidates.length - 1, Math.floor(Math.random() * candidates.length))];
+  const choice = candidates[Math.min(candidates.length - 1, Math.floor(Math.random() * candidates.length))];
+  room.grandPrix = null;
+  if (Object.hasOwn(GRAND_PRIX, choice)) beginGrandPrix(room, choice);      // (a vote can be for a Grand Prix as well as a map)
+  else room.mapId = choice;
   room.votes = new Map();
   startRaceIn(room);
 }
@@ -778,7 +1006,8 @@ function createPlayer(socketId, name, slot = 0) {
     finishTime: null,
     item: null,
     voice: false,            // microphone on for voice chat (the players talk to each other directly)
-    hitImmuneUntil: 0
+    hitImmuneUntil: 0,
+    shieldUntil: 0           // wearing the golden collar: shielded from everything but specials until then
   };
 }
 
@@ -865,7 +1094,8 @@ function beginCountdown(room) {
         startedAt: room.startedAt
       });
       broadcastStandings(room);
-      if (ALWAYS_SPECIAL) for (const player of room.players.values()) grantItem(room, player);
+      startBots(room);
+      if (ALWAYS_SPECIAL || FORCE_ITEM) for (const player of room.players.values()) grantItem(room, player);
 
       updateLobby(room);
 
@@ -934,11 +1164,8 @@ function checkRaceProgress(room, player, previousPosition) {
       `${player.name} finished in ${player.finishTime}s`
     );
 
-    if (
-      [...room.players.values()].every(
-        (participant) => participant.finished
-      )
-    ) {
+    botDrivers.get(player)?.finish();
+    if (everyoneHome(room)) {
       endRace(room);
     } else {
       startFinishGrace(room);
@@ -956,6 +1183,228 @@ function checkRaceProgress(room, player, previousPosition) {
     playerId: player.id,
     lap: player.lap
   });
+}
+
+// A dog says where it now is (a player's game, or the driver of a computer dog): the server checks the
+// move against the map's rules and sees what the dog ran into, picked up and passed on the way.
+// Returns false for a move that makes no sense.
+const VALID_ANIMATIONS = ['Idle', 'Walk', 'Trot', 'Run', 'Sprint', 'Jump', 'Land'];
+
+function applyMove(room, player, data) {
+  const position = data?.position;
+  const rotation = data?.rotation;
+
+  if (
+    !Array.isArray(position) ||
+    position.length !== 3 ||
+    !position.every(
+      (value) =>
+        typeof value === 'number' &&
+        Number.isFinite(value)
+    ) ||
+    typeof rotation !== 'number' ||
+    !Number.isFinite(rotation)
+  ) {
+    return false;
+  }
+
+  const previousPosition = [...player.position];
+
+  let onRoad = true;
+  if (MAPS[room.mapId].procedural) {
+    onRoad = updateProceduralRace(room, player, data);
+  } else if (room.mapId === 'wendover') {
+    onRoad = updateWoodlandRace(room, player, data);
+  } else if (room.mapId === 'frostpeak') {
+    onRoad = updateFrostpeakRace(room, player, data);
+  } else {
+    player.position = [...position];
+    player.rotation = rotation;
+  }
+
+  // how fast it is going, for the computer dogs to judge it by (a jump from one place to another is not speed)
+  const now = Date.now(), last = dogSpeeds.get(player);
+  const moved = Math.hypot(player.position[0] - previousPosition[0], player.position[2] - previousPosition[2]);
+  const seconds = last ? (now - last.at) / 1000 : 0;
+  dogSpeeds.set(player, { at: now, speed: seconds > 0.01 && seconds < 0.5 && moved < 12 ? moved / seconds : last?.speed ?? 0 });
+
+  if (room.mapId !== 'wendover' || onRoad) { checkItemHits(room, player, previousPosition); checkSpecialContacts(room, player); }
+
+  if (onRoad) {
+    collectTreatBoxes(room, player, previousPosition);
+    collectGoldenBones(room, player, previousPosition);
+    if (VALID_ANIMATIONS.includes(data.animation)) player.animation = data.animation;
+    checkRaceProgress(room, player, previousPosition);
+  }
+
+  if (Date.now() - (room.standingsSentAt ?? 0) >= STANDINGS_INTERVAL_MS) {
+    broadcastStandings(room);
+  }
+  return true;
+}
+
+// ---------------------------------
+// COMPUTER-CONTROLLED DOGS (server/bots.js)
+// ---------------------------------
+// The host says how many (room.bots.count) and how good (room.bots.level).  They join when the race
+// starts, taking the dogs and the seats nobody has, and leave when the room goes back to the lobby: in
+// the lobby there are only players.  In the race each is a player like any other, except that the
+// server makes its moves.
+
+const humans = room => [...room.players.values()].filter(player => !player.bot);
+
+// The race is over when every player is home; the computer dogs do not keep anyone waiting.
+const everyoneHome = room => humans(room).every(player => player.finished);
+
+function addBots(room) {
+  removeBots(room);
+  const wanted = Math.min(room.bots?.count ?? 0, MAX_PLAYERS - room.players.size);
+  for (let n = 0; n < wanted; n++) {
+    const taken = [...room.players.values()];
+    const free = DOGS.filter(dog => !taken.some(other => other.dog === dog));
+    if (!free.length) break;
+    const dog = free[Math.min(free.length - 1, Math.floor(Math.random() * free.length))];
+    let slot = 0;
+    while (taken.some(other => other.slot === slot)) slot += 1;
+    const bot = createPlayer(`bot-${room.code}-${slot}`, 'CPU', slot);       // (the board reads "CPU — Meela")
+    Object.assign(bot, { bot: true, level: room.bots.level, dog, ready: true });
+    room.players.set(bot.id, bot);
+  }
+}
+
+function removeBots(room) {
+  stopBots(room);
+  for (const player of [...room.players.values()]) {
+    if (!player.bot) continue;
+    clearTimeout(activeSpecials.get(player)?.timer);
+    activeSpecials.delete(player);
+    room.players.delete(player.id);
+  }
+}
+
+function startBots(room) {
+  stopBots(room);
+  const bots = [...room.players.values()].filter(player => player.bot);
+  if (!bots.length) return;
+  bots.forEach((player, index) => {
+    const driver = createBot({
+      mapId: room.mapId, dog: player.dog, level: player.level,
+      seed: (Date.now() + index * 7919) >>> 0, heightAt: BALL_GROUND[room.mapId] ?? null
+    });
+    driver.place(player.position, player.rotation);
+    botDrivers.set(player, driver);
+  });
+  room.botTickedAt = Date.now();
+  room.botTimer = setInterval(() => tickBots(room), BOT_TICK_MS);
+  room.botTimer.unref?.();
+}
+
+function stopBots(room) {
+  if (room.botTimer) clearInterval(room.botTimer);
+  room.botTimer = null;
+}
+
+// Out of the dog's own paws: flying from the catapult or the cannon, falling, or down a burrow
+function carriedBy(room, player) {
+  const state = raceStateOf(room, player);
+  return state?.launch ? 'launch' : state?.fall ? 'fall' : burrowRides.has(player) ? 'tunnel' : null;
+}
+
+function raceStateOf(room, player) {
+  return room.mapId === 'wendover' ? woodlandRaceStates.get(player)
+    : room.mapId === 'frostpeak' ? frostpeakRaceStates.get(player)
+    : MAPS[room.mapId].procedural ? proceduralRaceStates.get(player) : null;
+}
+
+// What being put down does to a dog, as the players' games have it: { speed, seconds, running }
+function landingEffect(room, carried, tunnel = null) {
+  const track = PROCEDURAL_TRACKS[room.mapId];
+  if (carried === 'launch') {
+    const launch = (track ?? FROSTPEAK_CANNON).launch;
+    return { speed: launch.exitSpeedMultiplier, seconds: launch.boostSeconds, running: true };
+  }
+  if (carried === 'tunnel') return { speed: tunnel?.speedMultiplier ?? 1, seconds: tunnel?.boostSeconds ?? 0, running: true };
+  return { speed: track?.rules.respawnSpeedMultiplier ?? 1, seconds: track?.rules.respawnPenaltySeconds ?? RESCUE_PENALTY_SECONDS, running: false };
+}
+
+// How near the nearest thing coming for this dog is (a firework, a frisbee, a ball), in metres
+function threatTo(room, player) {
+  let nearest = Infinity;
+  const distance = position => Math.hypot(position[0] - player.position[0], position[2] - player.position[2]);
+  for (const f of room.fireworks.values()) if (f.owner !== player.id) nearest = Math.min(nearest, distance(f.position));
+  for (const f of room.frisbees.values()) if (f.target === player.id) nearest = Math.min(nearest, distance(f.position));
+  const now = Date.now();
+  for (const ball of room.balls.values()) {
+    if (ball.owner === player.id) continue;
+    const at = ballPositionAt(ball, (now - ball.firedAt) / 1000, BALL_GROUND[room.mapId]);
+    const ahead = (player.position[0] - at[0]) * ball.direction[0] + (player.position[2] - at[2]) * ball.direction[2];
+    if (ahead > 0 && distanceToSegment(player.position, at, [at[0] + ball.direction[0] * 40, at[1], at[2] + ball.direction[2] * 40]) < 3) nearest = Math.min(nearest, ahead);
+  }
+  return nearest;
+}
+
+function tickBots(room) {
+  if (rooms.get(room.code) !== room || (room.status !== 'racing' && room.status !== 'finished')) { stopBots(room); return; }
+  const now = Date.now();
+  const dt = Math.min(0.2, Math.max(0.001, (now - room.botTickedAt) / 1000));
+  room.botTickedAt = now;
+  const standings = room.status === 'racing' ? raceStandings(room) : [];
+  let running = room.status === 'racing';
+  for (const player of [...room.players.values()]) {
+    const driver = player.bot && botDrivers.get(player);
+    if (!driver) continue;
+    // home (or the race is over): it runs on a little way, slowing, and stops
+    if (player.finished || room.status !== 'racing') {
+      if (driver.stopped) continue;
+      running = true;
+      driver.finish();
+      const out = driver.step(dt, {});
+      Object.assign(player, { position: out.position, rotation: out.rotation, animation: out.animation });
+      io.to(room.code).emit('playerMoved', { playerId: player.id, position: player.position, rotation: player.rotation, animation: player.animation });
+      continue;
+    }
+    const carried = carriedBy(room, player), burrow = burrowRides.get(player)?.tunnel;
+    let out = null;
+    if (!carried) {
+      out = driver.step(dt, {
+        item: player.item,
+        place: standings.find(entry => entry.playerId === player.id)?.place ?? 1,
+        dogs: [...room.players.values()].filter(other => other !== player).map(other => ({
+          position: other.position, rotation: other.rotation, finished: other.finished || burrowRides.has(other),
+          speed: dogSpeeds.get(other)?.speed ?? 0
+        })),
+        toys: [...room.hazards.values()].filter(toy => toy.owner !== player.id || now - toy.placedAt >= TOY.ownerGraceMs),
+        boxTaken: id => room.treatBoxTimers.has(id),
+        boneTaken: index => room.boneTimers.has(index),
+        special: activeSpecials.get(player)?.spec ?? null,
+        burrowOpen: burrowOpen(room, player),
+        shielded: now < player.shieldUntil,
+        threat: threatTo(room, player),
+        raceSeconds: (now - room.startedAt) / 1000
+      });
+    }
+    const sent = out?.position ?? player.position;
+    applyMove(room, player, {
+      position: sent, rotation: out?.rotation ?? player.rotation, animation: out?.animation ?? player.animation,
+      respawnRevision: raceStateOf(room, player)?.revision ?? 0
+    });
+    io.to(room.code).emit('playerMoved', { playerId: player.id, position: player.position, rotation: player.rotation, animation: player.animation });
+    if (rooms.get(room.code) !== room || room.status !== 'racing') continue;      // that move ended the race
+    const nowCarried = carriedBy(room, player);
+    if (carried && !nowCarried) {
+      driver.place(player.position, player.rotation, landingEffect(room, carried, burrow));      // put down: it runs on from there
+    } else if (!carried && !nowCarried && Math.hypot(player.position[0] - sent[0], player.position[2] - sent[2]) > 0.3) {
+      driver.place(player.position, player.rotation);                                    // held back by a bank, a wall or a bale
+    }
+    if (carried || nowCarried || player.finished) continue;
+    if (out.stuck && rescuePlayer(room, player)) {
+      driver.place(player.position, player.rotation, landingEffect(room, 'fall'));
+    } else if (out.useItem && player.item && !burrowRides.has(player)) {
+      // eslint-disable-next-line react-hooks/rules-of-hooks -- the server's useItem, not a React hook
+      useItem(room, player);
+    }
+  }
+  if (!running) stopBots(room);          // the race is over and they have all pulled up
 }
 
 function leaveRoom(socket) {
@@ -979,7 +1428,8 @@ function leaveRoom(socket) {
 
   room.votes?.delete(socket.id);
 
-  if (room.players.size === 0) {
+  if (humans(room).length === 0) {
+    stopBots(room);
     clearCountdown(room);
     clearMapVote(room);
     for (const timer of room.treatBoxTimers.values()) clearTimeout(timer);
@@ -987,6 +1437,7 @@ function leaveRoom(socket) {
     for (const timer of room.specialTimers ?? []) clearTimeout(timer);
     clearRaceEndTimers(room);
     stopFrisbees(room);
+    stopFireworks(room);
     rooms.delete(roomCode);
     updateLobbies();
 
@@ -995,7 +1446,7 @@ function leaveRoom(socket) {
   }
 
   if (room.hostId === socket.id) {
-    room.hostId = room.players.keys().next().value;
+    room.hostId = humans(room)[0].id;
   }
 
   if (room.status === 'loading') {
@@ -1004,12 +1455,7 @@ function leaveRoom(socket) {
 
   maybeBeginMapVote(room);
 
-  if (
-    room.status === 'racing' &&
-    [...room.players.values()].every(
-      (player) => player.finished
-    )
-  ) {
+  if (room.status === 'racing' && everyoneHome(room)) {
     endRace(room);              // the only dogs still running have left
   }
 
@@ -1053,6 +1499,11 @@ io.on('connection', (socket) => {
       hostId: socket.id,
       status: 'lobby',
       singlePlayer: data?.singlePlayer === true,
+      // computer-controlled dogs: a full field for someone racing alone, none in a room of players
+      // until the host asks for them
+      bots: { count: data?.singlePlayer === true ? SOLO_BOTS : 0, level: 'medium' },
+      botTimer: null,
+      grandPrix: null,         // the Grand Prix being run: { id, round, points }
       mapId,
       startedAt: null,
       countdownTimer: null,
@@ -1060,6 +1511,8 @@ io.on('connection', (socket) => {
       boneTimers: new Map(),
       frisbees: new Map(),
       frisbeeTimer: null,
+      fireworks: new Map(),
+      fireworkTimer: null,
       votes: new Map(),
       voteEndsAt: 0,
       voteTimer: null,
@@ -1168,6 +1621,23 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
+  // COMPUTER-CONTROLLED DOGS: how many, and how good (the host's choice, in the lobby)
+
+  socket.on('setBots', (data, callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || room.status !== 'lobby') {
+      return callback?.({ success: false, error: 'Not in a lobby' });
+    }
+    if (room.hostId !== socket.id) {
+      return callback?.({ success: false, error: 'Only the host can change the computer dogs' });
+    }
+    const count = Number.isInteger(data?.count) ? Math.max(0, Math.min(MAX_PLAYERS - 1, data.count)) : room.bots.count;
+    const level = BOT_LEVEL_IDS.includes(data?.level) ? data.level : room.bots.level;
+    room.bots = { count, level };
+    callback?.({ success: true });
+    updateLobby(room);
+  });
+
   // SELECT DOG
 
   socket.on('selectDog', (data, callback) => {
@@ -1250,7 +1720,7 @@ io.on('connection', (socket) => {
     if (!room || room.status !== 'voting' || !room.players.has(socket.id)) {
       return callback?.({ success: false, error: 'There is no map vote running' });
     }
-    if (!Object.hasOwn(MAPS, data?.mapId)) {
+    if (!Object.hasOwn(MAPS, data?.mapId) && !Object.hasOwn(GRAND_PRIX, data?.mapId)) {
       return callback?.({ success: false, error: 'Invalid map selection' });
     }
     room.votes.set(socket.id, data.mapId);
@@ -1340,7 +1810,27 @@ io.on('connection', (socket) => {
       });
     }
 
+    room.grandPrix = null;                       // (a single race on the room's map)
     callback?.(startRaceIn(room));
+  });
+
+  // START A GRAND PRIX (host): four races, starting now
+
+  socket.on('startGrandPrix', (data, callback) => {
+    const room = rooms.get(playerRooms.get(socket.id));
+    if (!room || (room.status !== 'lobby' && room.status !== 'voting')) {
+      return callback?.({ success: false, error: 'Room not available' });
+    }
+    if (room.hostId !== socket.id) {
+      return callback?.({ success: false, error: 'Only the host can start the race' });
+    }
+    if (!Object.hasOwn(GRAND_PRIX, data?.id)) {
+      return callback?.({ success: false, error: 'There is no such Grand Prix' });
+    }
+    beginGrandPrix(room, data.id);
+    const started = startRaceIn(room);
+    if (!started.success) room.grandPrix = null;
+    callback?.(started);
   });
 
   // CLIENT FINISHED LOADING
@@ -1374,61 +1864,7 @@ io.on('connection', (socket) => {
 
     const player = room.players.get(socket.id);
 
-    if (!player || player.finished) return;
-
-    const position = data?.position;
-    const rotation = data?.rotation;
-
-    if (
-      !Array.isArray(position) ||
-      position.length !== 3 ||
-      !position.every(
-        (value) =>
-          typeof value === 'number' &&
-          Number.isFinite(value)
-      ) ||
-      typeof rotation !== 'number' ||
-      !Number.isFinite(rotation)
-    ) {
-      return;
-    }
-
-    const validAnimations = [
-      'Idle',
-      'Walk',
-      'Trot',
-      'Run',
-      'Sprint',
-      'Jump',
-      'Land'
-    ];
-
-    const previousPosition = [...player.position];
-
-    let onRoad = true;
-    if (MAPS[room.mapId].procedural) {
-      onRoad = updateProceduralRace(room, player, data);
-    } else if (room.mapId === 'wendover') {
-      onRoad = updateWoodlandRace(room, player, data);
-    } else if (room.mapId === 'frostpeak') {
-      onRoad = updateFrostpeakRace(room, player, data);
-    } else {
-      player.position = [...position];
-      player.rotation = rotation;
-    }
-
-    if (room.mapId !== 'wendover' || onRoad) { checkItemHits(room, player, previousPosition); checkSpecialContacts(room, player); }
-
-    if (onRoad) {
-      collectTreatBoxes(room, player, previousPosition);
-      collectGoldenBones(room, player, previousPosition);
-      if (validAnimations.includes(data.animation)) player.animation = data.animation;
-      checkRaceProgress(room, player, previousPosition);
-    }
-
-    if (Date.now() - (room.standingsSentAt ?? 0) >= STANDINGS_INTERVAL_MS) {
-      broadcastStandings(room);
-    }
+    if (!player || player.finished || !applyMove(room, player, data)) return;
 
     socket.to(roomCode).emit('playerMoved', {
       playerId: socket.id,
@@ -1455,15 +1891,15 @@ io.on('connection', (socket) => {
     const room = rooms.get(playerRooms.get(socket.id));
     if (!room || room.status !== 'racing') return;
     const player = room.players.get(socket.id);
-    if (!player || player.finished || !player.item || woodlandRaceStates.get(player)?.tunnel) return;
+    if (!player || player.finished || !player.item || burrowRides.has(player)) return;
     useItem(room, player);
   });
 
   // VOICE CHAT: the players' browsers talk to each other directly; the server only says who has a
   // microphone on and passes their connection set-up messages across, within one room.
-  // Switched off for now: the server ignores both messages unless it is started with VOICE_CHAT=1
-  // (and the game only shows the option when built with VITE_VOICE_CHAT=1).
-  const voiceChatOn = () => env.VOICE_CHAT === '1';
+  // On unless the server is started with VOICE_CHAT=0, when it ignores both messages (build the game
+  // with VITE_VOICE_CHAT=0 as well, so that it does not offer the option).
+  const voiceChatOn = () => env.VOICE_CHAT !== '0';
   socket.on('setVoice', (data) => {
     if (!voiceChatOn()) return;
     const room = rooms.get(playerRooms.get(socket.id));
@@ -1486,6 +1922,10 @@ io.on('connection', (socket) => {
     const room = rooms.get(playerRooms.get(socket.id));
     if (!room || !room.players.has(socket.id) || room.status !== 'finished') {
       return callback?.({ success: false, error: 'The race is not over yet' });
+    }
+    const gp = room.grandPrix;
+    if (gp && gp.round < GRAND_PRIX[gp.id].maps.length - 1) {
+      return callback?.({ success: false, error: 'The Grand Prix is not over yet' });
     }
     returnToLobby(room);
     callback?.({ success: true });

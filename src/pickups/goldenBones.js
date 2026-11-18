@@ -11,15 +11,12 @@
 // goldenBoneRespawned messages, so a bone a friend eats disappears on your screen too.  Other dogs'
 // boosts (from a road bone or a Golden Bone item) get the same golden trail: bones.showBoost(id).
 import * as THREE from 'three';
+import { BONE_BOOST } from '../../shared/items.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 export const GOLDEN_BONE = {
-  speedMultiplier: 1.3,       // top speed while boosted (brief: ~1.25; raised to be clearly felt)
-  accelerationMultiplier: 1.8,// so the extra speed arrives quickly
-  instantKick: 0.8,           // share of the extra top speed given at once on pickup
-  duration: 2.0,              // seconds at full boost
-  easeOut: 0.5,               // seconds to blend back to normal afterwards
+  ...BONE_BOOST,              // how much faster, and for how long (shared/items.js: the server's computer dogs get the same)
   respawnDelay: 6.0,          // seconds before a taken bone comes back (the server says when)
   respawnFallback: 3.0,       // ...extra wait before bringing it back anyway if the server never took it
   pickupRadius: 2.0,          // metres, measured flat (plus a height check)

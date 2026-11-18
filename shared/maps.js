@@ -2,12 +2,18 @@ import frostpeak from './frostpeak.json' with { type: 'json' };
 import { TREAT_ROAD } from './treatRoadData.js';
 import { MODBURY_HEIGHTS } from './modburyData.js';
 import { FARMYARD } from './farmData.js';
+import { WATER_PARK } from './waterParkData.js';
+import { PET_MALL } from './petMallData.js';
+import { MUD_PARK } from './mudParkData.js';
 
-export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD };
+export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD, water_park: WATER_PARK, pet_mall: PET_MALL, mud_park: MUD_PARK };
 const PROCEDURAL_DESCRIPTIONS = {
   treat_road: '1.45 km of sky road · catapult gap · landing boost',
   modbury_heights: '3.12 km coastal circuit · clifftops · broken bridges to jump · water crossing',
   farmyard: '1.67 km round the farm · through the barn · dodge the tractor, the sheep and the sails',
+  mud_park: '1.45 km mud run in the rain · slippery clay bends · deep bog and rolling logs · the mudslide and the mud pit',
+  pet_mall: '1.33 km round a pet shopping mall · escaped cats, trolleys and hamster balls · the escalator and the big leap',
+  water_park: '1.72 km of pools and slides · bounce across the rubber rings · the big slide and its jump',
 };
 
 const STARTING_GRID = [

@@ -28,7 +28,8 @@ function App() {
   }, [session]);
 
   const Screen = SCREENS[state.screen] ?? RaceScreen;
-  return <Screen session={session} state={state} />;
+  // (each race gets a new race screen, so the next race of a Grand Prix builds its own map)
+  return <Screen key={state.screen === 'race' ? `race-${state.raceNumber}` : state.screen} session={session} state={state} />;
 }
 
 export default App;
