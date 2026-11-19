@@ -13,7 +13,6 @@ export function RaceScreen({ session, state, split = null }) {
   const containerRef = useRef(null);
   const minimapRef = useRef(null);
   const speedRef = useRef(null);
-  const timerRef = useRef(null);
   const surfaceRef = useRef(null);
   const rescueRef = useRef(null);
 
@@ -27,7 +26,6 @@ export function RaceScreen({ session, state, split = null }) {
       session,
       hud: new RaceHud({
         speed: speedRef.current,
-        timer: timerRef.current,
         surface: surfaceRef.current,
         rescue: rescueRef.current
       })
@@ -37,7 +35,7 @@ export function RaceScreen({ session, state, split = null }) {
 
   return (
     <div
-      className={split ? `race-half race-half--${split}` : undefined}
+      className={split ? `race-screen race-half race-half--${split}` : 'race-screen'}
       style={{
         width: split ? '50vw' : '100vw',
         height: '100vh',
@@ -71,7 +69,7 @@ export function RaceScreen({ session, state, split = null }) {
         : state.frisbeesIncoming.length > 0 && <div className="race-incoming" role="alert">FRISBEE INCOMING!</div>}
 
       {split && <div className="race-half__player">PLAYER {split === 'left' ? 1 : 2}</div>}
-      <HudPanel state={state} speedRef={speedRef} timerRef={timerRef} surfaceRef={surfaceRef} device={session.device} />
+      <HudPanel state={state} speedRef={speedRef} surfaceRef={surfaceRef} device={session.device} />
       <CountdownOverlay racePhase={state.racePhase} />
       <ResultsPanel session={session} finishTime={state.finishTime} lobbyReturnAt={state.lobbyReturnAt}
         raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} buttons={split !== 'right'} />

@@ -493,3 +493,11 @@
   .zr-footer .zr-toggle, .bot-settings { padding: 3px 8px; font-size: 11px; gap: 6px; }
   .bot-settings button { padding: 3px 7px; font-size: 11px; min-width: 24px; }
 }
+
+/* ---------- a controller's highlight (ui/menuPad.js sets <html data-pad> while a controller is in use) ---------- */
+html[data-pad] :is(button, input, [role="tab"]):focus { outline: 4px solid #ffd22e; outline-offset: 3px; box-shadow: 0 0 0 7px #14224f, 0 0 22px 8px #ffd22eaa; }
+html[data-pad] .zr-tile:not(.zr-tile--wide):focus { outline: none; box-shadow: none; }
+html[data-pad] .zr-tile--cup:focus { box-shadow: inset 0 0 0 clamp(2px, 0.4vh, 4px) #fff, 0 0.5vh 0 #c96f00; }
+html[data-pad] .zr-home__name input:focus { outline: none; box-shadow: none; }
+html[data-pad] .zr-home__name:focus-within { border-color: #ffd22e; box-shadow: 0 0 0 4px #14224f, 0 0 22px 8px #ffd22eaa; }
+html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scale(1.05); }

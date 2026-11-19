@@ -67,7 +67,7 @@ export function LocalJoinScreen({ session, state }) {
   };
 
   return (
-    <div className="zr-page">
+    <div className="zr-page" data-pad-off="">
       <div className="zr-card" style={{ width: 'min(600px, 92vw)' }}>
         <h1>Split Screen</h1>
         <p style={{ color: '#c4d3f5' }}>Two players on this screen, each with their own controls. Computer dogs fill the rest of the grid.</p>
@@ -79,7 +79,7 @@ export function LocalJoinScreen({ session, state }) {
                 : `${pads} ${pads === 1 ? 'controller' : 'controllers'} connected`}
         </p>
         {state.error && <p className="zr-error">{state.error}</p>}
-        <button className="zr-btn zr-btn--quiet" onClick={session.backToMenu}>← Back</button>
+        <button className="zr-btn zr-btn--quiet" data-pad-back="" onClick={session.backToMenu}>← Back</button>
         {devices.length > 0 && devices.length < 2 && (
           <button className="zr-btn zr-btn--quiet" onClick={() => { joined.current = []; setDevices([]); setClash(false); }}>Start again</button>
         )}

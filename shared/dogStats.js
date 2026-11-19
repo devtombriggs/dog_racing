@@ -9,11 +9,11 @@ export const DOG_STATS = {
   black_lab: { speed: 7, acceleration: 7, agility: 8, swimming: 10 },    // Poppy
   pablo: { speed: 6, acceleration: 9, agility: 10, swimming: 5 },
   ralph: { speed: 5, acceleration: 10, agility: 9, swimming: 4 },
-  enzo: { speed: 5.5, acceleration: 5, agility: 8, swimming: 4 },
+  enzo: { speed: 6, acceleration: 6, agility: 8, swimming: 4 },
   rocky: { speed: 7, acceleration: 7, agility: 10, swimming: 6 },
   kombu: { speed: 7, acceleration: 8, agility: 9, swimming: 4 },         // (his special is a strong one)
   jazz: { speed: 6.5, acceleration: 9, agility: 10, swimming: 5.5 },         // the Great Dane: Pablo, and a shade better
-  baz_naz: { speed: 5.5, acceleration: 8.5, agility: 9.5, swimming: 4.5 },   // Baz and Naz, the pug twins: just under Pablo all round
+  baz_naz: { speed: 6, acceleration: 8.5, agility: 9.5, swimming: 5 },       // Baz and Naz, the pug twins: Pablo's speed and swimming, just under him on the rest
 };
 
 // What a dog's card says where that is not the number it runs on: Meela is shown as a 10 for speed, and runs as a 9

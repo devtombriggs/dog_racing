@@ -6,6 +6,7 @@ import { VOICE_CHAT } from '../config/env.js';
 import { BotSettings } from './BotSettings.jsx';
 import { Paw } from './Paw.jsx';
 import { arrowKeys, tileHandlers } from './tileGrid.js';
+import { restrictMenuPad } from './menuPad.js';
 
 const DOG_IDS = Object.keys(DOGS);
 const COLUMNS = 4;
@@ -39,6 +40,11 @@ export function DogSelectScreen({ session, state }) {
   // (whose screen this is just now: in split screen, the player whose turn it is)
   const socketId = picker?.id ?? state.socketId;
   const pick = id => (local ? session.pickLocalDog(turn, id, () => setTurn(1)) : session.selectDog(id));
+
+  // (split screen: only the controller of the player whose turn it is works this screen)
+  const turnDevice = local ? (turn === 0 ? session.device : local.device) : null;
+  const turnPad = !turnDevice ? null : turnDevice.type === 'pad' ? turnDevice.index : -1;
+  useEffect(() => { restrictMenuPad(turnPad); return () => restrictMenuPad(null); }, [turnPad]);
 
   const myDog = room?.players.find(player => player.id === socketId)?.dog ?? null;
   const multiplayer = !room?.singlePlayer;
@@ -125,7 +131,7 @@ export function DogSelectScreen({ session, state }) {
       </section>
 
       <footer className="zr-footer">
-        <button className="zr-btn zr-btn--quiet zr-btn--small" onClick={session.leaveGame}>Leave Game</button>
+        <button className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="focus" onClick={session.leaveGame}>Leave Game</button>
         {!local && <label className="zr-toggle">
           <input type="checkbox" checked={accessibilityMode} onChange={(event) => session.setAccessibilityMode(event.target.checked)} />
           <span>Accessibility mode<small>Runs for you · ↑ jump · ↓ use item</small></span>

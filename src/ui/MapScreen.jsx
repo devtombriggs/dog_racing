@@ -145,7 +145,7 @@ export function MapScreen({ session, state }) {
       </section>
 
       <footer className="zr-footer">
-        <button className="zr-btn zr-btn--quiet zr-btn--small" onClick={session.leaveGame}>Leave Game</button>
+        <button className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="focus" onClick={session.leaveGame}>Leave Game</button>
         {/* (the vote is too late to change them: they are settled in the lobby) */}
         <BotSettings session={session} room={room} canChange={!voting && connected && room?.hostId === socketId} />
         <p>

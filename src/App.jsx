@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { GameSession } from './session/GameSession.js';
 import { useSession } from './session/useSession.js';
+import { startMenuPad } from './ui/menuPad.js';
 import { MenuScreen } from './ui/MenuScreen.jsx';
 import { JoinScreen } from './ui/JoinScreen.jsx';
 import { LocalJoinScreen } from './ui/LocalJoinScreen.jsx';
@@ -39,6 +40,9 @@ function SplitRace({ session, state }) {
 function App() {
   const [session] = useState(() => new GameSession());
   const state = useSession(session);
+
+  // a controller works the menus (ui/menuPad.js)
+  useEffect(() => startMenuPad(), []);
 
   useEffect(() => {
     session.connect();

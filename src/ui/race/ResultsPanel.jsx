@@ -66,6 +66,7 @@ export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = 
   const midGrandPrix = table && !grandPrix.final;
   return (
     <div
+      className="race-results"
       style={{
         position: 'absolute',
         bottom: 35,

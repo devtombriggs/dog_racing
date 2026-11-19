@@ -1,5 +1,6 @@
 // The readouts the race writes straight to the page every frame (too often to go through React):
-// speed, race time, the ground under the dog and the "lost" countdown.  The elements belong to the
+// speed, a word when something is up with the ground under the dog, and the "lost" countdown
+// (there is no race time on screen now: `timer` is null, and setTimer does nothing).  The elements belong to the
 // race screen (ui/RaceScreen.jsx).
 export class RaceHud {
   constructor({ speed, timer, surface, rescue }) {
@@ -19,6 +20,7 @@ export class RaceHud {
 
   setSurface(text, color) {
     if (!this.surface) return;
+    this.surface.hidden = text === 'ON TRACK';              // (nothing to say while all is well)
     this.surface.textContent = text;
     this.surface.style.color = color;
   }

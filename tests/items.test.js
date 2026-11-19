@@ -180,7 +180,9 @@ test('Baz and Naz\'s Trip Wire: six seconds, faster, a rope right across the roa
   for (const key of ['speed', 'acceleration', 'agility', 'swimming']) assert.ok(DOG_STATS.jazz[key] >= DOG_STATS.pablo[key] && DOG_STATS.jazz[key] <= DOG_STATS.pablo[key] + 0.5, key);
   assert.ok(DOG_STATS.jazz.speed > DOG_STATS.pablo.speed);
   // just under Pablo all round
-  for (const key of ['speed', 'acceleration', 'agility', 'swimming']) assert.ok(DOG_STATS.baz_naz[key] < DOG_STATS.pablo[key] && DOG_STATS.baz_naz[key] >= DOG_STATS.pablo[key] - 0.5, key);
+  for (const key of ['speed', 'acceleration', 'agility', 'swimming']) assert.ok(DOG_STATS.baz_naz[key] <= DOG_STATS.pablo[key] && DOG_STATS.baz_naz[key] >= DOG_STATS.pablo[key] - 0.5, key);
+  // (Tom's buff, 2026-11-19: Pablo's speed and swimming, still under him on acceleration and agility)
+  assert.ok(DOG_STATS.baz_naz.acceleration < DOG_STATS.pablo.acceleration && DOG_STATS.baz_naz.agility < DOG_STATS.pablo.agility);
 });
 
 test('Enzo\'s Belly Bounce: up and down every bounce with a burst of speed at the start of each; he squashes a dog only when he is down on it', async () => {

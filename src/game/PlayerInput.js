@@ -68,7 +68,9 @@ export class PlayerInput {
     const mine = this.device?.type === 'keyboard' ? null
       : this.device?.type === 'pad' ? pads.find(pad => pad?.index === this.device.index) ?? null
         : pads.find(pad => pad?.connected && pad.mapping === 'standard') ?? pads.find(pad => pad?.connected) ?? null;
-    const next = readPad(mine);
+    // (the menu over the race is open: the controller is working that, not the dog)
+    const menu = typeof document !== 'undefined' && document.querySelector('.pause-menu');
+    const next = readPad(menu ? null : mine);
     const racing = this.racing();
     if (racing && next.jump && !this.pad.jump) this.onJump();
     if (racing && next.item && !this.pad.item) this.onUseItem();

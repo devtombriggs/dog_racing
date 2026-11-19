@@ -1,4 +1,4 @@
-// Inline styles shared by the plain screens (menu, join) and the race HUD
+// Inline styles for the panels over the race (results, the Esc menu)
 
 export const pageStyle = {
   minHeight: '100vh',
@@ -30,22 +30,4 @@ export const buttonStyle = {
   fontWeight: 'bold',
   cursor: 'pointer',
   margin: 6
-};
-
-export const hudStyle = {
-  position: 'absolute',
-  top: 20,
-  right: 20,
-  zIndex: 10,
-  color: 'white',
-  background:
-    'rgba(10, 25, 15, 0.82)',
-  border:
-    '1px solid rgba(255,255,255,0.15)',
-  borderRadius: 12,
-  padding: '16px 22px',
-  minWidth: 170,
-  fontFamily:
-    'Arial, sans-serif',
-  pointerEvents: 'none'
 };

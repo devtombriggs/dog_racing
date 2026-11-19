@@ -70,7 +70,19 @@ A controller works in the race beside the keyboard, laid out like an Xbox 360 pa
 | A | Jump |
 | X, B or either bumper | Use the item |
 
-The menus, dog select and map screens still need a mouse or keyboard.
+In the menus (`src/ui/menuPad.js`; the direction-finding is `src/ui/padNav.js`, tested in `tests/menu-pad.test.js`):
+
+| Button | What it does |
+|---|---|
+| D-pad or left stick | Move the highlight to the nearest button or tile that way (held: repeats) |
+| A | Choose it |
+| B | Back (Back, Done, Resume). On dog select and the map screen it only moves the highlight to Leave Game |
+| LB / RB | The Grand Prix and Maps tabs |
+| Start | In a race: the menu |
+
+It finds buttons by where they are on the screen, so a new screen needs nothing but, where wanted, `data-pad-first` (where the highlight starts) and `data-pad-back` (what B presses). In the race itself only Start does anything; while the race menu is open the controller works the menu and not the dog. In split screen only the controller of the player whose turn it is works dog select. Typing a name still needs a keyboard.
+
+**On screen during the race** (`src/ui/race/HudPanel.jsx`): top right, the lap, the item held and a word when something is up (off the track, fell); bottom right, the speed. No race time, checkpoints or control hints: the controls are behind the controller button on the home screen.
 
 ## Full screen and the Esc menu
 
@@ -103,7 +115,7 @@ Each dog has its own special move from a rare Treat Box item: see `../special_ab
 
 **Jazz** (Great Dane, built in `../jazz_great_dane/`) is the tenth dog, and the tallest by a head (`scale: 3.7`). Her stats are Pablo's and a shade better: speed 6.5, acceleration 9, agility 10, swimming 5.5. Her special is the **Earthquake** (`SPECIALS.jazz`, kind `quake`; the rules are `QUAKE` in `shared/specials.js`): she rears up and stomps, and every other dog still racing, wherever it is on the map, keeps only 25% of its speed for five seconds. Not a dog in the middle of its own special, under a golden collar's shield, or down a burrow; Jazz herself runs on as she was. The server names the dogs that are slowed (`earthquake`); each player's own game slows its dog (`LocalDog.shaken`), the computer's dogs are slowed in `server/bots.js` (`world.slowed`), and `src/abilities/quake.js` draws the stomp, the rings of dust, the cracked ground and the camera shake.
 
-**Baz & Naz** (the pug twins, built in `../baz_naz_pugs/`) are the ninth dog: two pugs roped together who race as one racer (id `baz_naz`; stats just under Pablo's: speed 5.5, acceleration 8.5, agility 9.5, swimming 4.5). Baz is the dog's `model` and Naz its `twin` in `src/config/dogs.js`; `src/game/dogs/duo.js` loads the second pug, swings the two past each other so that each slings the other forward, and draws the rope. Their special is the **Trip Wire** (`SPECIALS.baz_naz`, kind `rope`): for six seconds, at 1.3 times their pace, they run out to the two edges of the road with the rope tight and low between them. Any dog level with them on the road is tripped, wherever it is across it (`ropeTrips`: within 1.4 m up or down the road), unless it is more than 0.9 m off the ground: the rope can be jumped. While it lasts they go straight through whatever stands on the road (`ghost`, `ghostsThrough`: obstacles do not stop them, the edges of the road still do), and like every special nothing knocks them out of it.
+**Baz & Naz** (the pug twins, built in `../baz_naz_pugs/`) are the ninth dog: two pugs roped together who race as one racer (id `baz_naz`; stats close to Pablo's: speed 6, acceleration 8.5, agility 9.5, swimming 5). Baz is the dog's `model` and Naz its `twin` in `src/config/dogs.js`; `src/game/dogs/duo.js` loads the second pug, swings the two past each other so that each slings the other forward, and draws the rope. Their special is the **Trip Wire** (`SPECIALS.baz_naz`, kind `rope`): for six seconds, at 1.3 times their pace, they run out to the two edges of the road with the rope tight and low between them. Any dog level with them on the road is tripped, wherever it is across it (`ropeTrips`: within 1.4 m up or down the road), unless it is more than 0.9 m off the ground: the rope can be jumped. While it lasts they go straight through whatever stands on the road (`ghost`, `ghostsThrough`: obstacles do not stop them, the edges of the road still do), and like every special nothing knocks them out of it.
 
 **Enzo** (XL bully, built in `../enzo_bully/`) is the eighth dog. His special is the **Belly Bounce** (`SPECIALS.enzo` and `bellyBounce` in `shared/specials.js`): for ten seconds he bounds up the road, 2.4 m high every 0.85 s, at 1.3 times his pace with a further burst at the start of each bounce that fades as he comes down. Any dog within 2.6 m when he is down near the ground is squashed (drawn flat for as long as it is knocked about); a dog he is sailing over is safe. Like the other specials, nothing knocks him out of it.
 

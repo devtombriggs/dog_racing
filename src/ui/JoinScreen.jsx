@@ -46,6 +46,7 @@ export function JoinScreen({ session, state }) {
         <div>
           <button
             className="zr-btn zr-btn--quiet"
+            data-pad-back=""
             disabled={joiningRoom !== null}
             onClick={session.backToMenu}
           >

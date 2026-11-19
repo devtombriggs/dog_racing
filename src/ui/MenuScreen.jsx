@@ -30,7 +30,7 @@ function Settings({ session, state, close }) {
           <input type="checkbox" checked={state.accessibilityMode} onChange={event => session.setAccessibilityMode(event.target.checked)} />
           <span>Accessibility mode<small>Your dog runs by itself · ↑ jumps · ↓ uses the item</small></span>
         </label>
-        <button className="zr-btn zr-btn--yellow" onClick={close}>Done</button>
+        <button className="zr-btn zr-btn--yellow" data-pad-first="" data-pad-back="" onClick={close}>Done</button>
       </div>
     </div>
   );
@@ -58,7 +58,7 @@ function Controls({ close }) {
             <tr><td>X, B or a bumper</td><td>Use the item</td></tr>
           </tbody>
         </table>
-        <button className="zr-btn zr-btn--yellow" onClick={close}>Done</button>
+        <button className="zr-btn zr-btn--yellow" data-pad-first="" data-pad-back="" onClick={close}>Done</button>
       </div>
     </div>
   );
@@ -90,15 +90,15 @@ export function MenuScreen({ session, state }) {
           </label>
           {!multiplayer ? (
             <>
-              <button className="zr-btn zr-btn--yellow zr-btn--big" disabled={!connected} onClick={() => session.startSinglePlayer()}>{ICONS.flags}Single Player</button>
+              <button className="zr-btn zr-btn--yellow zr-btn--big" data-pad-first="" disabled={!connected} onClick={() => session.startSinglePlayer()}>{ICONS.flags}Single Player</button>
               <button className="zr-btn" disabled={!connected} onClick={() => setMultiplayer(true)}>{ICONS.people}Multiplayer</button>
             </>
           ) : (
             <>
-              <button className="zr-btn zr-btn--yellow zr-btn--big" disabled={!connected} onClick={session.hostGame}>Host Game</button>
+              <button className="zr-btn zr-btn--yellow zr-btn--big" data-pad-first="" disabled={!connected} onClick={session.hostGame}>Host Game</button>
               <button className="zr-btn" disabled={!connected} onClick={session.openJoinScreen}>Join Game</button>
               <button className="zr-btn" disabled={!connected} onClick={session.openLocalJoinScreen} title="Two players on this screen: a keyboard and a controller, or two controllers">Split Screen</button>
-              <button className="zr-btn zr-btn--quiet" onClick={() => setMultiplayer(false)}>← Back</button>
+              <button className="zr-btn zr-btn--quiet" data-pad-back="" onClick={() => setMultiplayer(false)}>← Back</button>
             </>
           )}
         </div>

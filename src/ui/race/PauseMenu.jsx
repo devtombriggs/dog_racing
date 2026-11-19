@@ -19,12 +19,14 @@ export function PauseMenu({ session }) {
       setOpen(was => !was);
     };
     window.addEventListener('keydown', onKey);
+    const onPad = () => setOpen(was => !was);            // Start on a controller (ui/menuPad.js)
+    window.addEventListener('zr-menu', onPad);
     const stop = fullscreen.onChange((on) => {
       setFull(on);
       if (!on && !ours.current) setOpen(true);
       ours.current = false;
     });
-    return () => { window.removeEventListener('keydown', onKey); stop(); };
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('zr-menu', onPad); stop(); };
   }, []);
 
   if (!open) return null;
@@ -34,14 +36,14 @@ export function PauseMenu({ session }) {
       <div className="pause-menu__panel">
         <h2>Menu</h2>
         <p>The race carries on while this is open</p>
-        <button style={buttonStyle} autoFocus onClick={() => setOpen(false)}>Resume</button>
+        <button style={buttonStyle} autoFocus data-pad-first="" data-pad-back="" onClick={() => setOpen(false)}>Resume</button>
         {fullscreen.available && (
           <button style={quiet} onClick={() => { ours.current = true; fullscreen.toggle(); }}>
             Full screen: {full ? 'on' : 'off'}
           </button>
         )}
         <button style={quiet} onClick={session.leaveGame}>Quit to Main Menu</button>
-        <small>Esc closes this menu</small>
+        <small>Esc or Start closes this menu</small>
       </div>
     </div>
   );
