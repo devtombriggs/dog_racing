@@ -137,6 +137,54 @@ export const DOGS = {
       Sprint: 5.598
     }
   },
+  jazz: {
+    name: 'Jazz (Great Dane)',
+    displayName: DOG_NAMES.jazz,
+    breed: 'Great Dane',
+    portrait: '/portraits/jazz.png?v=2',
+    accent: '#ff3838',
+    model: '/models/jazz.glb',
+    stats: DOG_STATS.jazz,
+    // (jazz_great_dane/create_jazz.py: the Labrador's frame with its legs lengthened.  The tallest dog by a head: she stands about 2.2 m at the back, Meela 1.9)
+    scale: 3.7,
+    size: 1.15,
+    maxStrideRate: 1.15,
+    cameraOffset: [0, 5.0, -9.4],
+    cameraLookHeight: 2.2,
+    // jazz_great_dane/clip_info.json (Poppy's captured strides on longer legs: a long, easy lope)
+    gaitSpeed: {
+      Walk: 1.47,
+      Trot: 2.502,
+      Run: 4.388,
+      Sprint: 6.83
+    }
+  },
+  baz_naz: {
+    name: 'Baz & Naz (Pug Twins)',
+    displayName: DOG_NAMES.baz_naz,
+    breed: 'Pug Twins',
+    portrait: '/portraits/baz_naz.png?v=2',
+    accent: '#35e0b5',
+    // Two pugs roped together who race as one: Baz (fawn, red harness) is `model`, Naz (black, blue harness) is `twin`.
+    // The rope and the way they sling each other up the road are src/game/dogs/duo.js
+    model: '/models/baz.glb',
+    twin: { model: '/models/naz.glb' },
+    stats: DOG_STATS.baz_naz,
+    // (baz_naz_pugs/create_pugs.py: the Labrador's frame with its legs shortened; each a little smaller than Pablo)
+    scale: 2.0,
+    size: 0.7,
+    strideBands: DOG_STRIDE_BANDS.baz_naz,
+    maxStrideRate: 1.8,
+    cameraOffset: [0, 3.0, -6.2],
+    cameraLookHeight: 1.1,
+    // baz_naz_pugs/baz_clip_info.json, less a quarter for the shorter legs
+    gaitSpeed: {
+      Walk: 0.9,
+      Trot: 1.54,
+      Run: 2.7,
+      Sprint: 4.2
+    }
+  },
   ralph: {
     name: 'Ralph (Dachshund)',
     displayName: DOG_NAMES.ralph,
@@ -168,8 +216,8 @@ export const DOGS = {
 // The ratings themselves, and what each point does, are in shared/dogStats.js (the server uses them too)
 
 // Water slows a dog to this share of its top speed: a 4 or below is slowed
-// more than by off-track ground, a 10 swims at close to full speed
-export const WATER_SPEED = [0.4, 0.95];
+// more than by off-track ground, a 10 is not slowed at all
+export const WATER_SPEED = [0.4, 1];
 export const WATER_ACCELERATION = [0.5, 1];
 
 // One colour per seat in a game (the server gives each player a `slot`)

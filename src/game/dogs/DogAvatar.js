@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { switchAction, collectBones } from './animation.js';
+import { createDuo } from './duo.js';
 
 // A dog in the race as you see it: its place in the scene, its model and the clips it plays.
 // LocalDog (the player's own) and RemoteDog (everyone else's) build on this.
@@ -19,6 +20,7 @@ export class DogAvatar {
     this.actions = {};
     this.currentAction = null;
     this.animations = [];
+    this.duo = null;        // the second dog and the rope, for a pair that races as one (config.twin)
   }
 
   get position() { return this.group.position; }
@@ -35,7 +37,10 @@ export class DogAvatar {
         if (castShadow) {
           model.traverse(object => { if (object.isMesh) object.castShadow = true; });
         }
-        this.group.add(model);
+        // (a pair that races as one: each dog is in a holder of its own, so that they can be moved about inside the group)
+        const holder = this.config.twin ? new THREE.Group() : this.group;
+        if (holder !== this.group) this.group.add(holder);
+        holder.add(model);
         this.model = model;
         this.bones = collectBones(model);
         this.animations = gltf.animations;
@@ -50,10 +55,28 @@ export class DogAvatar {
 
         this.modelReady();
         onLoaded(this);
+        if (this.config.twin) this.#loadTwin(loader, holder, { castShadow, wanted });
       },
       undefined,
       onError
     );
+  }
+
+  // The other dog of a pair (it turns up a moment after the first; the pair is one racer either way)
+  #loadTwin(loader, firstHolder, { castShadow, wanted }) {
+    loader.load(this.config.twin.model, (gltf) => {
+      if (!wanted() || !this.model) return;
+      const model = gltf.scene, holder = new THREE.Group();
+      model.scale.setScalar(this.config.scale);
+      if (castShadow) model.traverse(object => { if (object.isMesh) object.castShadow = true; });
+      holder.add(model);
+      this.group.add(holder);
+      this.duo = createDuo({
+        group: this.group, config: this.config,
+        first: { holder: firstHolder, model: this.model, bones: this.bones },
+        second: { holder, model, animations: gltf.animations },
+      });
+    }, undefined, error => console.warn(`[Dog] ${this.config.twin.model} failed to load:`, error));
   }
 
   // For subclasses: the model and its clips have just loaded

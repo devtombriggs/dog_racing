@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { pageStyle, panelStyle, buttonStyle } from './styles.js';
 
 // Split screen: who is playing, and with what.  Player 1 presses Enter on the keyboard or A on a
 // controller, then player 2 does the same on a different one.  Whatever each pressed is what they drive
@@ -57,11 +56,10 @@ export function LocalJoinScreen({ session, state }) {
   const slot = (index) => {
     const device = devices[index], waiting = devices.length === index;
     return (
-      <div style={{ flex: 1, padding: '18px 12px', borderRadius: 12, background: device ? '#2f5a3a' : '#1b2f22',
-        border: `2px solid ${device ? '#70b76d' : waiting ? '#ffd257' : 'rgba(255,255,255,0.12)'}` }}>
-        <div style={{ fontSize: 13, letterSpacing: 1, color: '#b4c9b5' }}>PLAYER {index + 1} · {index === 0 ? 'LEFT' : 'RIGHT'} HALF</div>
+      <div className={`zr-row${device ? ' zr-row--on' : waiting ? ' zr-row--next' : ''}`} style={{ flex: 1, display: 'block', margin: 0, textAlign: 'center' }}>
+        <div style={{ fontSize: 13, letterSpacing: 1, color: '#c4d3f5' }}>PLAYER {index + 1} · {index === 0 ? 'LEFT' : 'RIGHT'} HALF</div>
         <div style={{ fontSize: 20, fontWeight: 'bold', margin: '10px 0 4px' }}>{device ? `${describe(device)} ✓` : waiting ? 'Press to join' : 'Waiting'}</div>
-        <div style={{ fontSize: 13, color: '#b4c9b5', minHeight: 32 }}>
+        <div style={{ fontSize: 13, color: '#c4d3f5', minHeight: 32 }}>
           {device ? 'Ready' : waiting ? 'Enter on the keyboard, or A on a controller' : 'After player 1'}
         </div>
       </div>
@@ -69,10 +67,10 @@ export function LocalJoinScreen({ session, state }) {
   };
 
   return (
-    <div style={pageStyle}>
-      <div style={{ ...panelStyle, width: 560 }}>
+    <div className="zr-page">
+      <div className="zr-card" style={{ width: 'min(600px, 92vw)' }}>
         <h1>Split Screen</h1>
-        <p style={{ color: '#b4c9b5' }}>Two players on this screen, each with their own controls. Computer dogs fill the rest of the grid.</p>
+        <p style={{ color: '#c4d3f5' }}>Two players on this screen, each with their own controls. Computer dogs fill the rest of the grid.</p>
         <div style={{ display: 'flex', gap: 12, margin: '18px 0' }}>{slot(0)}{slot(1)}</div>
         <p role="status" style={{ minHeight: 22, color: clash ? '#ffd257' : '#b4c9b5' }}>
           {devices.length === 2 ? 'Both in! Starting…'
@@ -80,10 +78,10 @@ export function LocalJoinScreen({ session, state }) {
               : pads === 0 ? 'No controller found yet: plug one in and press any button on it'
                 : `${pads} ${pads === 1 ? 'controller' : 'controllers'} connected`}
         </p>
-        {state.error && <p style={{ color: 'salmon' }}>{state.error}</p>}
-        <button style={{ ...buttonStyle, background: '#3d5a45', color: 'white' }} onClick={session.backToMenu}>← Back</button>
+        {state.error && <p className="zr-error">{state.error}</p>}
+        <button className="zr-btn zr-btn--quiet" onClick={session.backToMenu}>← Back</button>
         {devices.length > 0 && devices.length < 2 && (
-          <button style={{ ...buttonStyle, background: '#3d5a45', color: 'white' }} onClick={() => { joined.current = []; setDevices([]); setClash(false); }}>Start again</button>
+          <button className="zr-btn zr-btn--quiet" onClick={() => { joined.current = []; setDevices([]); setClash(false); }}>Start again</button>
         )}
       </div>
     </div>

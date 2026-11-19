@@ -37,7 +37,7 @@ test('Wendover pools have smooth walk-in banks, deep swimming and dry exits', ()
       previous=water.groundY;
     }
   }
-  assert.ok(woodlandSwimMultiplier(10)/woodlandSwimMultiplier(4)>2.3,'Poppy gets a substantial swimming advantage');
+  assert.ok(woodlandSwimMultiplier(10)/woodlandSwimMultiplier(4)>2.2,'Poppy gets a substantial swimming advantage');
   assert.equal(woodlandSwimMultiplier(1),woodlandSwimMultiplier(4));
 });
 
@@ -106,9 +106,9 @@ test('each pool has one really thin tightrope plank: dry on top, back in the wat
   }
 });
 
-test('water speed follows the swim stat: Poppy is a touch faster in the water than on land, Meela and Ralph crawl', () => {
+test('water speed follows the swim stat: Poppy is as fast in the water as on land and no faster, Meela and Ralph crawl', () => {
   const poppy = woodlandSwimMultiplier(10), pippa = woodlandSwimMultiplier(6), pablo = woodlandSwimMultiplier(5), meela = woodlandSwimMultiplier(4);
-  assert.ok(Math.abs(poppy - 1.05) < 1e-9, 'Poppy speeds up a little in the water: 105 % of her land speed');
+  assert.equal(poppy, 1, 'the water does not slow Poppy, and does not speed her up');
   assert.ok(Math.abs(pippa - 0.62) < 0.01 && Math.abs(pablo - 0.51) < 0.01, 'the others are as they were');
   assert.ok(poppy > pippa && pippa > pablo && pablo > meela);
   assert.ok(meela < 0.5 && meela > 0.4, 'weak swimmers keep under half their speed (Meela pays for her land speed here)');

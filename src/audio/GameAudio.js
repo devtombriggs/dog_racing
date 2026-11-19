@@ -25,6 +25,15 @@ const RACE_AUDIO = {
   water_park: { music: '/audio/water_park.mp3', musicVolume: 0.35 },            // tropical: steel drums, marimba, slap bass
   pet_mall: { music: '/audio/pet_mall.mp3', musicVolume: 0.35 },                // zany funk and disco: synth organ, xylophone, kazoo
   mud_park: { music: '/audio/mud_park.mp3', musicVolume: 0.35 },                // rowdy stomp: slide guitar, harmonica, tuba
+  desert_dunes: { music: '/audio/desert_dunes.mp3', musicVolume: 0.35 },        // desert chase: oud, hand drums, surf guitar
+  speed_bowl: { music: '/audio/speed_bowl.mp3', musicVolume: 0.35 },            // arcade racing rock: guitars, organ, synth lead
+  kombu_house: { music: '/audio/enzo_house.mp3', musicVolume: 0.35 },           // cartoon caper: tuba, honky-tonk piano, kazoo (the tune made for the house that was here before)
+  neon_nexus: { music: '/audio/neon_nexus.mp3', musicVolume: 0.35 },            // synthwave: arpeggiated bass, neon lead
+  // (Grand Prix 4 has no music of its own yet: each borrows the nearest in mood)
+  yorkshire_dales: { music: '/audio/wendover.mp3', musicVolume: 0.35 },
+  boneyard: { music: '/audio/mud_park.mp3', musicVolume: 0.35 },
+  the_vets: { music: '/audio/enzo_house.mp3', musicVolume: 0.35 },
+  monkey_jungle: { music: '/audio/water_park.mp3', musicVolume: 0.35 },
 };
 
 // Voices come first: while this player is connected to anyone in voice chat, the music plays at this

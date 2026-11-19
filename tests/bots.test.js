@@ -29,7 +29,8 @@ test('the road a computer dog follows is the road the pickups are placed on, on 
       assert.ok(route.limitAt(s) < mine.halfWidth, `${mapId}: keeps off the edge at ${s} m`);
     }
     // every Treat Box and Golden Bone is somewhere a dog could run
-    for (const pickup of [...route.boxes, ...route.bones]) assert.ok(Math.abs(pickup.lateral) < route.pointAt(pickup.s).halfWidth, mapId);
+    // (on Neon Nexus some are on the second road, out to the side of the main one)
+    for (const pickup of [...route.boxes, ...route.bones]) assert.ok(Math.abs(pickup.lateral) < route.pointAt(pickup.s).halfWidth || route.branchAt?.(pickup.s), mapId);
   }
 });
 

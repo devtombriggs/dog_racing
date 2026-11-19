@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/Addons.js';
 import { MAPS, DEFAULT_MAP, PROCEDURAL_TRACKS } from '../../shared/maps.js';
-import { GOLDEN_BONE_SPOTS } from '../../shared/pickupSpots.js';
+import { GOLDEN_BONE_SPOTS, racingLineAt } from '../../shared/pickupSpots.js';
 import { BURROWS } from '../../shared/burrows.js';
 import { createBurrowMouths } from '../tracks/burrowMouths.js';
 import { createKelp } from '../abilities/kelp.js';
@@ -12,6 +12,7 @@ import { createItems } from '../pickups/items.js';
 import { createFireworks } from '../pickups/firework.js';
 import { createShields } from '../pickups/collar.js';
 import { createSpecials } from '../abilities/specials.js';
+import { createQuake } from '../abilities/quake.js';
 import { createMinimap } from '../minimap.js';
 import { formatTime } from '../utils/format.js';
 import { RaceScene } from './RaceScene.js';
@@ -84,6 +85,8 @@ export class Race {
     this.kelp = createKelp({ scene });
     // Rocky's flock (shared/specials.js SHEEP)
     this.sheep = createSheep({ scene });
+    // Jazz's stomp (shared/specials.js QUAKE)
+    this.quake = createQuake({ scene });
     // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
     this.specials = createSpecials({
       scene,
@@ -393,6 +396,12 @@ export class Race {
 
       // Rocky's Sheep Stampede: the server runs the flock; we draw it
       sheepReleased: ({ sheep }) => this.sheep.release(sheep),
+      // Jazz has stomped: the ground shakes for everyone, and the dogs the server names can barely move
+      earthquake: ({ playerId, position, slowed, seconds, speed }) => {
+        const avatarOf = id => (mine(id) ? local : remotes.get(id));
+        this.quake.stomp({ position, avatar: avatarOf(playerId), slowed: slowed.map(avatarOf).filter(Boolean), seconds });
+        if (slowed.includes(this.myId)) local.shaken(seconds, speed);
+      },
       sheepMoved: ({ sheep }) => this.sheep.move(sheep),
       sheepGone: ({ id, position }) => this.sheep.gone(id, position),
 
@@ -515,8 +524,26 @@ export class Race {
 
     // Special abilities: their clips, effects and timing, for every dog (after the dogs have moved)
     specials.update(delta);
+    // Jazz's stomp and what it does (after the dogs have been posed for this frame: it poses her itself)
+    this.quake.update(delta);
+    // The pug twins: the second dog and the rope (and, in their Trip Wire, out to the two edges of the road)
+    for (const [avatar, speed] of [[local, local.currentSpeed], ...[...remotes.values()].map(remote => [remote, remote.speed])]) {
+      if (!avatar.duo) continue;
+      const rope = specials.physics(avatar.id)?.rope;
+      let spread = null;
+      if (rope) {
+        const at = avatar.group.position, yaw = avatar.group.rotation.y, line = racingLineAt(this.mapId, at.x, at.z, avatar.roadS ?? null);
+        if (line) {
+          avatar.roadS = line.s;
+          const across = (at.x - line.x) * Math.cos(yaw) - (at.z - line.z) * Math.sin(yaw), half = Math.max(1, line.halfWidth - rope.edge);
+          spread = { left: half - across, right: -half - across };
+        }
+      }
+      avatar.duo.update(delta, { speed, sprintSpeed: local.sprintSpeed, action: avatar.currentAction, spread });
+    }
 
     this.chaseCamera.update(delta, Boolean(local.launchFlight));
+    this.quake.shake(this.stage.camera);
     this.stage.render();
   };
 
@@ -540,6 +567,7 @@ export class Race {
     this.kelp.dispose();
     this.sheep.dispose();
     this.specials.dispose();
+    this.quake.dispose();
     this.minimap.dispose();
     this.goldenBones.dispose();
     this.input.dispose();

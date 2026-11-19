@@ -72,6 +72,7 @@ export class GameSession {
     socketId: null,
     error: '',
     hoveredDog: null,
+    mapTab: 'cups',          // the map screen's tab to open on: 'cups' (Grand Prix) | 'maps'
     // split screen: the second player's session, while a local game is on (see startLocalGame)
     local: null,
     connected: false,
@@ -470,8 +471,9 @@ export class GameSession {
   // SINGLE PLAYER
   // ---------------------------------
 
-  startSinglePlayer = () => {
-    this.set({ error: '' });
+  // (tab: which side of the map screen opens after the dog is picked: 'cups' for the Grand Prix, or 'maps')
+  startSinglePlayer = (tab) => {
+    this.set({ error: '', mapTab: tab === 'maps' ? 'maps' : 'cups' });
 
     if (!this.socket?.connected) {
       this.set({ error: 'Not connected to server' });

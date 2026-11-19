@@ -18,8 +18,8 @@ import { PICKUP_PATHS, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSpeedLoss, pickupShare } from '../shared/dogStats.js';
-import { HANDLING, JUMP, STEEP_JUMP } from '../shared/handling.js';
-import { BONE_BOOST, TOY } from '../shared/items.js';
+import { HANDLING, JUMP, STEEP_JUMP, DROP } from '../shared/handling.js';
+import { BONE_BOOST, PAD_KICK, TOY } from '../shared/items.js';
 import { SPECIALS, SPECIAL_ITEM } from '../shared/specials.js';
 import { WENDOVER, woodlandWaterAt, woodlandDogY, woodlandSwimMultiplier } from '../shared/wendoverData.js';
 import { BURROWS } from '../shared/burrows.js';
@@ -135,6 +135,16 @@ function buildRoute(mapId) {
     // (the bridges are railed, and narrower than the road)
     for (const c of track.chasms) narrow.push({ from: c.ravineStart - 12, to: c.ravineEnd + 4, half: Math.min(...[c.ravineStart, c.s, c.ravineEnd].map(s => pointAt(s).halfWidth)) - 1.3 });
   }
+  // moving platforms (Neon Nexus): every break between them has to be jumped, and each has to be steered for
+  const sliders = [];
+  for (const zone of track?.platforms ?? []) {
+    const edges = [zone.sStart, ...zone.pads.flatMap(pad => [pad.s0, pad.s1]), zone.sEnd];
+    // (a rope bridge is one platform from end to end: no breaks to jump)
+    for (let k = 0; k < edges.length; k += 2) if (edges[k + 1] - edges[k] > 1) jumps.push({ id: `${zone.id}-gap-${k / 2}`, s0: edges[k] + 0.4, s1: edges[k + 1] - 0.4, height: 0.35, must: true });
+    for (const pad of zone.pads) sliders.push({ s0: pad.s0, s1: pad.s1, half: pad.half, lateralAt: t => track.padLateral(pad, t) });
+  }
+  // doorways (Kombu's House, the Vets): line up for them in good time
+  for (const door of track?.doors ?? []) narrow.push({ from: door.s - 26, to: door.s + (door.depth ?? 4) / 2 + 1, half: door.width / 2 - 1.5 });
   if (track?.obstacles) for (const o of track.obstacles) obstacles.push({ s: o.s, lateral: o.lateral, radius: o.radius });
   // the pig pen's mud (slow, and a pig trots round each wallow) and the ground the windmill's sails sweep:
   // nothing solid, but a dog that knows the farm keeps out of them
@@ -143,9 +153,9 @@ function buildRoute(mapId) {
   // the Water Park's fountain jets: there is room to run between them
   for (const jet of track?.jets ?? []) obstacles.push({ s: jet.s, lateral: (jet.lane - 1) * 0.62 * pointAt(jet.s).halfWidth, radius: jet.radius, optional: true });
   if (track?.barn) narrow.push({ from: track.barn.start - 14, to: track.barn.end + 4, half: track.barn.inside - 1.2 });
-  if (track?.launch) {
-    narrow.push({ from: track.launch.padStart - 30, to: track.launch.takeoffS + 2, half: pointAt(track.launch.landingS).halfWidth - 1.8 });
-    pads.push({ from: track.launch.padStart - 30, to: track.launch.takeoffS + 6 });
+  for (const launch of track?.launches ?? (track?.launch ? [track.launch] : [])) {
+    narrow.push({ from: launch.padStart - 30, to: launch.takeoffS + 2, half: pointAt(launch.landingS).halfWidth - 1.8 });
+    pads.push({ from: launch.padStart - 30, to: launch.takeoffS + 6 });
   }
   if (mapId === 'wendover') {
     WENDOVER_JUMPS.forEach(([x, z], k) => { const { s } = locate([x, NaN, z]); jumps.push({ id: `hop-${k}`, s0: s - 0.8, s1: s + 0.8, height: 0.9 }); });
@@ -189,6 +199,7 @@ function buildRoute(mapId) {
         y: q.dogY ?? q.y, hint: q.index, swimming: q.movement === 'swim',
         speed: track.speedFactor ? track.speedFactor(q, { stamina: 0.5, swimming: clamp(swimming / 10, 0, 1) }, airborne) : 1,
         hills: Boolean(track.speedFactor),
+        kick: airborne ? null : q.kick ?? null,       // a boost pad whose boost stays with the dog
       };
     }
     if (mapId === 'wendover') {
@@ -199,8 +210,8 @@ function buildRoute(mapId) {
   }
 
   return {
-    mapId, length, pointAt, locate, ahead, limitAt, onPad, groundAt, obstacles, jumps, boxes, bones, burrows,
-    steep: mapId === 'frostpeak',
+    mapId, length, pointAt, locate, ahead, limitAt, onPad, groundAt, obstacles, jumps, boxes, bones, burrows, sliders,
+    steep: mapId === 'frostpeak', drops: Boolean(track?.drops?.length),
     // the farm's tractor, sheep, pigs, sails and rolling bales: where they are is a matter of the race clock
     hazardHit: track?.hazardHit ?? null,
     hazardZones: Object.values(track?.hazardZones ?? {}).flat(),
@@ -208,6 +219,8 @@ function buildRoute(mapId) {
     // how slippery the road is at s (the mud run), 0 to 1
     slipAt: track?.slipAt ?? (() => 0),
     rings: track?.rings ?? [], ringAt: track?.ringAt ?? (() => null), bounce: track?.rules.bounce ?? null,
+    // a second road beside the main one for a while (Neon Nexus): { id, side, centre, half, slope, branch } at s, or null
+    branchAt: track?.branches?.length ? track.branchAt : null,
   };
 }
 
@@ -239,7 +252,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   let position = [0, 0, 0], groundY = 0, slope = 0;
   let jumpHeight = 0, jumpSpeed = 0, jumpGravity = JUMP.gravity, jumping = false, ringHop = 0;
   // its clocks, in seconds of its own running time
-  let time = 0, startAt = between(L.reaction), stunUntil = 0, boneUntil = -1, effect = null;
+  let time = 0, startAt = between(L.reaction), stunUntil = 0, boneUntil = -1, effect = null, kick = null;       // kick: { speed, until, quick } from a held boost pad
   let progressAt = 0, progressS = 0, travelled = 0, finishing = false;
   // how it is driving
   const lane = (random() - 0.5) * 0.5, phase = [random() * 7, random() * 7];
@@ -255,7 +268,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   function place(at, rotation, change = null) {
     const found = route.locate(at, change ? null : s);
     s = found.s;
-    lateral = clamp(found.lateral, -route.pointAt(s).halfWidth, route.pointAt(s).halfWidth);
+    const reach = route.branchAt?.(s) ? Infinity : route.pointAt(s).halfWidth;       // (it may be on a second road, well out to the side)
+    lateral = clamp(found.lateral, -reach, reach);
     sideSpeed = 0; yaw = rotation; hint = -1;
     position = [...at]; groundY = at[1];
     jumpHeight = jumpSpeed = 0; jumping = false; ringHop = 0;
@@ -263,7 +277,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       effect = { speed: change.speed, until: time + change.seconds };
       attempt += 1;                        // (a fresh go at whatever it got wrong)
       speed = change.running ? sprintSpeed * change.speed : 0;
-      boneUntil = -1;
+      boneUntil = -1; kick = null;
     }
     progressAt = time; progressS = travelled;
   }
@@ -275,10 +289,13 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       : clamp(1 - HANDLING.hillEffect * slope, 0.8, 1.08);
     const boneLeft = boneUntil - time;
     const bone = boneLeft <= 0 ? 0 : Math.min(1, boneLeft / BONE_BOOST.easeOut);
+    const kickLeft = kick ? kick.until - time : 0, padBoost = kickLeft > 0 ? 1 + (kick.speed - 1) * Math.min(1, kickLeft / PAD_KICK.easeOut) : 1;
     return sprintSpeed * ground.speed * hill
-      * (effect && time < effect.until ? effect.speed : 1)
+      // (a landing boost and a boost pad's do not add up: the greater of the two; a slow-down after a fall still counts)
+      * (padBoost > 1 && !(effect && time < effect.until && effect.speed < 1) ? Math.max(padBoost, effect && time < effect.until ? effect.speed : 1) : effect && time < effect.until ? effect.speed : 1)
       * (1 + (BONE_BOOST.speedMultiplier - 1) * bone)
       * (world.special?.speed ?? 1)
+      * (world.slowed ?? 1)                                      // (Jazz's Earthquake)
       * (time < stunUntil ? 0.15 : 1);
   }
 
@@ -335,6 +352,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       }
     }
 
+
     // round whatever is in the way: things standing in the road, chew toys, slower dogs
     const blocks = [];
     for (const o of route.obstacles) {
@@ -348,7 +366,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
         if (found.distance < 30 && gap > -1 && gap < reach) blocks.push({ gap, lateral: found.lateral, radius: TOY.radius });
       }
     }
-    if (!world.special?.hitRadius && !world.special?.flyHeight) {
+    if (!world.special?.hitRadius && !world.special?.flyHeight && !world.special?.rope) {
       for (const other of world.dogs ?? []) {
         if (other.finished) continue;
         const found = route.locate(other.position, s), gap = route.ahead(found.s, s);
@@ -415,6 +433,17 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
         if (!hazard) continue;
         // a sheep or a pig: over it, if there is time to get up (the jump is highest 0.2 to 0.65 s in)
         if (hazard.height <= 1.3 && ahead >= 0.2) return { cap: top, jump: ahead <= 0.6 };
+        // something that cannot be jumped (or not in time): step out of its way if there is a clear line beside it,
+        // and slow down only if there is not.  (An easier dog thinks of this less often.)
+        if (decide(`dodge-${hazard.id}-${Math.floor(world.raceSeconds / 4)}`, L.pace >= 0.9 ? 0.9 : 0.55)) {
+          const room = route.limitAt(s + reach);
+          for (const step of [2.6, -2.6, 4.8, -4.8, 7, -7]) {
+            const aside = clamp(lateral + step, -room, room);
+            if (Math.abs(aside - lateral) < 1.8) continue;
+            const clearAt = when => { const p = route.pointAt(s + speed * when, aside); return !route.hazardHit([p.x, p.y, p.z], world.raceSeconds + when); };
+            if ([ahead - 0.3, ahead - 0.15, ahead, ahead + 0.15, ahead + 0.3].every(when => when < 0 || clearAt(when))) return { cap: top, jump: false, dodge: aside };
+          }
+        }
         return { cap: Math.min(top, Math.max(0, speed - BRAKING * 0.3)), jump: false };
       }
     }
@@ -449,7 +478,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       case SPECIAL_ITEM:
         if (!special) return true;
         if (special.kind === 'jet') return true;
-        if (special.kind === 'flush' || special.kind === 'kelp' || special.kind === 'sheep') return !leading || heldFor > 8;
+        if (special.kind === 'flush' || special.kind === 'kelp' || special.kind === 'sheep' || special.kind === 'quake') return !leading || heldFor > 8;
+        if (special.kind === 'rope') return inFront(aim ? 14 : 22, 40) || heldFor > 6;      // the twins' rope: with anyone at all just up the road
         return inFront(aim ? 22 : 35, aim ? 4 : 8) || heldFor > 6;    // the sled, the spin, the wave: with someone to run into
       default: return true;
     }
@@ -482,11 +512,31 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     hint = ground.hint;
 
     // ----- how fast
+    if (ground.kick && time >= stunUntil) {
+      if (!(kick && kick.until > time) && speed > 0) speed += sprintSpeed * (ground.kick.speed - 1) * PAD_KICK.instant;
+      kick = { speed: ground.kick.speed, until: time + ground.kick.hold + PAD_KICK.easeOut, quick: ground.kick.quick ?? PAD_KICK.quick };
+    }
     const top = topSpeed(ground, world);
     let cap = finishing ? 0 : top * L.pace;
     if (world.special?.speed) cap = top;                     // a special carries the dog along by itself
     const limit = route.limitAt(s + Math.max(4, speed * 0.4));
-    const target = finishing ? lateral : chooseLine(world, limit);
+    let target = finishing ? lateral : chooseLine(world, limit);
+    // a second road leaving this one: a dog makes up its mind once a lap whether to take it, and one that
+    // does is carried across with it (down the middle of it, a little to its own side)
+    const branch = finishing || !route.branchAt ? null : route.branchAt(s);
+    const riding = branch && decide(`branch-${branch.id}:${lap()}`, branch.branch.bots ?? 0.5) ? branch : null;
+    if (riding) target = riding.side * riding.centre + lane * riding.half;
+    // a moving platform coming up (or under it): be where it will be when it gets there
+    if (!finishing && world.raceSeconds != null) {
+      const k = route.sliders.findIndex(q => route.ahead(q.s1, s) > 0 && route.ahead(q.s0, s) < 26);
+      if (k >= 0) {
+        const pad = route.sliders[k], next = route.sliders[k + 1], pace = Math.max(speed, 8), when = gap => world.raceSeconds + Math.max(0, gap) / pace;
+        target = pad.lateralAt(when(route.ahead(pad.s0 + 4, s)));
+        // near the far end of it: somewhere that is on this one now and will be on the next when it lands there
+        if (next && route.ahead(next.s0, pad.s1) < 12 && route.ahead(pad.s1, s) < 12) target = (pad.lateralAt(world.raceSeconds) + next.lateralAt(when(route.ahead(next.s0 + 3, s)))) / 2;
+        target = clamp(target, -limit, limit);
+      }
+    }
     if (!finishing) {
       cap = Math.min(cap, cornerSpeed(s, lateral, top));
       for (const share of [0.4, 0.8, 1.2]) {                  // ease off in time for the bend ahead
@@ -496,12 +546,14 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     }
     const hazards = finishing ? { cap, jump: false } : watchHazards(world, cap);
     cap = Math.min(cap, hazards.cap);
+    if (hazards.dodge != null) target = hazards.dodge;
     const boneLeft = boneUntil - time;
     const effort = clamp((speed - runSpeed * 0.5) / (sprintSpeed - runSpeed * 0.5), 0, 1);
     const push = acceleration
       * pickupShare(stats.agility, HANDLING.topEndAcceleration, effort)
       * (world.special?.speed ? 2.5 : 1)
       * (boneLeft > 0 ? BONE_BOOST.accelerationMultiplier : 1)
+      * (kick && kick.until > time ? kick.quick : 1)
       * (route.steep && slope < 0 ? 1 - 4 * slope : 1)
       * (ground.swimming ? waterAcceleration : 1);
     speed = speed < cap ? Math.min(cap, speed + push * dt) : Math.max(cap, speed - (finishing ? 9 : BRAKING) * dt);
@@ -509,12 +561,17 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
 
     // ----- across the road, then along it
     const sideways = clamp(0.3 * speed, 1, 5.5) * statScale(stats.agility, STAT_EFFECT.agilityTurn);
-    const wantedSide = clamp((target - lateral) * 3.5, -sideways, sideways);
-    sideSpeed += (wantedSide - sideSpeed) * (1 - Math.exp(-5 * dt));
-    if (Math.abs(sideSpeed) > speed * 0.6) sideSpeed = Math.sign(sideSpeed) * speed * 0.6;
-    lateral += sideSpeed * dt;
+    if (riding) {
+      const most = (sideways + Math.abs(riding.slope) * speed * 1.5 + 1) * dt, move = clamp(target - lateral, -most, most);
+      sideSpeed = move / dt; lateral += move;
+    } else {
+      const wantedSide = clamp((target - lateral) * 3.5, -sideways, sideways);
+      sideSpeed += (wantedSide - sideSpeed) * (1 - Math.exp(-5 * dt));
+      if (Math.abs(sideSpeed) > speed * 0.6) sideSpeed = Math.sign(sideSpeed) * speed * 0.6;
+      lateral += sideSpeed * dt;
+    }
     const here = route.pointAt(s);
-    const along = Math.sqrt(Math.max(0, (speed * dt) ** 2 - (sideSpeed * dt) ** 2)) / Math.max(0.5, 1 - here.curvature * lateral);
+    const along = Math.sqrt(Math.max((speed * dt * 0.8) ** 2, (speed * dt) ** 2 - (sideSpeed * dt) ** 2)) / Math.max(0.5, 1 - here.curvature * lateral);
     s = (s + along) % route.length;
     travelled += along;
 
@@ -544,6 +601,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     const point = route.pointAt(s, lateral);
     ground = route.groundAt(point.x, point.z, s, dog, stats.swimming, hint, heightAt, jumping);
     hint = ground.hint;
+    // the road stops and carries on a long way below: it falls to it
+    if (route.drops && groundY - ground.y > DROP.from) { jumpHeight += groundY - ground.y; if (!jumping) jumpSpeed = 0; jumping = true; jumpGravity = DROP.gravity; }
     groundY = ground.y;
     const next = [point.x, groundY + jumpHeight, point.z];
     const dx = next[0] - position[0], dz = next[2] - position[2];
@@ -567,7 +626,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   return {
     place, step,
     /** Knocked over: nearly stopped, and slow until it is back on its paws. */
-    hit(stunMs) { stunUntil = time + stunMs / 1000; speed *= 0.15; boneUntil = -1; },
+    hit(stunMs) { stunUntil = time + stunMs / 1000; speed *= 0.15; boneUntil = -1; kick = null; },
     /** A golden bone (the item, or one off the road). */
     boost() {
       boneUntil = time + BONE_BOOST.duration + BONE_BOOST.easeOut;

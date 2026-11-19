@@ -32,7 +32,10 @@ test('every map has box rows of three and single bones, with IDs unique across a
   const all = [];
   for (const mapId of Object.keys(MAPS)) {
     const boxes = TREAT_BOXES_BY_MAP[mapId], bones = GOLDEN_BONE_SPOTS[mapId];
-    assert.ok(boxes?.length >= 9 && boxes.length % 3 === 0, `${mapId}: box rows`);
+    // (the Speed Bowl's rows are five across; Neon Nexus has rows of four where it is two roads, two on each)
+    if (mapId === 'speed_bowl') assert.equal(boxes.length % 5, 0);
+    else if (mapId === 'neon_nexus') assert.ok(boxes.length >= 30);
+    else assert.ok(boxes?.length >= 9 && boxes.length % 3 === 0, `${mapId}: box rows`);
     assert.ok(bones?.length >= 4, `${mapId}: bones`);
     all.push(...boxes.map(b => b.id));
   }
@@ -42,8 +45,10 @@ test('every map has box rows of three and single bones, with IDs unique across a
 test('pickups keep clear of hazards, the start line and each other', () => {
   for (const [mapId, path] of Object.entries(PICKUP_PATHS)) {
     const spots = [...BOX_ROW_S[mapId], ...BONE_S[mapId]];
+    // (three maps say for themselves exactly where everything goes, closer together than the rest: the Speed Bowl is all pickups)
+    const placed = Boolean(path.pickups);
     for (const s of spots) {
-      assert.ok(lapDistance(s, 0, path.length) >= 60, `${mapId}: ${s.toFixed(0)} m is near the start line`);
+      assert.ok(lapDistance(s, 0, path.length) >= (placed ? 30 : 60), `${mapId}: ${s.toFixed(0)} m is near the start line`);
       for (const [a, b] of path.hazards) {
         assert.ok(lapDistance(s, (a + b) / 2, path.length) > (b - a) / 2, `${mapId}: ${s.toFixed(0)} m is inside hazard ${a}-${b}`);
       }
@@ -51,7 +56,7 @@ test('pickups keep clear of hazards, the start line and each other', () => {
     // Frostpeak's black run is packed on purpose (30 bones, 12 box rows); everywhere else keeps 70 m
     const onRun = s => path.slope && s > path.slope.topS && s < path.slope.bottomS;
     const sorted = [...spots].filter(s => !onRun(s)).sort((a, b) => a - b);
-    sorted.forEach((s, i) => assert.ok(lapDistance(s, sorted[(i + 1) % sorted.length], path.length) >= 70, `${mapId}: spots too close at ${s.toFixed(0)} m`));
+    if (!placed) sorted.forEach((s, i) => assert.ok(lapDistance(s, sorted[(i + 1) % sorted.length], path.length) >= 70, `${mapId}: spots too close at ${s.toFixed(0)} m`));
   }
 });
 

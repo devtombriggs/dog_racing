@@ -1,10 +1,12 @@
 // Grand Prix: four races one after another with the same dogs, points for each finishing place, and
 // the most points after the fourth race wins.  Shared by the server (which runs it) and the game
-// (which offers the two of them beside the single maps, and shows the scores).
+// (which offers them beside the single maps, and shows the scores).
 
 export const GRAND_PRIX = {
   gp1: { name: 'Grand Prix 1', maps: ['wendover', 'water_park', 'pet_mall', 'treat_road'] },
   gp2: { name: 'Grand Prix 2', maps: ['farmyard', 'modbury_heights', 'mud_park', 'frostpeak'] },
+  gp3: { name: 'Grand Prix 3', maps: ['desert_dunes', 'speed_bowl', 'kombu_house', 'neon_nexus'] },
+  gp4: { name: 'Grand Prix 4', maps: ['yorkshire_dales', 'boneyard', 'the_vets', 'monkey_jungle'] },
 };
 
 // 1st gets 10 points, 2nd 8, and so on down to 2 for 5th and 1 for 6th.  A dog that had not finished when the race

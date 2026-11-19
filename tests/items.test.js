@@ -137,7 +137,7 @@ test('specials: never for the leader, more likely the further back, and a rammin
   assert.ok(chances.every((c, i) => i === 0 || c > chances[i - 1]), `rising with place: ${chances}`);
   assert.ok(Math.abs(chances[0] - 0.1) < 1e-9 && Math.abs(chances[3] - 0.3) < 1e-9, '2nd 10 %, last 30 %');
   assert.ok(Math.abs(specialChance(2, 2) - 0.3) < 1e-9, '2nd of two is last');
-  assert.deepEqual(Object.keys(SPECIALS).sort(), ['black_lab', 'enzo', 'gsp', 'kombu', 'pablo', 'ralph', 'rocky', 'second_dog'], 'every dog has one');
+  assert.deepEqual(Object.keys(SPECIALS).sort(), ['baz_naz', 'black_lab', 'enzo', 'gsp', 'jazz', 'kombu', 'pablo', 'ralph', 'rocky', 'second_dog'], 'every dog has one');
   // Pablo's team runs ahead of him: a dog 7 m in front is hit, one 7 m behind or beside is not
   const sled = SPECIALS.pablo;
   assert.ok(specialTouches(sled, [0, 0, 0], 0, [0, 0, 7]));
@@ -149,6 +149,38 @@ test('specials: never for the leader, more likely the further back, and a rammin
   assert.equal(pheasantFlightMs(0), PHEASANT.minFlightMs);
   assert.equal(pheasantFlightMs(1e6), PHEASANT.maxFlightMs);
   assert.ok(pheasantFlightMs(60) > pheasantFlightMs(20));
+});
+
+test('Baz and Naz\'s Trip Wire: six seconds, faster, a rope right across the road that trips any dog it reaches unless it is jumped, and through whatever stands in the way', async () => {
+  const { SPECIALS, specialTouches, ropeTrips, ghostsThrough } = await import('../shared/specials.js');
+  const { DOG_STATS } = await import('../shared/dogStats.js');
+  const spec = SPECIALS.baz_naz;
+  assert.equal(spec.kind, 'rope');
+  assert.equal(spec.durationMs, 6000);
+  assert.ok(spec.speed > 1.2 && spec.speed < SPECIALS.pablo.speed);
+  // on the road: a dog at the same place round the lap is caught wherever it is across the road; one further on or back is not
+  const L = 1500, twins = { s: 400, y: 2 };
+  assert.ok(ropeTrips(spec, twins, { s: 400.8, y: 2 }, L));
+  assert.ok(ropeTrips(spec, twins, { s: 399.2, y: 2 }, L));
+  assert.ok(!ropeTrips(spec, twins, { s: 404, y: 2 }, L));
+  assert.ok(!ropeTrips(spec, twins, { s: 400, y: 2 + spec.rope.clear + 0.2 }, L), 'a dog in the air has jumped it');
+  assert.ok(!ropeTrips(spec, twins, { s: 400, y: -8 }, L), 'nor a dog on the floor below');
+  assert.ok(ropeTrips(spec, { s: 0.5, y: 0 }, { s: L - 0.5, y: 0 }, L), 'across the start line');
+  assert.ok(!ropeTrips(SPECIALS.pablo, twins, { s: 400, y: 2 }, L));
+  // off the road's own terms (chew toys): straight out to both sides of them
+  assert.ok(specialTouches(spec, [0, 0, 0], 0, [9, 0, 0.5]) && specialTouches(spec, [0, 0, 0], 0, [-9, 0, -0.5]));
+  assert.ok(!specialTouches(spec, [0, 0, 0], 0, [9, 0, 4]) && !specialTouches(spec, [0, 0, 0], 0, [0, 1.5, 0]));
+  assert.ok(specialTouches(spec, [0, 0, 0], Math.PI / 2, [0.5, 0, 9]), 'it turns with them');
+  // through a thing standing on the road, but not through the road's edge; and only in this special
+  assert.ok(ghostsThrough(spec, { blocked: true, lateral: 2, halfWidth: 8 }));
+  assert.ok(!ghostsThrough(spec, { blocked: true, lateral: 7.6, halfWidth: 8 }));
+  assert.ok(!ghostsThrough(spec, { blocked: false, lateral: 2, halfWidth: 8 }));
+  assert.ok(!ghostsThrough(SPECIALS.pablo, { blocked: true, lateral: 2, halfWidth: 8 }) && !ghostsThrough(null, { blocked: true, lateral: 2, halfWidth: 8 }));
+  // (and Jazz is Pablo and a shade better)
+  for (const key of ['speed', 'acceleration', 'agility', 'swimming']) assert.ok(DOG_STATS.jazz[key] >= DOG_STATS.pablo[key] && DOG_STATS.jazz[key] <= DOG_STATS.pablo[key] + 0.5, key);
+  assert.ok(DOG_STATS.jazz.speed > DOG_STATS.pablo.speed);
+  // just under Pablo all round
+  for (const key of ['speed', 'acceleration', 'agility', 'swimming']) assert.ok(DOG_STATS.baz_naz[key] < DOG_STATS.pablo[key] && DOG_STATS.baz_naz[key] >= DOG_STATS.pablo[key] - 0.5, key);
 });
 
 test('Enzo\'s Belly Bounce: up and down every bounce with a burst of speed at the start of each; he squashes a dog only when he is down on it', async () => {

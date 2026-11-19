@@ -36,3 +36,5 @@ export const JUMP = { force: 7, gravity: 16 };
 // dog does a short, snappy hop instead: about 2 m high (clears the padded slalom gates, solid to
 // 1.7 m; the snowmen are too tall and must be steered round) and 0.6 s in the air
 export const STEEP_JUMP = { force: 12.9, gravity: 41.6, below: -0.12 };
+// Where the road drops away under a dog by more than `from` metres at once (shared/trackKit.js `drops`) it falls, this fast
+export const DROP = { from: 2.5, gravity: 26 };

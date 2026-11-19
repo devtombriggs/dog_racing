@@ -38,9 +38,9 @@ test('Water Park: two pools to swim, and Poppy is the only dog as fast in the wa
   }
   const lagoon = at(mid(T.pools[0])), river = at(mid(T.pools[1]));
   const share = dog => T.speedFactor(lagoon, stats(dog));
-  assert.ok(share('black_lab') > 1 && share('black_lab') < 1.1, 'Poppy');
+  assert.equal(share('black_lab'), 1, 'the water does not slow Poppy, and does not speed her up');
   for (const dog of ['gsp', 'pablo', 'second_dog', 'ralph']) assert.ok(share(dog) < 0.6, dog);
-  assert.ok(share('gsp') > share('pablo') && share('pablo') > share('ralph'));
+  assert.ok(share('rocky') > share('pablo') && share('pablo') > share('ralph'));
   // the Lazy River flows with the race: everyone is carried a little
   for (const dog of Object.keys(DOG_STATS)) assert.ok(Math.abs(T.speedFactor(river, stats(dog)) - share(dog) - 0.15) < 1e-9, dog);
   // in the air (off a rubber ring) the water does not slow a dog

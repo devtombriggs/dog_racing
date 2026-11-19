@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { racingLineAt } from '../../../shared/pickupSpots.js';
-import { bellyBounce, SPECIALS } from '../../../shared/specials.js';
+import { bellyBounce, ghostsThrough, SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
 import { BASE_SPEED } from '../../../shared/dogStats.js';
-import { JUMP, STEEP_JUMP } from '../../../shared/handling.js';
+import { JUMP, STEEP_JUMP, DROP } from '../../../shared/handling.js';
+import { PAD_KICK } from '../../../shared/items.js';
 import { DOGS, STAT_EFFECT, WATER_SPEED, WATER_ACCELERATION, statScale, swimShare, turnSpeedLoss, pickupShare } from '../../config/dogs.js';
 import { HANDLING, RUNNING_JUMP_SPEED } from '../../config/handling.js';
 import { CONTACT, dogMass, dogOverlap } from './contact.js';
@@ -68,11 +69,14 @@ export class LocalDog extends DogAvatar {
     this.launchFlight = null;       // fired from the catapult or cannon: { startedAt, lateral }
     this.tunnelRide = null;         // underground in a burrow: { tunnel, startedAt }
     this.launchBoostUntil = 0;
+    this.padKick = null;            // a boost pad whose boost stays with the dog: { speed, until, quick, mega }
     this.burrowBoostUntil = 0;
     this.burrowBoost = 1.3;         // how much faster he comes out of a burrow (each burrow says)
     this.recoveryUntil = 0;         // slowed after a respawn until then
     this.respawnRevision = player?.respawnRevision ?? 0;      // (not 0 for a player coming back into a race)
     this.stunUntil = 0;
+    this.quakeUntil = 0;    // shaken by Jazz's Earthquake until then, at quakeSpeed of its pace
+    this.quakeSpeed = 1;
     this.stunLength = 1;
 
     // ---------------------------------
@@ -205,6 +209,7 @@ export class LocalDog extends DogAvatar {
     race.burrowOverlay.hidden = true;
     if (this.model) this.model.visible = true;
     this.launchBoostUntil = 0;
+    this.padKick = null;            // a boost pad whose boost stays with the dog: { speed, until, quick, mega }
     race.goldenBones.cancelBoost();
     this.respawnRevision = data.respawnRevision;
     this.recoveryUntil = performance.now() + data.penaltySeconds * 1000;
@@ -223,7 +228,7 @@ export class LocalDog extends DogAvatar {
 
   // Fired from Treat Road's catapult or Frostpeak's cannon
   launched(data) {
-    this.launchFlight = { startedAt: performance.now(), lateral: data.lateral };
+    this.launchFlight = { startedAt: performance.now(), lateral: data.lateral, index: data.launch ?? 0 };
     this.fall = null;
     this.knock.set(0, 0, 0);
     this.#groundJump();
@@ -236,6 +241,8 @@ export class LocalDog extends DogAvatar {
     this.launchFlight = null;
     this.respawnRevision = data.respawnRevision;
     this.launchBoostUntil = performance.now() + data.boostSeconds * 1000;
+    this.launchBoost = data.speedMultiplier;
+    this.padKick = null;
     this.position.fromArray(data.position);
     this.group.rotation.set(0, data.rotation, 0);
     this.travelYaw = data.rotation;
@@ -273,7 +280,15 @@ export class LocalDog extends DogAvatar {
     this.stunLength = stunMs;
     this.stunUntil = performance.now() + stunMs;
     this.currentSpeed *= 0.15;
+    this.padKick = null;
     this.race.goldenBones.cancelBoost();
+  }
+
+  // Jazz has stomped: this dog can barely move for a while
+  shaken(seconds, speed) {
+    this.quakeUntil = performance.now() + seconds * 1000;
+    this.quakeSpeed = speed;
+    this.currentSpeed *= speed;
   }
 
   // This dog's special ability has begun
@@ -315,6 +330,7 @@ export class LocalDog extends DogAvatar {
   get fov() {
     const { goldenBones, specials } = this.race;
     return this.launchFlight ? 94
+      : this.padKick && performance.now() < this.padKick.until ? (this.padKick.mega ? 92 : 86)
       : performance.now() < this.launchBoostUntil || goldenBones.isBoosting() || specials.physics(this.id)?.speed ? 84 : 75;
   }
 
@@ -337,7 +353,7 @@ export class LocalDog extends DogAvatar {
   #fly(delta) {
     const { hud, world } = this.race;
     const elapsed = (performance.now() - this.launchFlight.startedAt) / 1000;
-    const point = world.launchTrack.launchPoint(elapsed, this.launchFlight.lateral);
+    const point = world.launchTrack.launchPoint(elapsed, this.launchFlight.lateral, this.launchFlight.index);
     this.position.set(point.x, point.y, point.z);
     this.group.rotation.y = point.rotationY;
     if (this.model) this.model.rotation.x = point.pitch;
@@ -396,6 +412,15 @@ export class LocalDog extends DogAvatar {
     this.inBog = Boolean(world.woodland && !this.#clearOfGround && woodlandBogAt(position.x, position.z));
     const inWater = !this.isJumping && (woodlandSurface?.inWater || (this.offTrack && world.isOverWater(position)));
     const coastalGround = coastalTrack?.query(position.x, position.z);
+    // a boost pad whose boost stays with the dog after the pad (Neon Nexus)
+    const padNow = performance.now();
+    if (coastalGround?.kick && !this.isJumping && padNow >= this.stunUntil) {
+      const pad = coastalGround.kick;
+      if (!(this.padKick && this.padKick.until > padNow) && this.currentSpeed > 0) this.currentSpeed += this.sprintSpeed * (pad.speed - 1) * PAD_KICK.instant;
+      this.padKick = { speed: pad.speed, until: padNow + (pad.hold + PAD_KICK.easeOut) * 1000, quick: pad.quick ?? PAD_KICK.quick, mega: Boolean(pad.mega) };
+    }
+    const kickLeft = this.padKick ? (this.padKick.until - padNow) / 1000 : 0;
+    const kickNow = kickLeft > 0 ? 1 + (this.padKick.speed - 1) * Math.min(1, kickLeft / PAD_KICK.easeOut) : 1;
     const terrainMultiplier = inWater && woodlandSurface
       ? woodlandSwimMultiplier(stats.swimming)
       : coastalGround
@@ -418,10 +443,11 @@ export class LocalDog extends DogAvatar {
       terrainMultiplier *
       hillMultiplier *
       (performance.now() < this.burrowBoostUntil ? this.burrowBoost : 1) *
-      (performance.now() < this.launchBoostUntil ? world.launchTrack.launch.exitSpeedMultiplier : 1) *
+      Math.max(kickNow, performance.now() < this.launchBoostUntil ? this.launchBoost ?? world.launchTrack.launch.exitSpeedMultiplier : 1) *      // (a landing boost and a boost pad's do not add up)
       (world.proceduralTrack && performance.now() < this.recoveryUntil ? world.proceduralTrack.rules.respawnSpeedMultiplier : 1) *
       goldenBones.speedMultiplier() *
       (special?.speed ?? 1) *
+      (performance.now() < this.quakeUntil ? this.quakeSpeed : 1) *      // (Jazz's Earthquake)
       (performance.now() < this.stunUntil ? 0.15 : 1);
     // (the last of a dog's speed comes slowly, and an agile dog is back up to speed sooner)
     const effectiveAcceleration = this.acceleration *
@@ -429,6 +455,7 @@ export class LocalDog extends DogAvatar {
       pickupShare(stats.agility, HANDLING.topEndAcceleration, sprintFraction(this.currentSpeed, this.runSpeed, sprintSpeed)) *
       (special?.speed ? 2.5 : 1) *
       goldenBones.accelerationMultiplier() *
+      (kickLeft > 0 ? this.padKick.quick : 1) *
       (steepRun && slope < 0 ? 1 - 4 * slope : 1) *      // gravity does the work going down the black run
       (inWater
         ? this.waterAcceleration
@@ -534,7 +561,7 @@ export class LocalDog extends DogAvatar {
 
     const previousPosition = position.clone();
     const proposedPosition = previousPosition.clone().addScaledVector(forward, this.currentSpeed * delta);
-    if (world.blockedByObstacle(previousPosition, proposedPosition)) {
+    if (!frame.special?.ghost && world.blockedByObstacle(previousPosition, proposedPosition)) {
       // Stop forward movement; steering and jumping remain available.
       this.currentSpeed = 0;
     } else {
@@ -621,7 +648,7 @@ export class LocalDog extends DogAvatar {
 
     // Slide along the coastal banks and dunes; exposed cliff edges remain open.
     let coastalSurface = coastalTrack?.query(position.x, position.z);
-    if (coastalSurface?.blocked) {
+    if (coastalSurface?.blocked && !ghostsThrough(frame.special, coastalSurface)) {      // (the twins' Trip Wire goes through whatever stands on the road)
       position.x = coastalSurface.clampX;
       position.z = coastalSurface.clampZ;
       coastalSurface = coastalTrack.query(position.x, position.z);
@@ -735,6 +762,18 @@ export class LocalDog extends DogAvatar {
     // Over a dip (the stream) a jumping dog keeps the height it took off
     // from; it only meets lower ground once it comes down
     const groundBelow = world.groundHeightAt(position, this.groundY);
+    // The road stops and carries on a long way below (the window at the Vets, the end of the stair in
+    // the jungle): the dog runs off the end and falls to it, rather than being put down on it
+    if (world.proceduralTrack?.drops?.length && this.groundY - groundBelow > DROP.from) {
+      // (a dog that jumped off the end keeps the rise of its jump, and falls from the top of it)
+      this.jumpHeight += this.groundY - groundBelow;
+      this.groundY = groundBelow;
+      if (!this.isJumping) { this.verticalVelocity = 0; this.play('Jump'); }
+      this.isJumping = true;
+      this.isLanding = false;
+      this.jumpedFromOffTrack = false;
+      this.jumpGravity = DROP.gravity;
+    }
     // ...except down Frostpeak's black run, where that would sail the dog out level over a
     // 45 % slope: there a jump is a hop that follows the mountain down
     const groundNow = this.isJumping && !steepRun && !special?.flyHeight   // (flying, he follows the ground)
@@ -855,6 +894,7 @@ export class LocalDog extends DogAvatar {
         now < this.recoveryUntil
           ? 'RECOVERING — REDUCED SPEED'
           : now < this.launchBoostUntil ? 'LANDING BOOST!'
+          : this.padKick && now < this.padKick.until ? (this.padKick.mega ? 'MEGA BOOST!' : 'BOOST!')
           : goldenBones.isBoosting() ? 'GOLDEN BONE BOOST!'
           : offTrack ? 'OFF THE EDGE'
           : now - (this.bouncedAt ?? -1e9) < 700 ? 'BOING!'
@@ -870,5 +910,6 @@ export class LocalDog extends DogAvatar {
       );
     }
     if (special) hud.setSurface(`${special.name.toUpperCase()}!`, '#ffe45c');
+    else if (performance.now() < this.quakeUntil) hud.setSurface('EARTHQUAKE — HOLD ON!', '#ff8a6a');
   }
 }

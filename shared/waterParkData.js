@@ -54,9 +54,9 @@ const WATER_BELOW_DECK = 0.35;          // the water lies this far below the dec
 const POOL_DEPTH = 1.7;                 // ...and is this deep in the middle
 const POOL_RAMP = 7;                    // metres of slope into and out of each pool
 const SWIM_DRAFT = 0.42;                // a swimming dog rides this far below the surface
-// Share of top speed a dog keeps swimming, from its swim stat (0.4 = a 4, 1 = a 10): Poppy is a touch
-// faster in the water than on land; the weak swimmers crawl.   10 -> 1.05   6 -> 0.57   5 -> 0.49   4 -> 0.45
-const swimShare = swimming => { const skill = Math.max(0, Math.min(1, (swimming * 10 - 4) / 6)); return 0.45 + 0.6 * skill ** 1.5; };
+// Share of top speed a dog keeps swimming, from its swim stat (0.4 = a 4, 1 = a 10): Poppy is not slowed
+// at all, and never quicker than on land; the weak swimmers crawl.   10 -> 1   6 -> 0.57   5 -> 0.49   4 -> 0.45
+const swimShare = swimming => { const skill = Math.max(0, Math.min(1, (swimming * 10 - 4) / 6)); return Math.min(1, 0.45 + 0.6 * skill ** 1.5); };
 const RIVER_FLOW = 0.15;                // the Lazy River carries every dog along by this much of its top speed
 const SLIDE_SPEED = 1.45;               // share of top speed on the slide
 const RING = { spacing: 13.5, radius: 2.4, zigzag: 1.1 };

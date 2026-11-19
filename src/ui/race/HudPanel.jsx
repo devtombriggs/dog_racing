@@ -1,7 +1,6 @@
-import { MAPS, DEFAULT_MAP } from '../../../shared/maps.js';
+import { MAPS, DEFAULT_MAP, lapsFor } from '../../../shared/maps.js';
 import { ITEM_NAMES } from '../../../shared/items.js';
 import { SPECIALS, SPECIAL_ITEM } from '../../../shared/specials.js';
-import { TOTAL_LAPS } from '../../config/handling.js';
 import { VOICE_CHAT } from '../../config/env.js';
 import { hudStyle } from '../styles.js';
 
@@ -34,7 +33,7 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef, device = null 
           marginBottom: 12
         }}
       >
-        LAP {lap}/{TOTAL_LAPS}
+        LAP {lap}/{lapsFor(room?.mapId ?? DEFAULT_MAP)}
       </div>
 
       <div style={{ fontSize: 12, color: '#b4c9b5', marginBottom: 3 }}>ITEM</div>
@@ -148,6 +147,14 @@ export function HudPanel({ state, speedRef, timerRef, surfaceRef, device = null 
         {room?.mapId === 'wendover' && <div>Amber burrows boost Ralph · Poppy swims fastest</div>}
         {room?.mapId === 'treat_road' && <div>Cyan pad launches automatically · falls return to checkpoints</div>}
         {room?.mapId === 'modbury_heights' && <div>Follow the trail · falls return you to a checkpoint</div>}
+        {room?.mapId === 'desert_dunes' && <div>Keep off the soft sand · nothing jumps a whirlwind: go round · jump the tumbleweed · weave the boulders</div>}
+        {room?.mapId === 'speed_bowl' && <div>Five laps · Treat Boxes and Golden Bones all the way round</div>}
+        {room?.mapId === 'kombu_house' && <div>Dodge the toy car · round through the pool (Poppy swims fastest) · watch for the shadows in the kitchen · the lift fires you upstairs · time the swinging doors · mind the wheelchair</div>}
+        {room?.mapId === 'neon_nexus' && <div>Pink arrows: MEGA boost · blue arrows: boost · two roads: the longer has the mega pads and the Golden Bones · jump from platform to platform · run on to a catapult</div>}
+        {room?.mapId === 'yorkshire_dales' && <div>Boost pads up the hills · flat out down them · jump the cheeses and the sheep · wade the ford · through the cave and out under the waterfall</div>}
+        {room?.mapId === 'boneyard' && <div>Golden Bones everywhere · it is slippery · wade the puddles, swim the bog · jump the rolling bones · keep off the bubbling mud</div>}
+        {room?.mapId === 'the_vets' && <div>Jump the cones, the pills, the syringes and the trolleys · nothing jumps a vet: go round · wet floor in the kennels · the way out is the top-floor window: run straight out of it</div>}
+        {room?.mapId === 'monkey_jungle' && <div>No sides on the bridges or the log: stay on · jump from swing to swing · jump the snakes and the monkeys · run off the end of the tree stair · keep out of a stone ball’s lane and off the coconut shadows</div>}
         {room?.mapId === 'mud_park' && <div>It is slippery: ease off in the bends · keep out of the deep mud · jump the logs · mind the quad bike</div>}
         {room?.mapId === 'pet_mall' && <div>Jump the cats and hamster balls · dodge the trolleys and tins · ride the escalator · leap the atrium</div>}
         {room?.mapId === 'water_park' && <div>Bounce across the rubber rings or swim · dodge the beach balls and the jets · ride the slide</div>}

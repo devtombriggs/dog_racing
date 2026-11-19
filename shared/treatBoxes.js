@@ -12,8 +12,9 @@ function boxesFor(mapId) {
   const path = PICKUP_PATHS[mapId];
   return BOX_ROW_S[mapId].flatMap((s, row) => {
     const centre = path.pointAt(s);
-    return LANES.map((lane, column) => {
-      const p = path.pointAt(s, lane * centre.halfWidth);
+    // (three across the road, unless the map says otherwise there)
+    return (path.lanes?.(s) ?? LANES.map(lane => lane * centre.halfWidth)).map((lateral, column) => {
+      const p = path.pointAt(s, lateral);
       return {
         id: mapId === 'treat_road' ? `treat-${row}-${column}` : `${mapId}-${row}-${column}`, s,
         groundPosition: [p.x, p.y, p.z],

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 import { env } from 'node:process';
-import { MAPS, PROCEDURAL_TRACKS } from '../shared/maps.js';
+import { lapsFor, MAPS, PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
@@ -209,7 +209,7 @@ test('older clients default to Wendover and host migration retains map selection
 });
 
 for (const [mapId, map] of Object.entries(MAPS)) {
-  test(`${mapId}: grid, loading gate, ordered checkpoints and three-lap finish`, context => {
+  test(`${mapId}: grid, loading gate, ordered checkpoints and a finish after the last lap`, context => {
     context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
     const host = client(), guest = client();
     const room = host.call('hostGame', { mapId }).room;
@@ -238,21 +238,27 @@ for (const [mapId, map] of Object.entries(MAPS)) {
     // Crossing the finish before visiting the route cannot count a lap.
     move(finishPoint(-2)); move(finishPoint(2));
     assert.equal(latest(room.code, 'raceProgress'), undefined);
-    for (let lap = 1; lap <= 3; lap++) {
+    const laps = lapsFor(mapId);                       // (three, or the Speed Bowl's five)
+    let landings = 0;
+    for (let lap = 1; lap <= laps; lap++) {
       // Skipping ahead cannot advance the required checkpoint.
       const last = map.checkpoints.at(-1);
       move([last.x, last.y ?? 0, last.z]);
       for (const checkpoint of map.checkpoints) {
         if (checkpoint.launchLanding) {
           const T = PROCEDURAL_TRACKS[mapId];              // (Treat Road's catapult, the Water Park's slide)
-          for (const s of [T.launch.padStart + 1, T.launch.takeoffS + 0.1]) {
+          // (Neon Nexus has three: the one that lands on this checkpoint)
+          const nearTo = l => { const p = T.pointAt(l.landingS); return Math.hypot(p.x - checkpoint.x, p.z - checkpoint.z); };
+          const launch = [...(T.launches ?? [T.launch])].sort((a, b) => nearTo(a) - nearTo(b))[0];
+          for (const s of [launch.padStart + 1, launch.takeoffS + 0.1]) {
             const p=T.pointAt(s); move([p.x,p.y,p.z]);
           }
           assert.equal(latest(room.code,'playerLaunched').playerId,host.id);
-          context.mock.timers.tick(T.launch.duration*1000+1);
+          context.mock.timers.tick(launch.duration*1000+1);
           move([checkpoint.x,checkpoint.y,checkpoint.z]);
           revision=latest(room.code,'playerLanded').respawnRevision;
-          assert.equal(revision,lap);
+          landings += 1;
+          assert.equal(revision,landings);
         }
         move([checkpoint.x, checkpoint.y ?? 0, checkpoint.z]);
       }
@@ -265,9 +271,9 @@ for (const [mapId, map] of Object.entries(MAPS)) {
       context.mock.timers.tick(1000);
       move(finishPoint(2));
       progress = latest(room.code, 'raceProgress');
-      assert.equal(progress.finished, lap === 3);
+      assert.equal(progress.finished, lap === laps);
       assert.equal(progress.totalCheckpoints, map.checkpoints.length);
-      if (lap < 3) assert.equal(progress.lap, lap + 1);
+      if (lap < laps) assert.equal(progress.lap, lap + 1);
     }
     assert.ok(latest(room.code, 'playerFinished').finishTime > 0);
     host.call('leaveGame'); guest.call('leaveGame');
@@ -1826,9 +1832,12 @@ test('reconnecting before the server has noticed the old connection is dead: the
   for (const p of [tom, again]) p.call('leaveGame');
 });
 
-test('Kombu\'s Kelp Dive: up behind the dog two places ahead; a good way behind the leader when that dog is first; never past first', context => {
+test('Kombu\'s Kelp Dive: up as far along the road as Poppy\'s wave carries her, past whoever is in between', async context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const { KELP } = { KELP: { behind: 8, behindLeader: 27, seconds: 1.1 } };
+  const { KELP, SPECIALS } = await import('../shared/specials.js');
+  // Poppy's wave: 5 s at 1.9 times her 17 m/s
+  assert.equal(KELP.distance, 17 * SPECIALS.black_lab.speed * SPECIALS.black_lab.durationMs / 1000);
+  assert.ok(KELP.distance > 150 && KELP.distance < 175, `${KELP.distance} m`);
   const at = s => { const p = FARM.pointAt(s); return [p.x, p.y, p.z]; };
   const along = position => FARM.query(position[0], position[2]).s;
   const box = TREAT_BOXES_BY_MAP.farmyard[0].groundPosition;        // (the first row of boxes, about 117 m round)
@@ -1865,34 +1874,107 @@ test('Kombu\'s Kelp Dive: up behind the dog two places ahead; a good way behind 
     for (const socket of sockets) socket.call('leaveGame');
     return result;
   };
-  // 4th of four: the dog two places ahead is 2nd (250 m round); he comes up just behind it, in front of the 3rd
-  let r = race([330, 250, 190]);
-  assert.ok(r.landed > 190 && r.landed <= 250 - KELP.behind + 2.5 && r.landed > 250 - KELP.behind - 30, `up at ${r.landed} m`);
-  assert.equal(r.places.indexOf(r.kombu.id), 2, 'that makes him 3rd');
-  assert.equal(r.progress.lap, 1);
-  assert.equal(r.progress.checkpoint, MAPS.farmyard.checkpoints.filter(cp => FARM.query(cp.x, cp.z).s < r.landed).length, 'with the checkpoints of the place he came up at');
-  // 3rd of three: two places ahead is the leader (330 m): about 30 yards behind it, which is in front of the 2nd
-  // (a leader placed so that the spot behind it is plain road: he is never put down in the barn or among the bales)
-  const plain = s => !PICKUP_PATHS.farmyard.hazards.some(([a, b]) => s >= a - 4 && s <= b + 4);
-  let leader = 330; while (!plain(leader - KELP.behindLeader)) leader += 5;
-  r = race([leader, 200]);
-  assert.ok(r.landed <= leader - KELP.behindLeader + 2.5 && r.landed > leader - KELP.behindLeader - 6 && r.landed > 200, `up at ${r.landed} m, the leader at ${leader}`);
-  assert.deepEqual([r.places.indexOf(r.kombu.id), r.places.indexOf(r.sockets[0].id)], [1, 0], '2nd, and the leader is still the leader');
-  // 2nd of two, already close behind the leader: nowhere to go, so the kelp gives him a dash instead
-  const sockets = [client(), client()], [lead, kombu] = sockets;
-  const room = lead.call('hostGame', { mapId: 'farmyard' }).room;
-  kombu.call('joinGame', { roomCode: room.code });
-  lead.call('selectDog', { dog: 'gsp' }); kombu.call('selectDog', { dog: 'kombu' });
-  lead.call('startRace'); for (const s of sockets) s.call('raceLoaded');
+  // (he is never put down in the barn or among the bales: a little short of them instead)
+  const plain = s => !PICKUP_PATHS.farmyard.hazards.some(([a, b]) => s >= a - 2 && s <= b + 2);
+  const check = r => {
+    let want = r.from + KELP.distance; while (!plain(want)) want -= 4;
+    assert.ok(Math.abs(r.landed - want) < 6, `up at ${r.landed} m, from ${r.from} m: wanted ${want}`);
+    assert.ok(plain(r.landed));
+    assert.equal(r.progress.lap, 1);
+    assert.equal(r.progress.checkpoint, MAPS.farmyard.checkpoints.filter(cp => FARM.query(cp.x, cp.z).s < r.landed).length, 'with the checkpoints of the place he came up at');
+    return r.landed;
+  };
+  // 4th of four, the others 330, 250 and 190 m round: he goes the same distance whoever is where, and is placed by where he comes up
+  let r = race([330, 250, 190]), landed = check(r);
+  assert.equal(r.places.indexOf(r.kombu.id), [330, 250, 190].filter(s => s > landed).length);
+  // 2nd of two, the leader 200 m round: past the leader
+  r = race([200]); landed = check(r);
+  assert.ok(landed > 200);
+  assert.deepEqual(r.places, [r.kombu.id, r.sockets[0].id], 'that makes him 1st');
+});
+
+test('Baz and Naz\'s Trip Wire: the rope trips a dog right across the road from them, not one that jumps it, and they run through what stands on the road while it lasts', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const { SPECIALS } = await import('../shared/specials.js');
+  const T = PROCEDURAL_TRACKS.kombu_house, spec = SPECIALS.baz_naz;
+  const at = (s, lateral = 0, up = 0) => { const p = T.pointAt(s, lateral); return [p.x, p.y + up, p.z]; };
+  const pippa = client(), twins = client();
+  const room = pippa.call('hostGame', { mapId: 'kombu_house', name: 'One' }).room;
+  twins.call('joinGame', { roomCode: room.code, name: 'Two' });
+  pippa.call('selectDog', { dog: 'gsp' });
+  assert.equal(twins.call('selectDog', { dog: 'baz_naz' }).success, true);
+  pippa.call('startRace');
+  for (const socket of [pippa, twins]) socket.call('raceLoaded');
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
-  const move = (socket, position) => socket.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: 0 });
-  move(lead, [MAPS.farmyard.checkpoints[0].x, MAPS.farmyard.checkpoints[0].y, MAPS.farmyard.checkpoints[0].z]); move(lead, at(along(box) + 14));
-  context.mock.method(Math, 'random', () => 0);
-  move(kombu, box); kombu.call('useItem');
+  const move = (socket, position) => socket.call('playerMove', { position, rotation: T.pointAt(T.query(position[0], position[2]).s).rotationY, animation: 'Sprint', respawnRevision: 0 });
   const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
-  assert.equal(events('playerBurrowEntered').length, 0);
-  assert.deepEqual(events('itemUsed').at(-1), { playerId: kombu.id, item: 'bone' });
-  for (const s of sockets) s.call('leaveGame');
+  // Pippa leads up the drive; the twins, behind her, get their special from the first row of boxes
+  const box = TREAT_BOXES_BY_MAP.kombu_house[0], from = box.s;
+  move(pippa, at(from + 20, 4));
+  context.mock.method(Math, 'random', () => 0);
+  move(twins, box.groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: twins.id, item: 'special' });
+  twins.call('useItem');
+  assert.deepEqual(events('specialStarted').at(-1), { playerId: twins.id, kind: 'rope', durationMs: 6000 });
+  // they come up to her on the far side of the road: nowhere near her, but the rope is
+  move(twins, at(from + 14, -4));
+  assert.equal(events('specialHit').length, 0, 'not yet');
+  move(twins, at(from + 19.5, -4));
+  assert.deepEqual(events('specialHit'), [{ playerId: twins.id, victim: pippa.id }]);
+  // once she is up again she jumps it...
+  context.mock.timers.tick(2500);
+  move(pippa, at(from + 40, 4, spec.rope.clear + 0.4));
+  move(twins, at(from + 40, -4));
+  assert.equal(events('specialHit').length, 1, 'over the rope');
+  // ...and comes down on it
+  move(pippa, at(from + 40.5, 4));
+  assert.equal(events('specialHit').length, 2);
+  // through the sofa in the living room while it lasts; round it afterwards
+  const sofa = T.obstacles.find(o => o.kind === 'sofa'), where = () => events('playerMoved').findLast(e => e.playerId === twins.id).position;
+  move(twins, [sofa.x, sofa.y, sofa.z]);
+  assert.ok(Math.hypot(where()[0] - sofa.x, where()[2] - sofa.z) < 0.01, 'straight through it');
+  context.mock.timers.tick(spec.durationMs);
+  assert.equal(events('specialEnded').at(-1).playerId, twins.id);
+  move(twins, [sofa.x, sofa.y, sofa.z]);
+  assert.ok(Math.hypot(where()[0] - sofa.x, where()[2] - sofa.z) > 1, 'not once it is over');
+  for (const p of [pippa, twins]) p.call('leaveGame');
+});
+
+test('Jazz\'s Earthquake: every other dog still racing is slowed for five seconds wherever it is, but not one in its own special or under a golden collar, and not Jazz', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const { QUAKE, SPECIALS } = await import('../shared/specials.js');
+  assert.equal(SPECIALS.jazz.kind, 'quake');
+  assert.equal(QUAKE.seconds, 5);
+  assert.ok(QUAKE.speed > 0.1 && QUAKE.speed <= 0.3, 'extremely slow, but not stopped');
+  const T = PROCEDURAL_TRACKS.kombu_house;
+  const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return [p.x, p.y, p.z]; };
+  const sockets = [client(), client(), client(), client()], [pippa, twins, poppy, jazz] = sockets;
+  const room = pippa.call('hostGame', { mapId: 'kombu_house', name: 'One' }).room;
+  sockets.slice(1).forEach((socket, i) => socket.call('joinGame', { roomCode: room.code, name: `P${i + 2}` }));
+  ['gsp', 'baz_naz', 'black_lab', 'jazz'].forEach((dog, i) => assert.equal(sockets[i].call('selectDog', { dog }).success, true));
+  pippa.call('startRace');
+  for (const socket of sockets) socket.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const move = (socket, position) => socket.call('playerMove', { position, rotation: 0, animation: 'Sprint', respawnRevision: 0 });
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const box = TREAT_BOXES_BY_MAP.kombu_house[0], from = box.s;
+  // Pippa leads, a long way up the road; the twins take a box and set off on their Trip Wire; then Jazz takes one
+  move(pippa, at(from + 30, 4));
+  move(poppy, at(from + 12, -4));
+  context.mock.method(Math, 'random', () => 0);
+  move(twins, box.groundPosition);
+  twins.call('useItem');
+  assert.equal(events('specialStarted').at(-1).kind, 'rope');
+  move(jazz, TREAT_BOXES_BY_MAP.kombu_house[1].groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: jazz.id, item: 'special' });
+  jazz.call('useItem');
+  const quake = events('earthquake').at(-1);
+  assert.equal(quake.playerId, jazz.id);
+  assert.deepEqual([quake.seconds, quake.speed], [QUAKE.seconds, QUAKE.speed]);
+  assert.deepEqual([...quake.slowed].sort(), [pippa.id, poppy.id].sort(), 'Pippa and Poppy; not the twins in their special, not Jazz');
+  assert.equal(events('specialStarted').filter(e => e.playerId === jazz.id).length, 0, 'nothing of her own to keep track of');
+  assert.equal(events('itemUsed').at(-1)?.playerId ?? jazz.id, jazz.id);
+  for (const p of sockets) p.call('leaveGame');
 });
 
 test('Ralph on his rocket paws is still fired by the cannon and thrown by the catapult, and keeps flying when he lands', context => {

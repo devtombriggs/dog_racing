@@ -5,9 +5,27 @@ import { FARMYARD } from './farmData.js';
 import { WATER_PARK } from './waterParkData.js';
 import { PET_MALL } from './petMallData.js';
 import { MUD_PARK } from './mudParkData.js';
+import { DESERT } from './desertData.js';
+import { SPEED_BOWL } from './speedBowlData.js';
+import { KOMBU_HOUSE } from './kombuHouseData.js';
+import { NEON } from './neonData.js';
+import { DALES } from './dalesData.js';
+import { BONEYARD } from './boneyardData.js';
+import { VETS } from './vetsData.js';
+import { JUNGLE } from './jungleData.js';
 
-export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD, water_park: WATER_PARK, pet_mall: PET_MALL, mud_park: MUD_PARK };
+export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD, water_park: WATER_PARK, pet_mall: PET_MALL, mud_park: MUD_PARK,
+  desert_dunes: DESERT, speed_bowl: SPEED_BOWL, kombu_house: KOMBU_HOUSE, neon_nexus: NEON,
+  yorkshire_dales: DALES, boneyard: BONEYARD, the_vets: VETS, monkey_jungle: JUNGLE };
 const PROCEDURAL_DESCRIPTIONS = {
+  yorkshire_dales: `${(DALES.length / 1000).toFixed(2)} km over the fells · boost pads up every climb, flat out down the other side · cheeses rolling down the hill · sheep · into the cave in the scar and out through the waterfall`,
+  boneyard: `${(BONEYARD.length / 1000).toFixed(2)} km in the rain · a lap the shape of a bone · Golden Bones all the way round · muddy water to wade and swim · rolling bones and mud spouts`,
+  the_vets: `${(VETS.length / 1000).toFixed(2)} km inside the vets · in on the treadmill · three storeys of syringes, giant pills, cones of shame and vets in masks · out of the top-floor window`,
+  monkey_jungle: `${(JUNGLE.length / 1000).toFixed(2)} km of rainforest · rope bridges and a log with no sides · vine swings to jump along · up the tree stair and off the end · snakes, monkeys, coconuts and stone balls`,
+  desert_dunes: `${(DESERT.length / 1000).toFixed(2)} km of desert · rolling dunes and soft sand · whirlwinds and tumbleweed · the leap off the great dune`,
+  speed_bowl: `${Math.round(SPEED_BOWL.length)} m kart oval · five laps · six rows of Treat Boxes and Golden Bones all the way round · nothing in the way`,
+  kombu_house: `${(KOMBU_HOUSE.length / 1000).toFixed(2)} km through Kombu’s house · in at the glass doors · the toy car, the pool room, flying cutlery · up in the lift · swinging doors · the dog pen and the chickens · down the back drive`,
+  neon_nexus: `${(NEON.length / 1000).toFixed(2)} km above a neon city · three two-minute laps · mega boost pads · three catapults · choose your road: the longer has the mega pads and the Golden Bones · moving platforms to jump`,
   treat_road: '1.45 km of sky road · catapult gap · landing boost',
   modbury_heights: '3.12 km coastal circuit · clifftops · broken bridges to jump · water crossing',
   farmyard: '1.67 km round the farm · through the barn · dodge the tractor, the sheep and the sails',
@@ -74,9 +92,10 @@ export const MAPS = {
     name: track.name,
     description: PROCEDURAL_DESCRIPTIONS[id],
     procedural: true,
+    laps: track.laps ?? 3,
     startPositions: track.startPositions,
-    checkpoints: track.checkpoints.slice(1).map(({ position, halfWidth, rotationY, launchLanding }) => ({
-      x: position[0], y: position[1], z: position[2], radius: halfWidth + 8, launchLanding,
+    checkpoints: track.checkpoints.slice(1).map(({ position, halfWidth, radius, rotationY, launchLanding }) => ({
+      x: position[0], y: position[1], z: position[2], radius: radius ?? halfWidth + 8, launchLanding,
       forward: [Math.sin(rotationY), Math.cos(rotationY)]
     })),
     startFinish: {
@@ -111,4 +130,10 @@ export function sampleGroundHeight(heights, metadata, x, z) {
   const row = iz * width + ix;
   return (heights[row] * (1 - u) + heights[row + 1] * u) * (1 - v)
     + (heights[row + width] * (1 - u) + heights[row + width + 1] * u) * v;
+}
+
+/** How many laps a race on this map is: three, unless the map says otherwise (the Speed Bowl is five). */
+export const DEFAULT_LAPS = 3;
+export function lapsFor(mapId) {
+  return MAPS[mapId]?.laps ?? DEFAULT_LAPS;
 }

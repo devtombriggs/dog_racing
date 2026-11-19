@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { pageStyle, panelStyle, buttonStyle } from './styles.js';
 
 // The games waiting for players: pick a host to join their lobby
 export function JoinScreen({ session, state }) {
@@ -12,13 +11,13 @@ export function JoinScreen({ session, state }) {
   }, [session, connected]);
 
   return (
-    <div style={pageStyle}>
-      <div style={{ ...panelStyle, width: 620, maxHeight: '90dvh', overflowY: 'auto' }}>
+    <div className="zr-page">
+      <div className="zr-card" style={{ width: 'min(660px, 92vw)' }}>
         <h2>Join Game</h2>
         <p>Choose a host to join their lobby. Games update automatically.</p>
         <div role="status">
           {!connected ? <p>Disconnected. Reconnecting to the server…</p>
-            : lobbyListError ? <p style={{ color: 'salmon' }}>{lobbyListError}</p>
+            : lobbyListError ? <p className="zr-error">{lobbyListError}</p>
               : availableLobbies === null ? <p>Looking for games…</p>
                 : availableLobbies.length === 0 ? <p>No games waiting for players. Ask a friend to host a game!</p>
                   : <p>{availableLobbies.length} {availableLobbies.length === 1 ? 'lobby' : 'lobbies'} found</p>}
@@ -27,14 +26,14 @@ export function JoinScreen({ session, state }) {
           const full = lobby.playerCount >= lobby.maxPlayers;
           const disabled = full || joiningRoom !== null;
           return (
-            <div key={lobby.code} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: 16, marginBottom: 12, background: '#34523b', borderRadius: 8, textAlign: 'left' }}>
+            <div key={lobby.code} className="zr-row">
               <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                 <strong>{lobby.hostName}’s lobby</strong>
                 <div style={{ marginTop: 6 }}>Picking dogs · map vote next</div>
                 <div style={{ marginTop: 6 }}>{lobby.playerCount}/{lobby.maxPlayers} players{full ? ' · Full' : ''}</div>
               </div>
               <button
-                style={{ ...buttonStyle, opacity: disabled ? 0.55 : 1, cursor: disabled ? 'default' : 'pointer' }}
+                className="zr-btn zr-btn--yellow zr-btn--small"
                 disabled={disabled}
                 aria-label={`Join ${lobby.hostName}’s lobby`}
                 onClick={() => session.joinGame(lobby.code)}
@@ -46,16 +45,16 @@ export function JoinScreen({ session, state }) {
         })}
         <div>
           <button
-            style={buttonStyle}
+            className="zr-btn zr-btn--quiet"
             disabled={joiningRoom !== null}
             onClick={session.backToMenu}
           >
-            Back
+            ← Back
           </button>
         </div>
 
         {error && (
-          <p style={{ color: 'salmon' }}>
+          <p className="zr-error">
             {error}
           </p>
         )}

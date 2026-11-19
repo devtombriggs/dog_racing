@@ -67,11 +67,11 @@ export function woodlandBogAt(x,z) {
   return null;
 }
 
-// Share of a dog's own top speed it keeps in the water, from its swim stat: Poppy (10) is a touch
-// faster in the water than she is on land; the weak swimmers (Meela and Ralph, 4) crawl at under half.
-//   10 -> 1.05   6 -> 0.62   5 -> 0.51   4 -> 0.45
-// The best a swimmer can do is SWIM_BEST: Poppy was 1.35 before and ran away with every pool.
-const SWIM_BEST=1.05;
+// Share of a dog's own top speed it keeps in the water, from its swim stat: Poppy (10) is not slowed
+// at all, and is never quicker than she is on land; the weak swimmers (Meela and Ralph, 4) crawl at under half.
+//   10 -> 1   6 -> 0.62   5 -> 0.51   4 -> 0.45
+// The best a swimmer can do is SWIM_BEST: Poppy was 1.35, then 1.05, and still ran away with every pool.
+const SWIM_BEST=1;
 export function woodlandSwimMultiplier(swimming=4) {
   const skill=Math.max(0,Math.min(1,(swimming-4)/6));
   return Math.min(SWIM_BEST,0.45+0.9*skill**1.5);
@@ -102,6 +102,6 @@ export function woodlandDistanceAt(x,z) {
 // Water reaches just below each model's shoulders; size alone does not describe
 // a dachshund's short legs or a greyhound's long ones.
 export function woodlandDogY(water, dogId) {
-  const draft = { gsp: 1.3, second_dog: 1.65, black_lab: 1.3, pablo: 0.9, ralph: 0.42, kombu: 1.2, rocky: 1.25, enzo: 1.5 }[dogId] ?? 1.3;
+  const draft = { gsp: 1.3, second_dog: 1.65, black_lab: 1.3, pablo: 0.9, ralph: 0.42, kombu: 1.2, rocky: 1.25, enzo: 1.5, baz_naz: 0.7, jazz: 1.9 }[dogId] ?? 1.3;
   return water.swimming ? Math.max(water.groundY, water.waterY - draft) : water.groundY;
 }

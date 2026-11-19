@@ -174,3 +174,11 @@ export function frisbeeHits(position, dog) {
   return Math.hypot(position[0] - dog[0], position[2] - dog[2]) <= FRISBEE.radius
     && Math.abs(position[1] - (dog[1] + FRISBEE.height)) <= 2.5;
 }
+
+// A boost pad whose boost stays with the dog after it has left the pad (a strip with `hold` seconds: shared/trackKit.js).
+// The pad says how fast and for how long; this is what is the same for all of them
+export const PAD_KICK = {
+  easeOut: 0.6,    // seconds over which the boost fades at the end
+  instant: 0.5,    // share of the extra speed a dog has the moment it touches the pad
+  quick: 4,        // how much faster its speed builds while the boost lasts
+};

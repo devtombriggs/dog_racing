@@ -14,6 +14,14 @@ import { FARMYARD } from './farmData.js';
 import { WATER_PARK } from './waterParkData.js';
 import { PET_MALL } from './petMallData.js';
 import { MUD_PARK } from './mudParkData.js';
+import { DESERT } from './desertData.js';
+import { SPEED_BOWL } from './speedBowlData.js';
+import { KOMBU_HOUSE } from './kombuHouseData.js';
+import { NEON } from './neonData.js';
+import { DALES } from './dalesData.js';
+import { BONEYARD } from './boneyardData.js';
+import { VETS } from './vetsData.js';
+import { JUNGLE } from './jungleData.js';
 
 const START_CLEAR = 60;        // metres either side of the start/finish line kept clear
 const MIN_GAP = 70;            // metres between any two pickup spots
@@ -50,6 +58,10 @@ export const PICKUP_PATHS = {
       [FARMYARD.chasms[0].ravineStart - 35, FARMYARD.chasms[0].ravineEnd + 20],
     ],
   },
+  // (the tracks made by shared/trackKit.js say for themselves where nothing should be put)
+  // (lanes: where across the road a row of boxes goes; hold: the nearest place a dog can stand, where the road has a branch)
+  ...Object.fromEntries([DESERT, SPEED_BOWL, KOMBU_HOUSE, NEON, DALES, BONEYARD, VETS, JUNGLE].map(track => [track.id, { length: track.length, pointAt: track.pointAt, hazards: track.pickupHazards,
+    lanes: track.boxLanes, hold: track.holdLateral, pickups: track.pickups }])),
   mud_park: {
     length: MUD_PARK.length, pointAt: MUD_PARK.pointAt,
     // nothing in the bog, where the quad bike or the logs cross, among the tyres, or on the mudslide, its leap and the landing
@@ -242,6 +254,15 @@ const PLAN = {
   farmyard:        { rows: [0.07, 0.24, 0.42, 0.66, 0.86],             bones: [0.14, 0.31, 0.50, 0.59, 0.74, 0.95], even: true },
   // (the boxes and bones are on the dry stretches: the plaza, between the hazards, the climb to the slide, the dock)
   mud_park:        { rows: [0.08, 0.215, 0.33, 0.72],                  bones: [0.135, 0.275, 0.66, 0.965], even: true },
+  desert_dunes:    { rows: [0.07, 0.25, 0.50, 0.70, 0.93],             bones: [0.13, 0.33, 0.58, 0.80], even: true },
+  // (these three say for themselves exactly where everything goes: see `pickups` in their track files)
+  speed_bowl:      { exact: true },
+  kombu_house:     { exact: true },
+  neon_nexus:      { exact: true },
+  yorkshire_dales: { exact: true },
+  boneyard:        { exact: true },
+  the_vets: { exact: true },
+  monkey_jungle: { exact: true },
   pet_mall:        { rows: [0.08, 0.235, 0.385, 0.66],                 bones: [0.135, 0.31, 0.60, 0.965], even: true },
   water_park:      { rows: [0.06, 0.32, 0.415, 0.575, 0.705],          bones: [0.105, 0.52, 0.64, 0.955], even: true },
   modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91],
@@ -255,6 +276,7 @@ const PLAN = {
 /** { mapId: [s, ...] } for box rows and for bones */
 export const BOX_ROW_S = {}, BONE_S = {};
 const BONE_LATERAL = {};          // optional: which side of the road each bone sits (share of the half width)
+const BONE_METRES = {};           // ...or how many metres from the middle of it
 for (const [mapId, plan] of Object.entries(PLAN)) {
   const path = PICKUP_PATHS[mapId], taken = [];
   if (mapId === 'treat_road') {
@@ -271,6 +293,11 @@ for (const [mapId, plan] of Object.entries(PLAN)) {
     BOX_ROW_S[mapId] = f.rows;
     BONE_S[mapId] = f.bones;
     BONE_LATERAL[mapId] = f.laterals;
+  } else if (plan.exact) {
+    // { rows: [s, ...], bones: [[s, metres across the road], ...] }
+    BOX_ROW_S[mapId] = [...path.pickups.rows];
+    BONE_S[mapId] = path.pickups.bones.map(([s]) => s);
+    BONE_METRES[mapId] = path.pickups.bones.map(([, lateral]) => lateral);
   } else {
     BOX_ROW_S[mapId] = pickSpots(path, plan.rows, taken, 0.08, plan.even);
     BONE_S[mapId] = pickSpots(path, plan.bones, taken, 0.08, plan.even);
@@ -292,7 +319,7 @@ for (const [mapId, plan] of Object.entries(PLAN)) {
 export const GOLDEN_BONE_SPOTS = Object.fromEntries(Object.entries(BONE_S).map(([mapId, list]) => {
   const path = PICKUP_PATHS[mapId];
   return [mapId, list.map((s, n) => {
-    const c = path.pointAt(s), p = path.pointAt(s, (BONE_LATERAL[mapId]?.[n] ?? (n % 2 ? -0.45 : 0.45)) * c.halfWidth);
+    const c = path.pointAt(s), p = path.pointAt(s, BONE_METRES[mapId]?.[n] ?? (BONE_LATERAL[mapId]?.[n] ?? (n % 2 ? -0.45 : 0.45)) * c.halfWidth);
     return { s, x: p.x, y: p.y, z: p.z };
   })];
 }));

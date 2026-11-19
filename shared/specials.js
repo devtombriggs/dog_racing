@@ -7,13 +7,18 @@
 //   Pippa  — Pheasant Flush: one pheasant for every other dog, ahead or behind; each flies its dog down and knocks it over
 //   Enzo   — Belly Bounce:   ten seconds of bounding up the road on his belly, a burst of speed on every bounce, squashing any dog he lands on
 //   Rocky  — Sheep Stampede: five sheep charge up the road, each knocking over the first dog it reaches
-//   Kombu  — Kelp Dive:      seaweed pulls him under and puts him down behind the dog two places ahead (never past first)
+//   Kombu  — Kelp Dive:      seaweed pulls him under and puts him down further up the road: as far as Poppy's wave carries her
+//   Baz & Naz — Trip Wire:   the twins run out to the two edges of the road with their rope tight between them, faster, straight
+//                            through whatever is standing in the way; any dog the rope reaches is tripped unless it jumps it
+//   Jazz   — Earthquake:     one great stomp shakes the whole map: every other dog, however far off, can barely move for five seconds
 //   Poppy  — Surf's Up:      belly-flops onto her own wave: the fastest of the lot, but it steers itself for five
 //                            seconds, so it only hits who happens to be in the way
 //
 // The dog in first place never gets one; for everyone else the chance rises the further back they are.
 // Nothing knocks a dog out of its special: while it lasts, whatever is thrown, dropped or driven at
 // the dog (another dog's special included) bounces off.  A fall or a catapult still ends it.
+
+import { BASE_SPEED, DOG_STATS, STAT_EFFECT, statScale } from './dogStats.js';
 
 export const SPECIAL_ITEM = 'special';
 
@@ -31,17 +36,24 @@ export const SPECIALS = {
   rocky: { kind: 'sheep', name: 'Sheep Stampede', durationMs: 10000 },
   // (Kombu's is over in a moment: the server moves him; shared/specials.js KELP has the rules)
   kombu: { kind: 'kelp', name: 'Kelp Dive', durationMs: 1100 },
+  // Baz and Naz: the rope is `rope.reach` thick up and down the road and as wide as the road is; a dog more than
+  // `rope.clear` above it has jumped it.  ghost: whatever stands on the road does not stop them (the walls still do)
+  baz_naz: { kind: 'rope', name: 'Trip Wire', durationMs: 6000, speed: 1.3, ghost: true, rope: { reach: 1.4, clear: 0.9, edge: 0.9, span: 14 } },
+  // Jazz: over in a moment for her (the stomp); QUAKE below has what it does to everyone else
+  jazz: { kind: 'quake', name: 'Earthquake', durationMs: 900 },
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true },
 };
 
-// Kombu's Kelp Dive: seaweed comes up out of the ground, pulls him under, and puts him down further
-// up the road: just behind the dog two places ahead of him.  Never in front of the dog in first place:
-// if the dog two places ahead IS first (he is 3rd), or there is only one dog ahead, he comes up a good
-// way behind the leader instead.
+// Kombu's Kelp Dive: seaweed comes up out of the ground, pulls him under, and puts him down a fixed
+// distance further up the road: as far as Poppy travels on her wave (her top speed, times the wave's,
+// for as long as it lasts: about 160 m).  Whoever is in between is passed, the leader included.  He is
+// put down on plain road (never in a jump, a pool or a hazard: a little short of it instead), and on the
+// last lap never nearer the finish than `beforeFinish`.
+const wave = SPECIALS.black_lab;
 export const KELP = {
   seconds: 1.1,          // how long he is under
-  behind: 8,             // metres behind the dog he comes up behind
-  behindLeader: 27,      // ...when that dog is the leader (about 30 yards)
+  distance: BASE_SPEED.sprint * statScale(DOG_STATS.black_lab.speed, STAT_EFFECT.speed) * wave.speed * wave.durationMs / 1000,
+  beforeFinish: 20,      // metres short of the finish line he stops, on the last lap
   worthIt: 5,            // if it would move him on less than this he is not moved (he gets a golden bone's dash instead)
   boostSeconds: 1.0, speedMultiplier: 1.2,     // the dash he comes up with
 };
@@ -62,6 +74,16 @@ export const SHEEP = {
   steer: 4.5,            // ...moving across the road towards it at this many m/s
   hitRadius: 1.5, hitHeight: 1.7,      // a dog this close is hit (one jumping clean over is not)
   tickMs: 50,
+};
+
+// Jazz's Earthquake: she rears and stomps, and the ground shakes right round the map.  Every other dog still racing
+// keeps only `speed` of its pace for `seconds`, wherever it is.  Not a dog in the middle of its own special (Ralph in
+// the air among them), under a golden collar's shield, or down a burrow.  Jazz herself runs on as she was.
+export const QUAKE = {
+  seconds: 5,
+  speed: 0.25,           // the share of its speed a shaken dog keeps
+  stompAt: 0.45,         // seconds into her stomp that her paws come down (when the ring goes out and the screen shakes)
+  stompSeconds: 0.9,
 };
 
 /** Enzo's Belly Bounce at `seconds` since it began: { height (m off the ground), speed (multiplier) } */
@@ -104,6 +126,13 @@ export function specialFor(dog) {
  * owner/other: [x, y, z] of their feet; rotationY: the way the user faces.
  */
 export function specialTouches(spec, ownerPosition, rotationY, otherPosition) {
+  if (spec?.rope) {
+    // (the twins' rope, without knowing the road: straight out to both sides of them, `span` each way)
+    const dy = otherPosition[1] - ownerPosition[1];
+    if (dy > spec.rope.clear || dy < -SPECIAL_HIT.clearHeight) return false;
+    const fx = Math.sin(rotationY), fz = Math.cos(rotationY), dx = otherPosition[0] - ownerPosition[0], dz = otherPosition[2] - ownerPosition[2];
+    return Math.abs(dx * fx + dz * fz) <= spec.rope.reach && Math.abs(dx * fz - dz * fx) <= spec.rope.span;
+  }
   if (!spec?.hitRadius) return false;
   if (Math.abs(otherPosition[1] - ownerPosition[1]) > SPECIAL_HIT.clearHeight) return false;
   if (spec.landing && ownerPosition[1] - otherPosition[1] > spec.landing) return false;      // (Enzo, still up in the air)
@@ -111,6 +140,21 @@ export function specialTouches(spec, ownerPosition, rotationY, otherPosition) {
   const dx = otherPosition[0] - ownerPosition[0], dz = otherPosition[2] - ownerPosition[2];
   const along = Math.max(0, Math.min(spec.reach ?? 0, dx * fx + dz * fz));
   return Math.hypot(dx - fx * along, dz - fz * along) <= spec.hitRadius;
+}
+
+/**
+ * The twins' rope across a road: does it reach a dog?  Both are given as places on the road
+ * ({ s: metres round the lap, y: height }); the rope is as wide as the road, so across does not come into it.
+ */
+export function ropeTrips(spec, owner, other, lapLength) {
+  if (!spec?.rope) return false;
+  const gap = Math.abs(other.s - owner.s) % lapLength, dy = other.y - owner.y;
+  return Math.min(gap, lapLength - gap) <= spec.rope.reach && dy <= spec.rope.clear && dy >= -SPECIAL_HIT.clearHeight;
+}
+
+/** In a special that goes through things (`ghost`), is this block (a track's query) something on the road, not its edge? */
+export function ghostsThrough(spec, ground) {
+  return Boolean(spec?.ghost && ground?.blocked && Math.abs(ground.lateral) < ground.halfWidth - 1);
 }
 
 /** How long one of Pippa's pheasants takes to reach a dog `distance` away. */

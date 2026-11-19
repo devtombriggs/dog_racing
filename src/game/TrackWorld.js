@@ -11,6 +11,14 @@ const GENERATED_WORLDS = {
   modbury_heights: () => import('../tracks/modburyHeights/ModburyHeightsTrack.js').then(module => module.createModburyHeights),
   farmyard: () => import('../tracks/farm/FarmTrack.js').then(module => module.createFarm),
   mud_park: () => import('../tracks/mudPark/MudParkTrack.js').then(module => module.createMudPark),
+  desert_dunes: () => import('../tracks/desert/DesertTrack.js').then(module => module.createDesert),
+  speed_bowl: () => import('../tracks/speedBowl/SpeedBowlTrack.js').then(module => module.createSpeedBowl),
+  kombu_house: () => import('../tracks/kombuHouse/KombuHouseTrack.js').then(module => module.createKombuHouse),
+  neon_nexus: () => import('../tracks/neon/NeonTrack.js').then(module => module.createNeon),
+  yorkshire_dales: () => import('../tracks/dales/DalesTrack.js').then(module => module.createDales),
+  boneyard: () => import('../tracks/boneyard/BoneyardTrack.js').then(module => module.createBoneyard),
+  the_vets: () => import('../tracks/vets/VetsTrack.js').then(module => module.createVets),
+  monkey_jungle: () => import('../tracks/jungle/JungleTrack.js').then(module => module.createJungle),
   pet_mall: () => import('../tracks/petMall/PetMallTrack.js').then(module => module.createPetMall),
   water_park: () => import('../tracks/waterPark/WaterParkTrack.js').then(module => module.createWaterPark),
   treat_road: () => import('../tracks/treatRoad/TreatRoadTrack.js').then(module => module.createTreatRoad)
@@ -39,7 +47,9 @@ export class TrackWorld {
     // The supplied coastal map has its own surfaces (mud, verges, water) and speeds for them
     this.coastalTrack = this.proceduralTrack?.speedFactor ? this.proceduralTrack : null;
     // Dogs cast shadows on the maps lit for them
-    this.castsShadows = this.woodland || mapId === 'modbury_heights' || mapId === 'farmyard' || mapId === 'water_park' || mapId === 'pet_mall' || mapId === 'mud_park';
+    this.castsShadows = this.woodland || mapId === 'modbury_heights' || mapId === 'farmyard' || mapId === 'water_park' || mapId === 'pet_mall' || mapId === 'mud_park'
+      || mapId === 'desert_dunes' || mapId === 'speed_bowl' || mapId === 'kombu_house'
+      || mapId === 'yorkshire_dales' || mapId === 'boneyard' || mapId === 'the_vets' || mapId === 'monkey_jungle';       // (not Neon Nexus: it is night there)
 
     this.proceduralWorld = null;
     this.woodlandWorld = null;

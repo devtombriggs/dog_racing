@@ -2,11 +2,11 @@
 import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
-import { MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
+import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, specialChance, specialFor, specialTouches, pheasantFlightMs } from '../shared/specials.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
@@ -29,8 +29,7 @@ const io = new Server(PORT, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo'];
-const TOTAL_LAPS = 3;
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo', 'baz_naz', 'jazz'];
 const MAX_PLAYERS = RACE_DOGS;
 const LOBBY_BROWSER = 'lobby-browser';
 // For trying the specials out: ALWAYS_SPECIAL=1 makes every Treat Box give the special, even to the leader,
@@ -198,19 +197,21 @@ function updateProceduralRace(room, player, data) {
   const now = Date.now();
   if (state.launch) {
     const elapsed = (now - state.launch.startedAt) / 1000;
-    const point = track.launchPoint(elapsed, state.launch.lateral);
+    const flight = track.launches?.[state.launch.index] ?? track.launch;
+    const point = track.launchPoint(elapsed, state.launch.lateral, state.launch.index);
     player.position = [point.x, point.y, point.z];
     player.rotation = point.rotationY;
     player.animation = 'Jump';
-    if (elapsed < track.launch.duration) return false;
+    if (elapsed < flight.duration) return false;
     state.launch = null;
+    state.landing = flight;
     state.launchLap = player.lap;
     state.revision += 1;
     player.animation = 'Sprint';
     io.to(room.code).emit('playerLanded', {
       playerId: player.id, position: player.position, rotation: player.rotation,
-      respawnRevision: state.revision, boostSeconds: track.launch.boostSeconds,
-      speedMultiplier: track.launch.exitSpeedMultiplier
+      respawnRevision: state.revision, boostSeconds: flight.boostSeconds,
+      speedMultiplier: flight.exitSpeedMultiplier
     });
     return true;
   }
@@ -241,24 +242,24 @@ function updateProceduralRace(room, player, data) {
   }
   if (rideBurrow(room, player, data)) return false;
   const [x, y, z] = data.position;
+  track.setClock?.((now - room.startedAt) / 1000);       // (moving platforms: where they are is a matter of the race clock)
   const ground = track.query(x, z);
-  if (track.launch) {
-    const previous = track.query(player.position[0], player.position[2]);
-    const pad = track.launch;
+  const previous = track.launch ? track.query(player.position[0], player.position[2]) : null;
+  for (const pad of track.launches ?? (track.launch ? [track.launch] : [])) {
     if (previous.onTrack && previous.s >= pad.padStart && previous.s < pad.takeoffS
       && ground.s >= pad.takeoffS && ground.s <= pad.gapStart + 8
       && Math.abs(ground.lateral) <= ground.halfWidth
       && y > ground.y - 1.2 && (y < ground.y + 2.5 || flying(player))) {   // a dog jumping across the pad still launches, and so does Ralph flying over it
       const halfWidth = Math.min(ground.halfWidth, track.pointAt(pad.landingS).halfWidth) - 1;
-      state.launch = { startedAt: now, lateral: Math.max(-halfWidth, Math.min(halfWidth, ground.lateral)) };
-      const point = track.launchPoint(0, state.launch.lateral);
+      state.launch = { startedAt: now, lateral: Math.max(-halfWidth, Math.min(halfWidth, ground.lateral)), index: pad.index ?? 0 };
+      const point = track.launchPoint(0, state.launch.lateral, state.launch.index);
       player.position = [point.x,point.y,point.z]; player.rotation = point.rotationY; player.animation = 'Jump';
       if (!flying(player)) endSpecial(room, player, 'cancelled');      // (Ralph keeps his rocket paws for the landing)
-      io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral: state.launch.lateral });
+      io.to(room.code).emit('playerLaunched', { playerId: player.id, lateral: state.launch.lateral, launch: state.launch.index });
       return false;
     }
   }
-  const position = ground.blocked
+  const position = ground.blocked && !ghostsThrough(activeSpecials.get(player)?.spec, ground)
     ? [ground.clampX, ground.dogY ?? ground.y, ground.clampZ]
     : [...data.position];
   if (ground.onTrack && crossedFinishLine(player.position, position, MAPS[room.mapId].startFinish)) {
@@ -349,6 +350,7 @@ function resetItems(room) {
     player.item = null;
     player.hitImmuneUntil = 0;
     player.shieldUntil = 0;
+    player.slowUntil = 0;
     clearTimeout(activeSpecials.get(player)?.timer);
     activeSpecials.delete(player);
   }
@@ -418,6 +420,7 @@ function startSpecial(room, player) {
   if (!spec) return;
   if (spec.kind === 'kelp') { kelpDive(room, player); return; }       // (over in a moment: nothing to keep track of)
   if (spec.kind === 'sheep') { releaseSheep(room, player); return; }  // (the flock is on its own from here: he just runs on)
+  if (spec.kind === 'quake') { earthquake(room, player); return; }    // (one stomp, and it is everyone else's problem)
   clearTimeout(activeSpecials.get(player)?.timer);
   const now = Date.now();
   activeSpecials.set(player, {
@@ -438,6 +441,18 @@ function endSpecial(room, player, reason) {
   clearTimeout(active.timer);
   activeSpecials.delete(player);
   io.to(room.code).emit('specialEnded', { playerId: player.id, reason });
+}
+
+// Jazz's Earthquake (shared/specials.js QUAKE): every other dog still racing is slowed, wherever it is.  Each dog's own game
+// slows it (the server says who); the computer's dogs are slowed here (slowUntil, read in tickBots).
+function earthquake(room, player) {
+  const now = Date.now(), slowed = [];
+  for (const victim of room.players.values()) {
+    if (victim === player || victim.finished || activeSpecials.has(victim) || now < victim.shieldUntil || burrowRides.has(victim)) continue;
+    victim.slowUntil = now + QUAKE.seconds * 1000;
+    slowed.push(victim.id);
+  }
+  io.to(room.code).emit('earthquake', { playerId: player.id, position: player.position, slowed, seconds: QUAKE.seconds, speed: QUAKE.speed });
 }
 
 // Rocky's Sheep Stampede (shared/specials.js SHEEP): the server runs five sheep up the road, telling
@@ -471,7 +486,7 @@ function roadPlace(room, position) {
 function placeSheep(room, sheep) {
   const path = PICKUP_PATHS[room.mapId], L = path.length, s = ((sheep.s % L) + L) % L;
   const reach = Math.max(0, path.pointAt(s).halfWidth - SHEEP.edge);
-  const point = path.pointAt(s, Math.max(-reach, Math.min(reach, sheep.lateral)));
+  const point = path.pointAt(s, path.hold ? path.hold(s, sheep.lateral, SHEEP.edge) : Math.max(-reach, Math.min(reach, sheep.lateral)));
   const y = BALL_GROUND[room.mapId] ? BALL_GROUND[room.mapId](point.x, point.z) : point.y;
   sheep.position = [point.x, y, point.z];
   sheep.yaw = point.rotationY;
@@ -528,14 +543,9 @@ function stopSheep(room) {
 // comes up at.
 function kelpDive(room, player) {
   const route = fireworkRoute(room.mapId), path = PICKUP_PATHS[room.mapId], L = route.length;
-  const standings = raceStandings(room);
-  const place = standings.find(entry => entry.playerId === player.id)?.place ?? 1;
-  const entry = standings.find(e => e.place === Math.max(1, place - 2));
-  const target = entry && entry.playerId !== player.id && !entry.finished ? room.players.get(entry.playerId) : null;
-  const progress = dog => (dog.lap - 1) * L + route.sAt(dog.position);
-  const here = progress(player);
-  // behind the dog two places up; a good way behind if that dog is the leader
-  let landing = target ? progress(target) - (entry.place === 1 ? KELP.behindLeader : KELP.behind) : -Infinity;
+  const here = (player.lap - 1) * L + route.sAt(player.position);
+  // as far up the road as Poppy's wave takes her; on the last lap, not over the finish line
+  let landing = Math.min(here + KELP.distance, lapsFor(room.mapId) * L - KELP.beforeFinish);
   // (on to plain road: not into a jump, a pool, a hazard or the start of a catapult)
   const clear = s => !path.hazards.some(([a, b]) => { const mid = (a + b) / 2, d = Math.abs(s - mid) % L; return Math.min(d, L - d) <= (b - a) / 2 + 2; });
   for (let tries = 0; tries < 60 && landing > here && !clear(((landing % L) + L) % L); tries++) landing -= 4;
@@ -586,10 +596,13 @@ function checkSpecialContacts(room, mover) {
   const now = Date.now();
   for (const owner of room.players.values()) {
     const spec = activeSpecials.get(owner)?.spec;
-    if (!spec?.hitRadius || owner.finished) continue;
+    if (!(spec?.hitRadius || spec?.rope) || owner.finished) continue;
+    // (the twins' rope is right across the road wherever they are on it)
+    const ropeAt = spec.rope ? { s: roadPlace(room, owner.position).s, y: owner.position[1] } : null;
     for (const victim of owner === mover ? room.players.values() : [mover]) {
       if (victim === owner || victim.finished || now < victim.hitImmuneUntil || burrowRides.has(victim) || activeSpecials.has(victim)) continue;
-      if (!specialTouches(spec, owner.position, owner.rotation, victim.position)) continue;
+      if (ropeAt ? !ropeTrips(spec, ropeAt, { s: roadPlace(room, victim.position).s, y: victim.position[1] }, PICKUP_PATHS[room.mapId].length)
+        : !specialTouches(spec, owner.position, owner.rotation, victim.position)) continue;
       io.to(room.code).emit('specialHit', { playerId: owner.id, victim: victim.id });
       hitPlayer(room, victim, owner.id, SPECIAL_ITEM);
     }
@@ -959,7 +972,7 @@ function startRaceIn(room) {
     grandPrix: grandPrixInfo(room),
     totalCheckpoints: MAPS[room.mapId].checkpoints.length,
     players,
-    totalLaps: TOTAL_LAPS
+    totalLaps: lapsFor(room.mapId)
   });
 
   updateLobby(room);
@@ -1153,6 +1166,7 @@ function createPlayer(socketId, name, slot = 0) {
     item: null,
     voice: false,            // microphone on for voice chat (the players talk to each other directly)
     hitImmuneUntil: 0,
+    slowUntil: 0,            // shaken by Jazz's Earthquake until then
     shieldUntil: 0,          // wearing the golden collar: shielded from everything but specials until then
     away: false              // their connection has dropped and their seat is being held (see HELD SEATS)
   };
@@ -1164,7 +1178,7 @@ function getRaceProgress(room, player) {
     lap: player.lap,
     checkpoint: player.checkpoint,
     totalCheckpoints: MAPS[room.mapId].checkpoints.length,
-    totalLaps: TOTAL_LAPS,
+    totalLaps: lapsFor(room.mapId),
     finished: player.finished,
     finishTime: player.finishTime
   };
@@ -1297,7 +1311,7 @@ function checkRaceProgress(room, player, previousPosition) {
 
   if (!crossedFinish) return;
 
-  if (player.lap >= TOTAL_LAPS) {
+  if (player.lap >= lapsFor(room.mapId)) {
     player.finished = true;
     player.finishTime =
       (Date.now() - room.startedAt) / 1000;
@@ -1423,7 +1437,7 @@ function driveAway(room, player) {
 function raceSnapshot(room, player) {
   if (!IN_A_RACE.includes(room.status)) return null;
   return {
-    status: room.status, mapId: room.mapId, totalCheckpoints: MAPS[room.mapId].checkpoints.length, totalLaps: TOTAL_LAPS,
+    status: room.status, mapId: room.mapId, totalCheckpoints: MAPS[room.mapId].checkpoints.length, totalLaps: lapsFor(room.mapId),
     grandPrix: grandPrixInfo(room), players: [...room.players.values()],
     raceMs: room.startedAt ? Date.now() - room.startedAt : null,
     you: { position: player.position, rotation: player.rotation, lap: player.lap, checkpoint: player.checkpoint, item: player.item,
@@ -1565,10 +1579,10 @@ function raceStateOf(room, player) {
 }
 
 // What being put down does to a dog, as the players' games have it: { speed, seconds, running }
-function landingEffect(room, carried, tunnel = null) {
+function landingEffect(room, carried, tunnel = null, player = null) {
   const track = PROCEDURAL_TRACKS[room.mapId];
   if (carried === 'launch') {
-    const launch = (track ?? FROSTPEAK_CANNON).launch;
+    const launch = (player && raceStateOf(room, player)?.landing) || (track ?? FROSTPEAK_CANNON).launch;
     return { speed: launch.exitSpeedMultiplier, seconds: launch.boostSeconds, running: true };
   }
   if (carried === 'tunnel') return { speed: tunnel?.speedMultiplier ?? 1, seconds: tunnel?.boostSeconds ?? 0, running: true };
@@ -1627,6 +1641,7 @@ function tickBots(room) {
         special: activeSpecials.get(player)?.spec ?? null,
         burrowOpen: burrowOpen(room, player),
         shielded: now < player.shieldUntil,
+        slowed: now < (player.slowUntil ?? 0) ? QUAKE.speed : 1,
         threat: threatTo(room, player),
         raceSeconds: (now - room.startedAt) / 1000
       });
@@ -1640,7 +1655,7 @@ function tickBots(room) {
     if (rooms.get(room.code) !== room || room.status !== 'racing') continue;      // that move ended the race
     const nowCarried = carriedBy(room, player);
     if (carried && !nowCarried) {
-      driver.place(player.position, player.rotation, landingEffect(room, carried, burrow));      // put down: it runs on from there
+      driver.place(player.position, player.rotation, landingEffect(room, carried, burrow, player));      // put down: it runs on from there
     } else if (!carried && !nowCarried && Math.hypot(player.position[0] - sent[0], player.position[2] - sent[2]) > 0.3) {
       driver.place(player.position, player.rotation);                                    // held back by a bank, a wall or a bale
     }
