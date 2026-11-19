@@ -170,13 +170,14 @@ export const DOGS = {
     model: '/models/baz.glb',
     twin: { model: '/models/naz.glb' },
     stats: DOG_STATS.baz_naz,
-    // (baz_naz_pugs/create_pugs.py: the Labrador's frame with its legs shortened; each a little smaller than Pablo)
-    scale: 2.0,
-    size: 0.7,
+    // (baz_naz_pugs/create_pugs.py: the Labrador's frame with its legs shortened.  Tom, 2026-11-19: not much bigger
+    //  than Ralph, being pugs: each is 1.13 m tall and 1.62 m long here, to Ralph's 1.05 and 1.92)
+    scale: 1.65,
+    size: 0.6,
     strideBands: DOG_STRIDE_BANDS.baz_naz,
     maxStrideRate: 1.8,
-    cameraOffset: [0, 3.0, -6.2],
-    cameraLookHeight: 1.1,
+    cameraOffset: [0, 2.7, -5.6],
+    cameraLookHeight: 0.95,
     // baz_naz_pugs/baz_clip_info.json, less a quarter for the shorter legs
     gaitSpeed: {
       Walk: 0.9,

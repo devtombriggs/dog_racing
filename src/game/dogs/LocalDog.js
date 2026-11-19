@@ -731,7 +731,13 @@ export class LocalDog extends DogAvatar {
       this.verticalVelocity -= this.jumpGravity * delta;
       this.jumpHeight += this.verticalVelocity * delta;
 
-      if (this.jumpHeight <= 0) {
+      // Down a hill the ground has dropped away since take-off (the jump is measured from where it began, so that
+      // it carries over a dip): the dog is not down yet, and falls on to the ground that is really there
+      const under = this.jumpHeight <= 0 && !this.race.world.steepRun ? this.race.world.groundHeightAt(this.position, this.groundY) : this.groundY;
+      if (this.jumpHeight <= 0 && this.groundY - under > 0.15) {
+        this.jumpHeight += this.groundY - under;
+        this.groundY = under;
+      } else if (this.jumpHeight <= 0) {
         this.jumpHeight = 0;
         this.verticalVelocity = 0;
         this.isJumping = false;

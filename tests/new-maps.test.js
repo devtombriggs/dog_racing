@@ -272,3 +272,27 @@ test('Neon Nexus: the longest lap, three of them and fast; mega pads and three c
   const landed = T.launchPoint(T.launch.duration), land = T.pointAt(T.launch.landingS);
   assert.ok(Math.hypot(landed.x - land.x, landed.z - land.z) < 0.01);
 });
+
+test('a hazard on a hill is cleared by a jump of its own height, measured from the ground each is on (the cheeses on the Dales)', async () => {
+  const { DALES } = await import('../shared/dalesData.js');
+  const { pull, cheeseRun } = DALES;
+  // a moment when a cheese is rolling, somewhere on the climb where the road is steep
+  let found = null;
+  for (let t = 0; t < 60 && !found; t += 0.25) {
+    for (const h of DALES.hazardsAt(t)) {
+      if (h.kind !== 'cheese' || !h.active) continue;
+      const q = DALES.query(h.x, h.z);
+      if (q.s > pull.sStart + 20 && q.s < pull.sEnd - 20 && Math.abs(q.grade) > 0.12) { found = { t, h, q }; break; }
+    }
+  }
+  assert.ok(found, 'a cheese rolling on the steep part of the climb');
+  const { t, h, q } = found;
+  // the dog is a metre and a half down the road from it (lower ground), coming up
+  const downhill = DALES.pointAt(q.s - 1.5, q.lateral);
+  const ground = DALES.query(downhill.x, downhill.z).trackY;
+  assert.ok(h.y - ground > 0.15, 'the cheese stands on higher ground than the dog');
+  assert.ok(Math.hypot(downhill.x - h.x, downhill.z - h.z) <= cheeseRun.radius + 1, 'near enough to be hit');
+  assert.equal(DALES.hazardHit([downhill.x, ground, downhill.z], t)?.id, h.id, 'on the ground: hit');
+  assert.equal(DALES.hazardHit([downhill.x, ground + 0.6, downhill.z], t)?.id, h.id, 'a low hop: hit');
+  assert.equal(DALES.hazardHit([downhill.x, ground + h.height + 0.15, downhill.z], t), null, 'a jump of the height of the cheese clears it');
+});

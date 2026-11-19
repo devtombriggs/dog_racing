@@ -24,7 +24,9 @@ export function createDuo({ group, first, second, config }) {
   const actions = Object.fromEntries(second.animations.map(clip => [clip.name, mixer.clipAction(clip)]));
   for (const name of ['Jump', 'Land']) actions[name]?.setLoop(THREE.LoopOnce, 1);
   let current = null, phase = 0, swing = 0, spreadShare = 0, taut = 0;
-  const x = [SIDE, -SIDE];
+  // (the distances above are for dogs at a scale of 2: smaller dogs run closer together on a shorter rope)
+  const part = (config.scale ?? 2) / 2, side = SIDE * part, leap = LEAP * part, hop = HOP * part, ropeLength = ROPE.length * part, ropeRadius = ROPE.radius * part;
+  const x = [side, -side];
   // the rope: clipped to each harness, between the shoulders
   const back = (() => { const chest = first.bones.chest ?? first.bones.spine1; if (!chest) return 0.42 * config.scale; group.updateWorldMatrix(true, true); return group.worldToLocal(chest.getWorldPosition(new THREE.Vector3())).y + 0.07 * config.scale; })();
   const ropeMaterial = new THREE.MeshStandardMaterial({ color: ROPE.color, roughness: 0.9, emissive: ROPE.taut, emissiveIntensity: 0 });
@@ -57,24 +59,24 @@ export function createDuo({ group, first, second, config }) {
       // the swing: one is slung forward past the other, lands, and slings the other
       swing += ((spread ? 0 : pace) - swing) * (1 - Math.exp(-5 * delta));
       phase += delta * 2 * Math.PI * SWAPS * (0.45 + 0.55 * pace);
-      const targets = spread ? [spread.left, spread.right] : [SIDE, -SIDE];
+      const targets = spread ? [spread.left, spread.right] : [side, -side];
       [first, second].forEach((dog, k) => {
         const sign = k ? -1 : 1, sin = Math.sin(phase) * sign, cos = Math.cos(phase) * sign;
         x[k] += (targets[k] - x[k]) * (1 - Math.exp(-(spread ? 5 : 8) * delta));
         const flying = Math.max(0, cos) ** 1.5 * swing;             // (on its way forward)
-        dog.holder.position.set(x[k], HOP * flying, LEAP * swing * sin);
+        dog.holder.position.set(x[k], hop * flying, leap * swing * sin);
         dog.holder.rotation.x = -0.35 * flying * Math.sin(Math.max(0, cos) * Math.PI);    // nose up as it leaves the ground
         dog.holder.rotation.y = spreadShare > 0.02 && Math.abs(targets[k] - x[k]) > 0.3 ? Math.sign(targets[k] - x[k]) * 0.5 * spreadShare : 0;      // (running out to the edge)
       });
 
       // the rope: slack between them side by side, tight when one is flung ahead, and a bright tight line in the Trip Wire
       const a = first.holder.position, b = second.holder.position, apart = a.distanceTo(b);
-      const slack = spread ? 0 : Math.sqrt(Math.max(0, (ROPE.length / 2) ** 2 - (apart / 2) ** 2));
+      const slack = spread ? 0 : Math.sqrt(Math.max(0, (ropeLength / 2) ** 2 - (apart / 2) ** 2));
       const low = spread ? 0.55 : 1;                                 // (in the Trip Wire it is carried low: shin height)
       taut += ((spread ? 1 : 0) - taut) * (1 - Math.exp(-8 * delta));
       curve.points.forEach((p, k) => { const t = k / 4, sag = Math.min(back * 0.8, slack) * 4 * t * (1 - t); p.set(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t + back * (1 - (1 - low) * taut) - sag, a.z + (b.z - a.z) * t); });
       rope.geometry.dispose();
-      rope.geometry = new THREE.TubeGeometry(curve, ROPE.segments, ROPE.radius * (1 + 0.6 * taut), 5, false);
+      rope.geometry = new THREE.TubeGeometry(curve, ROPE.segments, ropeRadius * (1 + 0.6 * taut), 5, false);
       ropeMaterial.emissiveIntensity = 0.9 * taut;
       rope.visible = first.model.visible;
     },

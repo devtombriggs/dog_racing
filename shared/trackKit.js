@@ -354,12 +354,19 @@ export function makeTrack(def, features = () => ({})) {
   // ---------- everything that moves, as a function of the seconds since GO
   // Each hazard: { id, kind, x, y, z, rotationY, radius, height, active }.  A dog whose middle comes
   // within radius (plus its own) of an active one is knocked over, unless it is more than `height`
-  // above it (a jump clears a low one).
+  // above it (a jump clears a low one).  On a hill "above it" is measured from the ground each is on: a cheese
+  // rolling down at a dog is further up the slope, so its foot is already above the dog's, and a jump that
+  // clears it by its own height has cleared it.
   const hazardsAt = parts.hazardsAt ?? (() => []);
   function hazardHit(position, t) {
     for (const h of hazardsAt(t)) {
       if (!h.active || position[1] - h.y > h.height) continue;
-      if (Math.hypot(position[0] - h.x, position[2] - h.z) <= h.radius + DOG) return h;
+      if (Math.hypot(position[0] - h.x, position[2] - h.z) > h.radius + DOG) continue;
+      // (only where both are plainly on the same stretch of road: not one floor above another)
+      const under = query(position[0], position[2]).trackY, foot = query(h.x, h.z).trackY;
+      const dogUp = position[1] - under, hazardUp = h.y - foot;
+      if (Math.abs(under - foot) < 3 && dogUp > -0.5 && Math.abs(hazardUp) < 0.6 && dogUp - Math.max(0, hazardUp) > h.height) continue;
+      return h;
     }
     return null;
   }

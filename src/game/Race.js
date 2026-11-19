@@ -469,7 +469,7 @@ export class Race {
     // RACE TIMER
     // ---------------------------------
 
-    if (session.raceStart !== null && hud.timer && !session.raceFinished) {
+    if (session.raceStart !== null && !session.raceFinished) {
       const elapsed = (performance.now() - session.raceStart) / 1000;
       hud.setTimer(formatTime(elapsed));
 
