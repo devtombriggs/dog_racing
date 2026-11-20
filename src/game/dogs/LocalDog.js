@@ -1,14 +1,17 @@
 import * as THREE from 'three';
-import { racingLineAt } from '../../../shared/pickupSpots.js';
+import { racingLineAt, PICKUP_PATHS } from '../../../shared/pickupSpots.js';
 import { bellyBounce, ghostsThrough, SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
 import { BASE_SPEED } from '../../../shared/dogStats.js';
-import { JUMP, STEEP_JUMP, DROP } from '../../../shared/handling.js';
+import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
 import { PAD_KICK } from '../../../shared/items.js';
+import { DRIFT, AUTO_DRIFT, driftPerks, driftCanStart, driftTurn, driftChargeRate, driftTier, driftBoost, driftBoostNow, autoDriftHeld, autoDriftTurn } from '../../../shared/drift.js';
+import { DRIFT_HUD_COLOURS } from './driftEffects.js';
 import { DOGS, STAT_EFFECT, WATER_SPEED, WATER_ACCELERATION, statScale, swimShare, turnSpeedLoss, pickupShare } from '../../config/dogs.js';
 import { HANDLING, RUNNING_JUMP_SPEED } from '../../config/handling.js';
 import { CONTACT, dogMass, dogOverlap } from './contact.js';
-import { gaitTimeScale, sprintFraction, applyTurnPose } from './animation.js';
+import { gaitTimeScale, sprintFraction } from './animation.js';
+import { SkidView } from './skidView.js';
 import { DogAvatar } from './DogAvatar.js';
 
 const OFF_TRACK_SPEED_MULTIPLIER = 0.5;
@@ -80,6 +83,19 @@ export class LocalDog extends DogAvatar {
     this.stunLength = 1;
 
     // ---------------------------------
+    // DRIFTING (shared/drift.js)
+    // ---------------------------------
+
+    this.drift = null;              // skidding round a corner: { side: 1 left / -1 right, charge }
+    this.driftBoostUntil = 0;       // the boost for letting go of a skid with sparks, until then
+    this.driftBoostTier = 0;
+    this.driftBoost = null;         // that boost: { speed, quick, easeOut } (shared/drift.js driftBoost)
+    this.wallAt = -1e9;             // when it last ran into a wall (shared/handling.js WALL)
+    this.arrowHeld = { side: 0, seconds: 0 };   // which way the steering is held, and for how long (accessibility mode's own skid)
+    this.skid = new SkidView(this, race.stage.scene);     // how a skid looks (and what the pug twins take their stack from)
+    this.driftPerks = driftPerks(dogId);   // what a slow dog gets from a skid on top of its Drift stat
+
+    // ---------------------------------
     // MOVEMENT SETTINGS
     // ---------------------------------
 
@@ -124,6 +140,8 @@ export class LocalDog extends DogAvatar {
       this.currentAction = actions.Idle;
       this.currentAction.play();
     }
+
+    this.skid.ready();
   }
 
   play(name) {
@@ -143,7 +161,8 @@ export class LocalDog extends DogAvatar {
     return {
       position: this.position.toArray(),
       rotation: this.group.rotation.y,
-      animation: this.currentAnimation,
+      animation: this.drift ? 'Sprint' : this.currentAnimation,      // (in a skid the others' games pose the dog themselves: skidView.js)
+      drift: this.drift ? { side: this.drift.side, tier: driftTier(this.drift.charge) } : null,
       respawnRevision: this.respawnRevision
     };
   }
@@ -192,6 +211,7 @@ export class LocalDog extends DogAvatar {
   // Off the edge of the track: drop, until the server puts the dog back
   fell(data) {
     this.fall = { position: new THREE.Vector3().fromArray(data.position), startedAt: performance.now() };
+    this.#endDrift(false, true);
     this.currentSpeed = 0;
     this.race.goldenBones.cancelBoost();
     this.knock.set(0, 0, 0);
@@ -210,6 +230,7 @@ export class LocalDog extends DogAvatar {
     if (this.model) this.model.visible = true;
     this.launchBoostUntil = 0;
     this.padKick = null;            // a boost pad whose boost stays with the dog: { speed, until, quick, mega }
+    this.#endDrift(false, true);
     race.goldenBones.cancelBoost();
     this.respawnRevision = data.respawnRevision;
     this.recoveryUntil = performance.now() + data.penaltySeconds * 1000;
@@ -229,6 +250,7 @@ export class LocalDog extends DogAvatar {
   // Fired from Treat Road's catapult or Frostpeak's cannon
   launched(data) {
     this.launchFlight = { startedAt: performance.now(), lateral: data.lateral, index: data.launch ?? 0 };
+    this.#endDrift(false, true);
     this.fall = null;
     this.knock.set(0, 0, 0);
     this.#groundJump();
@@ -257,6 +279,7 @@ export class LocalDog extends DogAvatar {
   // Down one of Ralph's burrows (shared/wendoverData.js)
   enteredBurrow(tunnel) {
     this.tunnelRide = { tunnel, startedAt: performance.now() };
+    this.#endDrift(false, true);
     this.race.burrowOverlay.hidden = false;
     this.currentSpeed = 0;
     this.knock.set(0, 0, 0);
@@ -281,6 +304,7 @@ export class LocalDog extends DogAvatar {
     this.stunUntil = performance.now() + stunMs;
     this.currentSpeed *= 0.15;
     this.padKick = null;
+    this.#endDrift(false, true);
     this.race.goldenBones.cancelBoost();
   }
 
@@ -302,6 +326,94 @@ export class LocalDog extends DogAvatar {
   // The kick of speed a golden bone gives a dog that is already running
   boneKick() {
     if (this.currentSpeed > 0) this.currentSpeed += this.race.goldenBones.instantKick(this.sprintSpeed);
+  }
+
+  // ---------------------------------
+  // DRIFTING
+  // ---------------------------------
+
+  // The skid is over.  boost: it was let go (or jumped out of), so its sparks are paid out as a boost.
+  // wipe: whatever boost a skid had already earned goes too (knocked over, put back on the track)
+  #endDrift(boost, wipe = false) {
+    const { drift } = this;
+    this.drift = null;
+    if (wipe) this.driftBoostUntil = 0;
+    if (!drift || !boost) return;
+    const tier = driftTier(drift.charge), earned = driftBoost(this.stats.drift, tier, this.driftPerks);
+    if (!earned) return;
+    this.driftBoostUntil = performance.now() + (earned.seconds + earned.easeOut) * 1000;
+    this.driftBoostTier = tier;
+    this.driftBoost = earned;
+    // (a Golden Bone's boost and a skid's do not add up: no kick on top of a bone)
+    const boosted = this.sprintSpeed * earned.speed;
+    if (this.currentSpeed > 0 && this.currentSpeed < boosted && !this.race.goldenBones.isBoosting()) this.currentSpeed = Math.min(boosted, this.currentSpeed + this.sprintSpeed * (earned.speed - 1) * earned.kick);
+    this.skid.burst(tier);
+  }
+
+  // Run into a wall (shared/handling.js WALL).  into: metres it had gone into it this step.  ground: the share of
+  // its pace the ground there leaves it (soft ground has already slowed it: the wall adds nothing)
+  #hitWall(frame, into, ground) {
+    if (frame.special || ground < WALL.softBelow || this.currentSpeed <= 0) return;
+    const now = performance.now(), travelled = Math.abs(this.currentSpeed) * frame.delta;
+    this.#endDrift(false, true);
+    // (in accessibility mode the dog skids by itself: a wall costs it less)
+    const cost = this.race.session.state.accessibilityMode ? AUTO_DRIFT.wall : 1, was = this.currentSpeed;
+    if (now - this.wallAt > WALL.again * 1000 && travelled > 1e-4) {
+      this.currentSpeed = was - (was - speedAfterWall(was, into / travelled)) * cost;
+    }
+    this.currentSpeed = Math.min(this.currentSpeed, this.sprintSpeed * (1 - (1 - WALL.scrape) * cost));
+    // (nose against it and going nowhere: it is not sprinting on the spot.  It keeps enough pace to turn away)
+    const square = travelled > 1e-4 ? Math.min(1, into / travelled) : 0;
+    if (square > 0.5) this.currentSpeed = Math.max(WALL.pinned, this.currentSpeed - WALL.pinnedBraking * (square - 0.5) * frame.delta);
+    this.wallAt = now;
+  }
+
+  // Start, hold or end a skid, from the drift button.  Returns how hard the skid is turning the dog
+  // (a share of its turning speed, signed like the steering), or null when it is not skidding
+  #driftSteer(frame, turnInput) {
+    const { delta, special, effort } = frame;
+    const { input, session } = this.race;
+    const grounded = !this.isJumping && !this.offTrack && !frame.inWater && !special && performance.now() >= this.stunUntil;
+
+    // Accessibility mode (four keys, no drift button): an arrow held into a bend is the drift button
+    const auto = Boolean(session.state.accessibilityMode);
+    const arrow = Math.abs(turnInput) >= DRIFT.startTurn ? Math.sign(turnInput) : 0;
+    this.arrowHeld = arrow && arrow === this.arrowHeld.side ? { side: arrow, seconds: this.arrowHeld.seconds + delta } : { side: arrow, seconds: 0 };
+    const road = auto && arrow ? this.#roadAhead() : null;
+    const held = auto
+      ? autoDriftHeld({ turn: turnInput, heldFor: this.arrowHeld.seconds, bend: road?.bend ?? 0, side: this.drift?.side ?? 0 })
+      : input.drift;
+
+    if (!this.drift && driftCanStart({ held, turn: turnInput, effort, grounded })) {
+      this.drift = { side: Math.sign(turnInput), charge: 0, startedAt: performance.now() };
+    }
+    if (!this.drift) return null;
+    if (!held || this.isJumping) { this.#endDrift(true); return null; }       // let go: off it goes
+    if (!grounded || effort < DRIFT.endEffort) { this.#endDrift(false); return null; }  // lost it
+
+    const { drift } = this, into = auto ? AUTO_DRIFT.into : turnInput * drift.side;
+    drift.charge += driftChargeRate(this.stats.drift, into, this.driftPerks.charge) * delta;
+    // (by itself, the skid is steered round with the road; with the button, the steering tightens and opens it)
+    if (!auto || !road) return drift.side * driftTurn(into, this.driftPerks.control);
+    return drift.side * autoDriftTurn({
+      bend: road.bend, speed: this.currentSpeed, control: this.driftPerks.control,
+      turnRate: THREE.MathUtils.lerp(this.turnRateSlow, this.turnRateSprint, effort),
+      off: drift.side * Math.atan2(Math.sin(this.travelYaw - road.yaw), Math.cos(this.travelYaw - road.yaw)),
+      inside: drift.side * road.left, halfWidth: road.halfWidth,
+    });
+  }
+
+  // The road at the dog: { bend: how it bends just ahead (1 / its radius in metres, + to the left), yaw: the way it
+  // runs, left: how far to the left of its middle the dog is (m), halfWidth }
+  #roadAhead() {
+    const { mapId, rescue } = this.race, path = PICKUP_PATHS[mapId];
+    const line = path && racingLineAt(mapId, this.position.x, this.position.z, rescue.lineS);
+    if (!line) return null;
+    const from = path.pointAt(line.s + 3).rotationY, to = path.pointAt(line.s + 15).rotationY;
+    return {
+      bend: Math.atan2(Math.sin(to - from), Math.cos(to - from)) / 12, yaw: line.rotationY, halfWidth: line.halfWidth,
+      left: Math.cos(line.rotationY) * (this.position.x - line.x) - Math.sin(line.rotationY) * (this.position.z - line.z),
+    };
   }
 
   // ---------------------------------
@@ -331,7 +443,8 @@ export class LocalDog extends DogAvatar {
     const { goldenBones, specials } = this.race;
     return this.launchFlight ? 94
       : this.padKick && performance.now() < this.padKick.until ? (this.padKick.mega ? 92 : 86)
-      : performance.now() < this.launchBoostUntil || goldenBones.isBoosting() || specials.physics(this.id)?.speed ? 84 : 75;
+      : performance.now() < this.launchBoostUntil || goldenBones.isBoosting() || specials.physics(this.id)?.speed ? 84
+      : performance.now() < this.driftBoostUntil ? 81 : 75;
   }
 
   update(delta) {
@@ -436,6 +549,10 @@ export class LocalDog extends DogAvatar {
       : steepRun && slope < 0 ? Math.min(1.75, 1 - 1.7 * slope)
       : THREE.MathUtils.clamp(1 - HANDLING.hillEffect * slope, 0.8, 1.08);
     frame.terrainMultiplier = terrainMultiplier;
+    frame.inWater = Boolean(inWater);
+    // the boost out of a skid (it does not add to a Golden Bone, a boost pad or a landing boost: the best of them counts)
+    const driftLeft = (this.driftBoostUntil - padNow) / 1000;
+    const driftNow = goldenBones.isBoosting() || !this.driftBoost ? 1 : driftBoostNow(driftLeft, this.driftBoost.speed, this.driftBoost.easeOut);
     // Wet ground (the mud run): a dog slides where it was going and is slow to pick up speed
     const wet = coastalTrack?.rules.slip, slip = frame.slip = wet && !this.isJumping ? coastalGround.slippery ?? 0 : 0;
     const maxSpeed = frame.maxSpeed =
@@ -443,7 +560,7 @@ export class LocalDog extends DogAvatar {
       terrainMultiplier *
       hillMultiplier *
       (performance.now() < this.burrowBoostUntil ? this.burrowBoost : 1) *
-      Math.max(kickNow, performance.now() < this.launchBoostUntil ? this.launchBoost ?? world.launchTrack.launch.exitSpeedMultiplier : 1) *      // (a landing boost and a boost pad's do not add up)
+      Math.max(kickNow, driftNow, this.drift && !goldenBones.isBoosting() ? this.driftPerks.speed : 1, performance.now() < this.launchBoostUntil ? this.launchBoost ?? world.launchTrack.launch.exitSpeedMultiplier : 1) *      // (a landing boost, a boost pad's and a skid's do not add up)
       (world.proceduralTrack && performance.now() < this.recoveryUntil ? world.proceduralTrack.rules.respawnSpeedMultiplier : 1) *
       goldenBones.speedMultiplier() *
       (special?.speed ?? 1) *
@@ -456,6 +573,7 @@ export class LocalDog extends DogAvatar {
       (special?.speed ? 2.5 : 1) *
       goldenBones.accelerationMultiplier() *
       (kickLeft > 0 ? this.padKick.quick : 1) *
+      (driftNow > 1 ? this.driftBoost.quick : 1) *
       (steepRun && slope < 0 ? 1 - 4 * slope : 1) *      // gravity does the work going down the black run
       (inWater
         ? this.waterAcceleration
@@ -499,8 +617,11 @@ export class LocalDog extends DogAvatar {
 
     const turnInput = special?.steerLocked ? 0 : input.turn;
 
+    // A skid (the drift button held through a corner) turns the dog by itself; the steering only tightens or opens it
+    const skid = this.#driftSteer(frame, turnInput);
+
     // The turn builds and fades: a running dog cannot change line instantly
-    this.steer += (turnInput - this.steer) * (1 - Math.exp(-HANDLING.steerResponse * delta));
+    this.steer += ((skid ?? turnInput) - this.steer) * (1 - Math.exp(-HANDLING.steerResponse * delta));
 
     // Fast means wide: the turn rate falls away as the dog stretches out
     const turnRate = THREE.MathUtils.lerp(this.turnRateSlow, this.turnRateSprint, effort);
@@ -524,8 +645,8 @@ export class LocalDog extends DogAvatar {
       }
     }
 
-    // Turning hard at speed costs speed
-    const turnLimit = maxSpeed * (1 - this.turnSpeedLoss * Math.abs(this.steer) * effort);
+    // Turning hard at speed costs speed (not in a skid: that is what a skid is for)
+    const turnLimit = this.drift ? maxSpeed : maxSpeed * (1 - this.turnSpeedLoss * Math.abs(this.steer) * effort);
 
     if (this.currentSpeed > turnLimit) {
       this.currentSpeed = Math.max(turnLimit, this.currentSpeed - BRAKING * 0.5 * delta);
@@ -548,7 +669,8 @@ export class LocalDog extends DogAvatar {
     // The dog travels where its momentum takes it, which trails the way
     // its nose points: at a sprint it drifts a little through a turn
     const wet = world.coastalTrack?.rules.slip;
-    const grip = THREE.MathUtils.lerp(HANDLING.gripSlow, this.gripSprint, effort) * (wet && frame.slip ? 1 - (1 - wet.grip) * frame.slip : 1);
+    const grip = (this.drift ? Math.min(DRIFT.grip, this.gripSprint) : THREE.MathUtils.lerp(HANDLING.gripSlow, this.gripSprint, effort))
+      * (wet && frame.slip ? 1 - (1 - wet.grip) * frame.slip : 1);
 
     this.travelYaw +=
       Math.atan2(
@@ -649,9 +771,12 @@ export class LocalDog extends DogAvatar {
     // Slide along the coastal banks and dunes; exposed cliff edges remain open.
     let coastalSurface = coastalTrack?.query(position.x, position.z);
     if (coastalSurface?.blocked && !ghostsThrough(frame.special, coastalSurface)) {      // (the twins' Trip Wire goes through whatever stands on the road)
+      // how far into the wall it had got this step, against how far it travelled: 1 is straight into it
+      const into = Math.hypot(position.x - coastalSurface.clampX, position.z - coastalSurface.clampZ);
       position.x = coastalSurface.clampX;
       position.z = coastalSurface.clampZ;
       coastalSurface = coastalTrack.query(position.x, position.z);
+      this.#hitWall(frame, into, coastalTrack.speedFactor(coastalSurface, this.coastalStats, this.isJumping));
     }
     if (coastalSurface) {
       // The ground the dog has just run on to sets its pace at once (mud, water, a climb).  Everything
@@ -817,7 +942,11 @@ export class LocalDog extends DogAvatar {
 
     const isMoving = Math.abs(this.currentSpeed) > 0.1;
 
-    if (!this.isJumping && !this.isLanding && !playsOwnClips) {
+    // In a skid the legs stop: a hop, then a held slide (skidView.js).  Out of it, straight back into the stride
+    // its speed calls for (a sprint, if it kept its pace)
+    const skid = this.skid.clips(delta, this.drift && !this.isJumping && !playsOwnClips ? this.drift : null);
+
+    if (!this.isJumping && !this.isLanding && !playsOwnClips && !skid) {
       // The stride follows the speed, as a dog's does.  A little overlap
       // between strides stops them flickering at the changeover.
       // A short-legged dog changes stride at lower speeds
@@ -841,7 +970,7 @@ export class LocalDog extends DogAvatar {
       }
     }
 
-    if (this.currentAction && !specials.animating(this.id)) {
+    if (this.currentAction && !specials.animating(this.id) && !skid) {
       this.currentAction.timeScale = swimming
         ? (isMoving ? 1.1 : 0.6)
         : gaitTimeScale(this.currentAction, this.currentSpeed, this.config);
@@ -850,13 +979,19 @@ export class LocalDog extends DogAvatar {
     if (this.mixer) {
       this.mixer.update(delta);
 
-      applyTurnPose(this.model, this.bones, this.steer * steeringFactor, effort);
+      // the lean into a turn, and all of a skid: turned into the corner, legs folded, tail going, dust and sparks
+      this.skid.pose(delta, {
+        steer: this.steer * steeringFactor / Math.max(1, Math.abs(this.steer)), effort,
+        tier: this.drift ? driftTier(this.drift.charge) : 0, speed: this.currentSpeed, spinning: performance.now() < this.stunUntil,
+      });
 
       // Nose up the hills and down the far side (not while in the air)
       if (this.model) {
         // (Enzo bouncing: nose up on the way up, belly first on the way down)
         this.model.rotation.x = special?.bouncing ? -0.5 * Math.cos(special.phase * Math.PI)
           : swimming ? -0.06 : this.isJumping ? 0 : -Math.atan(this.slope);
+        // (in the slide: sat back a little and let down on to its paws, its belly or its board)
+        this.skid.settle(delta, { pitch: this.model.rotation.x, speed: this.currentSpeed, grounded: !this.isJumping });
       }
     }
   }
@@ -915,6 +1050,13 @@ export class LocalDog extends DogAvatar {
           : offTrack || coastalSurface?.mud || soft ? '#ffbc75' : '#9fe49b'
       );
     }
+    if (this.drift) {
+      const tier = driftTier(this.drift.charge);
+      hud.setSurface(['DRIFTING — HOLD IT…', 'DRIFT — BOOST READY!', 'DRIFT — SUPER BOOST READY!', 'DRIFT — ULTRA BOOST READY!'][tier], DRIFT_HUD_COLOURS[tier]);
+    } else if (now < this.driftBoostUntil && !goldenBones.isBoosting()) {
+      hud.setSurface(['', 'DRIFT BOOST!', 'SUPER DRIFT BOOST!', 'ULTRA DRIFT BOOST!'][this.driftBoostTier], DRIFT_HUD_COLOURS[this.driftBoostTier]);
+    }
+    if (!special && now - this.wallAt < 700) hud.setSurface('HIT THE WALL!', '#ff8a6a');
     if (special) hud.setSurface(`${special.name.toUpperCase()}!`, '#ffe45c');
     else if (performance.now() < this.quakeUntil) hud.setSurface('EARTHQUAKE — HOLD ON!', '#ff8a6a');
   }

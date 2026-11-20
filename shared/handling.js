@@ -30,6 +30,24 @@ export const HANDLING = {
   runBelow: 13.5
 };
 
+// Running into a wall (a barrier, a bank, a pillar: anything that stops a dog dead at the edge of the road, where
+// there is no soft ground to slow it first).  It costs speed at once, more the squarer the hit, and a dog
+// scraping along one is held well under its pace.  It also ends a skid, with nothing for it.
+export const WALL = {
+  glance: 0.2,       // share of its speed lost touching a wall at a shallow angle...
+  square: 0.75,      // ...and running straight into one
+  scrape: 0.7,       // share of its top speed it can hold while it is against one
+  again: 0.5,        // seconds after a hit before another counts as a new hit
+  pinned: 2,         // a dog with its nose against a wall is brought down to this speed (m/s)...
+  pinnedBraking: 80, // ...this quickly (m/s², at dead square on)
+  softBelow: 0.9,    // ground that already slows a dog to under this share is the penalty there: the wall adds none
+};
+/** The speed a dog keeps hitting a wall.  squareness: 0 brushing along it, 1 straight into it */
+export function speedAfterWall(speed, squareness) {
+  const s = Math.max(0, Math.min(1, squareness));
+  return speed * (1 - (WALL.glance + (WALL.square - WALL.glance) * s));
+}
+
 // A jump: up at `force`, pulled down by `gravity` (about 1.5 m high and 0.9 s in the air)
 export const JUMP = { force: 7, gravity: 16 };
 // On Frostpeak's black run a normal jump at full speed sails 25 m down the mountain: there the

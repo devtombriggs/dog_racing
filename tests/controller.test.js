@@ -10,13 +10,14 @@ const pad = ({ buttons = {}, axes = [0, 0, 0, 0] } = {}) => ({
 const RT = 7, LT = 6, A = 0, B = 1, X = 2, LB = 4, RB = 5, LEFT = 14, RIGHT = 15;
 
 test('controller: right trigger goes, left trigger brakes, the stick and the D-pad steer, A jumps, X uses the item', () => {
-  assert.deepEqual(readPad(null), { accelerate: false, brake: false, turn: 0, jump: false, item: false });
-  assert.deepEqual(readPad(pad()), { accelerate: false, brake: false, turn: 0, jump: false, item: false });
+  assert.deepEqual(readPad(null), { accelerate: false, brake: false, turn: 0, jump: false, item: false, drift: false });
+  assert.deepEqual(readPad(pad()), { accelerate: false, brake: false, turn: 0, jump: false, item: false, drift: false });
   assert.equal(readPad(pad({ buttons: { [RT]: 0.4 } })).accelerate, true, 'a trigger part of the way in is enough');
   assert.equal(readPad(pad({ buttons: { [RT]: 0.05 } })).accelerate, false, 'a finger resting on it is not');
   assert.equal(readPad(pad({ buttons: { [LT]: 1 } })).brake, true);
   assert.equal(readPad(pad({ buttons: { [A]: 1 } })).jump, true);
-  for (const button of [X, B, LB, RB]) assert.equal(readPad(pad({ buttons: { [button]: 1 } })).item, true);
+  for (const button of [X, B, LB]) assert.equal(readPad(pad({ buttons: { [button]: 1 } })).item, true);
+  assert.deepEqual([readPad(pad({ buttons: { [RB]: 1 } })).drift, readPad(pad({ buttons: { [RB]: 1 } })).item], [true, false], 'the right bumper drifts');
   // steering: 1 is hard left; the stick has a dead zone and gives part turns
   assert.equal(readPad(pad({ axes: [-1, 0, 0, 0] })).turn, 1);
   assert.equal(readPad(pad({ axes: [1, 0, 0, 0] })).turn, -1);

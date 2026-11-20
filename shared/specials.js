@@ -7,7 +7,7 @@
 //   Pippa  — Pheasant Flush: one pheasant for every other dog, ahead or behind; each flies its dog down and knocks it over
 //   Enzo   — Belly Bounce:   ten seconds of bounding up the road on his belly, a burst of speed on every bounce, squashing any dog he lands on
 //   Rocky  — Sheep Stampede: five sheep charge up the road, each knocking over the first dog it reaches
-//   Kombu  — Kelp Dive:      seaweed pulls him under and puts him down further up the road: as far as Poppy's wave carries her
+//   Kombu  — Kelp Dive:      seaweed pulls him under and puts him down further up the road: further the further back he is
 //   Baz & Naz — Trip Wire:   the twins run out to the two edges of the road with their rope tight between them, faster, straight
 //                            through whatever is standing in the way; any dog the rope reaches is tripped unless it jumps it
 //   Jazz   — Earthquake:     one great stomp shakes the whole map: every other dog, however far off, can barely move for five seconds
@@ -23,7 +23,9 @@ import { BASE_SPEED, DOG_STATS, STAT_EFFECT, statScale } from './dogStats.js';
 export const SPECIAL_ITEM = 'special';
 
 export const SPECIALS = {
-  ralph: { kind: 'jet', name: 'Rocket Paws', durationMs: 15000, speed: 1.5, flyHeight: 3.2, immune: true },
+  // Ralph flies for `durationMs` from last place, and `lessPerPlaceMs` less for every place nearer the front
+  // (of six: 15, 13.5, 12, 10.5 and 9 seconds from 2nd): specialDurationMs below
+  ralph: { kind: 'jet', name: 'Rocket Paws', durationMs: 15000, lessPerPlaceMs: 1500, speed: 1.5, flyHeight: 3.2, immune: true },
   pablo: { kind: 'sled', name: 'Pack Rush', durationMs: 10000, speed: 1.65, hitRadius: 2.2, reach: 6 },
   second_dog: { kind: 'zoomies', name: 'Zoomies', durationMs: 5000, speed: 1.35, hitRadius: 3.0, reach: 0 },
   gsp: { kind: 'flush', name: 'Pheasant Flush', durationMs: 900 },
@@ -44,19 +46,28 @@ export const SPECIALS = {
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true },
 };
 
-// Kombu's Kelp Dive: seaweed comes up out of the ground, pulls him under, and puts him down a fixed
-// distance further up the road: as far as Poppy travels on her wave (her top speed, times the wave's,
-// for as long as it lasts: about 160 m).  Whoever is in between is passed, the leader included.  He is
+// Kombu's Kelp Dive: seaweed comes up out of the ground, pulls him under, and puts him down further up
+// the road.  How far goes by his place in the race: from last of six, as far as Poppy travels on her wave
+// (her top speed, times the wave's, for as long as it lasts: about 160 m); a place nearer the front, a good
+// deal less each time, down to under a third of it from 2nd (about 48 m), so that a Kombu who is already
+// well up does not jump the whole field.  Whoever is in between is passed, the leader included.  He is
 // put down on plain road (never in a jump, a pool or a hazard: a little short of it instead), and on the
 // last lap never nearer the finish than `beforeFinish`.
 const wave = SPECIALS.black_lab;
 export const KELP = {
   seconds: 1.1,          // how long he is under
   distance: BASE_SPEED.sprint * statScale(DOG_STATS.black_lab.speed, STAT_EFFECT.speed) * wave.speed * wave.durationMs / 1000,
+  fromSecond: 0.3,       // the share of that distance he goes from 2nd place...
+  perPlace: 0.175,       // ...and how much more of it for each place further back (all of it from 6th)
   beforeFinish: 20,      // metres short of the finish line he stops, on the last lap
   worthIt: 5,            // if it would move him on less than this he is not moved (he gets a golden bone's dash instead)
   boostSeconds: 1.0, speedMultiplier: 1.2,     // the dash he comes up with
 };
+
+/** How far up the road the Kelp Dive takes Kombu from this place in the race (1 = leading) */
+export function kelpDistance(place) {
+  return KELP.distance * Math.max(KELP.fromSecond, Math.min(1, KELP.fromSecond + KELP.perPlace * (place - 2)));
+}
 
 // Rocky's Sheep Stampede: five sheep set off up the road from just in front of him, side by side
 // around where he is on the road, faster than any dog, each veering towards the nearest dog in front of
@@ -77,8 +88,10 @@ export const SHEEP = {
 };
 
 // Jazz's Earthquake: she rears and stomps, and the ground shakes right round the map.  Every other dog still racing
-// keeps only `speed` of its pace for `seconds`, wherever it is.  Not a dog in the middle of its own special (Ralph in
-// the air among them), under a golden collar's shield, or down a burrow.  Jazz herself runs on as she was.
+// keeps only `speed` of its pace for `seconds`, wherever it is, and whether or not it is in the middle of its own
+// special (Enzo bouncing, Pablo on his sled: all of them have paws on the ground).  Not a dog that is off the ground
+// or out of reach: Ralph flying, one under a golden collar's shield, one down a burrow or under the kelp.  Jazz
+// herself runs on as she was.
 export const QUAKE = {
   seconds: 5,
   speed: 0.25,           // the share of its speed a shaken dog keeps
@@ -114,6 +127,15 @@ export function specialChance(place, racers) {
   if (place <= 1 || racers <= 1) return 0;
   const behind = racers <= 2 ? 1 : Math.min(1, (place - 2) / (racers - 2));
   return 0.1 + 0.2 * behind;
+}
+
+/**
+ * How long a dog's special lasts, used from this place (1 = leading) in a race of this many dogs: all of
+ * `durationMs` from last, and for a special with `lessPerPlaceMs` (Ralph's) that much less for each place
+ * nearer the front.
+ */
+export function specialDurationMs(spec, place, racers) {
+  return spec.lessPerPlaceMs ? Math.max(3000, spec.durationMs - spec.lessPerPlaceMs * Math.max(0, racers - place)) : spec.durationMs;
 }
 
 export function specialFor(dog) {

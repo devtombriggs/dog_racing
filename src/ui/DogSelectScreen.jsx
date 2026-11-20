@@ -134,7 +134,7 @@ export function DogSelectScreen({ session, state }) {
         <button className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="focus" onClick={session.leaveGame}>Leave Game</button>
         {!local && <label className="zr-toggle">
           <input type="checkbox" checked={accessibilityMode} onChange={(event) => session.setAccessibilityMode(event.target.checked)} />
-          <span>Accessibility mode<small>Runs for you · ↑ jump · ↓ use item</small></span>
+          <span>Accessibility mode<small>Runs for you · ↑ jump · ↓ use item · hold ← → round a bend to drift</small></span>
         </label>}
         <BotSettings session={session} room={room} canChange={connected && room?.hostId === state.socketId} />
         {VOICE_CHAT && multiplayer && (

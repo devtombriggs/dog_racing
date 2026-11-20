@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
-import { SPECIALS } from '../../shared/specials.js';
+import { SPECIALS, bellyBounce } from '../../shared/specials.js';
 import { createJetPaws } from './jetpack.js';
 import { createZoomiesWhirl } from './zoomies.js';
 import { createPheasantFlock } from './pheasants.js';
@@ -67,6 +67,7 @@ export function createSpecials({ scene, resolve }) {
   }
 
   function release(e) {
+    if (e.state?.kind === 'bounce' && e.model) e.model.rotation.x = 0;      // (level again)
     e.override = false;
     e.state = null;
   }
@@ -197,6 +198,9 @@ export function createSpecials({ scene, resolve }) {
             if (s.t >= WAVE.waveFrom) e.wave.setActive(true);
             if (s.phase === 'start' && s.t >= WAVE.flop) { playClip(e, 'WaveSurf', { loop: true, fade: 0 }); s.phase = 'surf'; }
             if (s.phase === 'hit' && (s.hitLeft -= delta) <= 0) { playClip(e, 'WaveSurf', { loop: true, fade: 0 }); s.phase = 'surf'; }
+          } else if (s.kind === 'bounce') {
+            // Enzo: nose up on the way up, belly first on the way down (for everyone watching, not only his own player)
+            if (e.model) e.model.rotation.x = -0.5 * Math.cos(bellyBounce(e.spec, s.t).phase * Math.PI);
           } else if (s.kind === 'flush') {
             if (!s.birdsOut && s.t >= s.cue * FLUSH.birdsAt && e.birdGltf) {
               s.birdsOut = true;

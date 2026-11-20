@@ -4,6 +4,36 @@ import { DOG_STATS, DOG_NAMES, DOG_STRIDE_BANDS, STAT_EFFECT, statScale, turnSpe
 
 export { STAT_EFFECT, statScale, turnSpeedLoss, pickupShare };
 
+// ---------------------------------
+// DRIFTING (shared/drift.js): what each dog does with its body in a skid
+// ---------------------------------
+//   hop    the frame of a clip it holds in the little hop that starts a skid
+//   slide  the clip under the slide itself
+//   bend   how far each leg joint is folded (radians about the joint: + swings the leg below it back, - forward):
+//          hind legs more than the front ones, and the body tipped back by
+//   pitch  so that it sits back into the skid.  Its paws are kept on the ground: folded legs are shorter
+//   drop   or, with no `bend`: how far the dog is let down on to the ground (share of its size)
+//   life   what keeps moving in the slide: its tail wags `wag` radians each way `wagRate` times a second,
+//          its head and neck sway `look` each way (slowly) and nod `judder` each way (fast, the skid's shake)
+const SKID_LIFE = { wag: 0.4, wagRate: 4.5, look: 0.035, lookRate: 0.7, judder: 0.012, judderRate: 6 };
+// The skid of the dogs that are fast enough already: down into a crouch, legs folded, and round
+const CROUCH_SKID = {
+  hop: ['Jump', 0.5], slide: 'Idle', pitch: -0.1,
+  bend: { thigh: -0.5, shin: 0.9, metatarsus: -0.5, upperarm: 0.6, forearm: -0.85, pastern: 0.25 },
+  life: SKID_LIFE
+};
+// The slow dogs each have a skid of their own, and get more from it (shared/drift.js DRIFT_PERKS):
+// Enzo flops on to his belly and glides round, legs out
+const BELLY_SKID = { hop: ['Jump', 0.5], slide: 'BellyFlop', slideRate: 0.5, drop: 0.14, pitch: -0.04, life: SKID_LIFE };
+// Ralph hops on to a little skateboard (src/game/dogs/skateboard.js) and rides it round, knees a little bent
+const BOARD_SKID = {
+  hop: ['Jump', 0.5], slide: 'Idle', pitch: -0.04, board: { colour: 0xff7a1a, size: 0.6 },
+  bend: { thigh: -0.22, shin: 0.4, metatarsus: -0.22, upperarm: 0.26, forearm: -0.38, pastern: 0.12 },
+  life: SKID_LIFE
+};
+// Baz crouches into the skid and Naz jumps up on to his back and rides him round (src/game/dogs/duo.js)
+const STACK_SKID = { ...CROUCH_SKID, stack: true };
+
 export const DOGS = {
   gsp: {
     name: 'Pippa (German Shorthaired Pointer)',
@@ -23,7 +53,8 @@ export const DOGS = {
       Trot: 2.09,
       Run: 3.66,
       Sprint: 5.7
-    }
+    },
+    skid: CROUCH_SKID
   },
   second_dog: {
     name: 'Meela (Greyhound)',
@@ -33,6 +64,7 @@ export const DOGS = {
     accent: '#cf88ff',
     model: '/models/meela_greyhound.glb',
     stats: DOG_STATS.second_dog,
+    skid: CROUCH_SKID,
     scale: 3,
     // meela_greyhound/clip_info.json
     gaitSpeed: {
@@ -50,6 +82,7 @@ export const DOGS = {
     accent: '#55aaff',
     model: '/models/black_lab.glb',
     stats: DOG_STATS.black_lab,
+    skid: CROUCH_SKID,
     scale: 3,
     // black_lab/clip_info.json
     gaitSpeed: {
@@ -67,6 +100,7 @@ export const DOGS = {
     accent: '#63efff',
     model: '/models/pablo.glb',
     stats: DOG_STATS.pablo,
+    skid: CROUCH_SKID,
     scale: 3,
     size: 0.7,
     strideBands: DOG_STRIDE_BANDS.pablo,
@@ -89,6 +123,7 @@ export const DOGS = {
     accent: '#ff8a1f',
     model: '/models/enzo.glb',
     stats: DOG_STATS.enzo,
+    skid: BELLY_SKID,
     // (enzo_bully/create_enzo.py: the Labrador's frame, a great deal wider)
     scale: 2.8,
     size: 1.05,
@@ -108,6 +143,7 @@ export const DOGS = {
     accent: '#3ddc4a',
     model: '/models/rocky.glb',
     stats: DOG_STATS.rocky,
+    skid: CROUCH_SKID,
     // (rocky_collie/create_rocky.py: built from the Labrador's body; a touch shorter than Poppy, who is 3)
     scale: 2.95,
     // rocky_collie/clip_info.json (Poppy's captured strides, carried low like a collie working sheep)
@@ -126,6 +162,7 @@ export const DOGS = {
     accent: '#ffd23a',
     model: '/models/kombu.glb',
     stats: DOG_STATS.kombu,
+    skid: CROUCH_SKID,
     // a little smaller than the Labrador he is built from (kombu_labradoodle/create_kombu.py)
     scale: 2.95,
     size: 0.93,
@@ -145,6 +182,7 @@ export const DOGS = {
     accent: '#ff3838',
     model: '/models/jazz.glb',
     stats: DOG_STATS.jazz,
+    skid: CROUCH_SKID,
     // (jazz_great_dane/create_jazz.py: the Labrador's frame with its legs lengthened.  The tallest dog by a head: she stands about 2.2 m at the back, Meela 1.9)
     scale: 3.7,
     size: 1.15,
@@ -170,6 +208,7 @@ export const DOGS = {
     model: '/models/baz.glb',
     twin: { model: '/models/naz.glb' },
     stats: DOG_STATS.baz_naz,
+    skid: STACK_SKID,
     // (baz_naz_pugs/create_pugs.py: the Labrador's frame with its legs shortened.  Tom, 2026-11-19: not much bigger
     //  than Ralph, being pugs: each is 1.13 m tall and 1.62 m long here, to Ralph's 1.05 and 1.92)
     scale: 1.65,
@@ -194,6 +233,7 @@ export const DOGS = {
     accent: '#ffad57',
     model: '/models/ralph.glb',
     stats: DOG_STATS.ralph,
+    skid: BOARD_SKID,
     scale: 3,
     // A dachshund stands about a third as tall as the pointer.  `size`
     // scales the collision rays (so he fits the small-dog tunnel), and the

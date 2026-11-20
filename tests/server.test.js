@@ -1203,12 +1203,13 @@ test('specials: not for the leader; pheasants land on every other dog, Ralph fli
   assert.deepEqual(events('playerHit').filter(e => e.item === 'special').map(e => e.stunMs), [1300, 1300]);
   assert.equal(events('specialEnded').at(-1).playerId, tom.id);
 
-  // Ralph's rocket paws: fifteen seconds in the air, and a second flush cannot touch him
+  // Ralph's rocket paws: fifteen seconds in the air from last place, a second and a half less from one place up
+  // (he is 2nd of the three here), and a second flush cannot touch him
   context.mock.timers.tick(2000);
   move(sam, boxes[2].groundPosition);
   assert.deepEqual(events('itemChanged').at(-1), { playerId: sam.id, item: 'special' });
   sam.call('useItem');
-  assert.deepEqual(events('specialStarted').at(-1), { playerId: sam.id, kind: 'jet', durationMs: 15000 });
+  assert.deepEqual(events('specialStarted').at(-1), { playerId: sam.id, kind: 'jet', durationMs: 13500 });
   move(tom, boxes[3].groundPosition);
   tom.call('useItem');
   const landedBefore = events('pheasantLanded').length;
@@ -1832,12 +1833,18 @@ test('reconnecting before the server has noticed the old connection is dead: the
   for (const p of [tom, again]) p.call('leaveGame');
 });
 
-test('Kombu\'s Kelp Dive: up as far along the road as Poppy\'s wave carries her, past whoever is in between', async context => {
+test('Kombu\'s Kelp Dive: further up the road the further back he is (as far as Poppy\'s wave carries her, from last), past whoever is in between', async context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const { KELP, SPECIALS } = await import('../shared/specials.js');
+  const { KELP, SPECIALS, kelpDistance } = await import('../shared/specials.js');
   // Poppy's wave: 5 s at 1.9 times her 17 m/s
   assert.equal(KELP.distance, 17 * SPECIALS.black_lab.speed * SPECIALS.black_lab.durationMs / 1000);
   assert.ok(KELP.distance > 150 && KELP.distance < 175, `${KELP.distance} m`);
+  // all of it from 6th, less for every place nearer the front, under a third of it from 2nd
+  assert.equal(kelpDistance(6), KELP.distance);
+  assert.equal(kelpDistance(8), KELP.distance);
+  for (let place = 2; place < 6; place++) assert.ok(kelpDistance(place) < kelpDistance(place + 1), `${place} goes less far than ${place + 1}`);
+  assert.ok(kelpDistance(2) > 40 && kelpDistance(2) < KELP.distance / 3, `${kelpDistance(2)} m from 2nd`);
+  assert.equal(kelpDistance(1), kelpDistance(2));
   const at = s => { const p = FARM.pointAt(s); return [p.x, p.y, p.z]; };
   const along = position => FARM.query(position[0], position[2]).s;
   const box = TREAT_BOXES_BY_MAP.farmyard[0].groundPosition;        // (the first row of boxes, about 117 m round)
@@ -1876,20 +1883,25 @@ test('Kombu\'s Kelp Dive: up as far along the road as Poppy\'s wave carries her,
   };
   // (he is never put down in the barn or among the bales: a little short of them instead)
   const plain = s => !PICKUP_PATHS.farmyard.hazards.some(([a, b]) => s >= a - 2 && s <= b + 2);
-  const check = r => {
-    let want = r.from + KELP.distance; while (!plain(want)) want -= 4;
+  const check = (r, place) => {
+    let want = r.from + kelpDistance(place); while (!plain(want)) want -= 4;
     assert.ok(Math.abs(r.landed - want) < 6, `up at ${r.landed} m, from ${r.from} m: wanted ${want}`);
     assert.ok(plain(r.landed));
     assert.equal(r.progress.lap, 1);
     assert.equal(r.progress.checkpoint, MAPS.farmyard.checkpoints.filter(cp => FARM.query(cp.x, cp.z).s < r.landed).length, 'with the checkpoints of the place he came up at');
     return r.landed;
   };
-  // 4th of four, the others 330, 250 and 190 m round: he goes the same distance whoever is where, and is placed by where he comes up
-  let r = race([330, 250, 190]), landed = check(r);
+  // 4th of four, the others 330, 250 and 190 m round: he goes a 4th-placed dog's distance, and is placed by where he comes up
+  let r = race([330, 250, 190]), landed = check(r, 4);
+  assert.ok(landed > 190, 'past the dog in front of him');
   assert.equal(r.places.indexOf(r.kombu.id), [330, 250, 190].filter(s => s > landed).length);
-  // 2nd of two, the leader 200 m round: past the leader
-  r = race([200]); landed = check(r);
-  assert.ok(landed > 200);
+  // 2nd of two, the leader 200 m round: a short hop, and he is still behind the leader
+  r = race([200]); landed = check(r, 2);
+  assert.ok(landed < 200);
+  assert.deepEqual(r.places, [r.sockets[0].id, r.kombu.id], 'still 2nd');
+  // ...but a leader only just in front of him is passed
+  r = race([140]); landed = check(r, 2);
+  assert.ok(landed > 140);
   assert.deepEqual(r.places, [r.kombu.id, r.sockets[0].id], 'that makes him 1st');
 });
 
@@ -1940,7 +1952,7 @@ test('Baz and Naz\'s Trip Wire: the rope trips a dog right across the road from 
   for (const p of [pippa, twins]) p.call('leaveGame');
 });
 
-test('Jazz\'s Earthquake: every other dog still racing is slowed for five seconds wherever it is, but not one in its own special or under a golden collar, and not Jazz', async context => {
+test('Jazz\'s Earthquake: every other dog still racing is slowed for five seconds wherever it is, its own special or not, but not Ralph flying, and not Jazz', async context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const { QUAKE, SPECIALS } = await import('../shared/specials.js');
   assert.equal(SPECIALS.jazz.kind, 'quake');
@@ -1948,10 +1960,10 @@ test('Jazz\'s Earthquake: every other dog still racing is slowed for five second
   assert.ok(QUAKE.speed > 0.1 && QUAKE.speed <= 0.3, 'extremely slow, but not stopped');
   const T = PROCEDURAL_TRACKS.kombu_house;
   const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return [p.x, p.y, p.z]; };
-  const sockets = [client(), client(), client(), client()], [pippa, twins, poppy, jazz] = sockets;
+  const sockets = [client(), client(), client(), client(), client()], [pippa, twins, poppy, jazz, ralph] = sockets;
   const room = pippa.call('hostGame', { mapId: 'kombu_house', name: 'One' }).room;
   sockets.slice(1).forEach((socket, i) => socket.call('joinGame', { roomCode: room.code, name: `P${i + 2}` }));
-  ['gsp', 'baz_naz', 'black_lab', 'jazz'].forEach((dog, i) => assert.equal(sockets[i].call('selectDog', { dog }).success, true));
+  ['gsp', 'baz_naz', 'black_lab', 'jazz', 'ralph'].forEach((dog, i) => assert.equal(sockets[i].call('selectDog', { dog }).success, true));
   pippa.call('startRace');
   for (const socket of sockets) socket.call('raceLoaded');
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
@@ -1965,13 +1977,17 @@ test('Jazz\'s Earthquake: every other dog still racing is slowed for five second
   move(twins, box.groundPosition);
   twins.call('useItem');
   assert.equal(events('specialStarted').at(-1).kind, 'rope');
+  // ...and Ralph takes one and is up on his rocket paws
+  move(ralph, TREAT_BOXES_BY_MAP.kombu_house[2].groundPosition);
+  ralph.call('useItem');
+  assert.equal(events('specialStarted').at(-1).kind, 'jet');
   move(jazz, TREAT_BOXES_BY_MAP.kombu_house[1].groundPosition);
   assert.deepEqual(events('itemChanged').at(-1), { playerId: jazz.id, item: 'special' });
   jazz.call('useItem');
   const quake = events('earthquake').at(-1);
   assert.equal(quake.playerId, jazz.id);
   assert.deepEqual([quake.seconds, quake.speed], [QUAKE.seconds, QUAKE.speed]);
-  assert.deepEqual([...quake.slowed].sort(), [pippa.id, poppy.id].sort(), 'Pippa and Poppy; not the twins in their special, not Jazz');
+  assert.deepEqual([...quake.slowed].sort(), [pippa.id, poppy.id, twins.id].sort(), 'Pippa, Poppy and the twins (Trip Wire or not, their paws are on the ground); not Ralph in the air, not Jazz');
   assert.equal(events('specialStarted').filter(e => e.playerId === jazz.id).length, 0, 'nothing of her own to keep track of');
   assert.equal(events('itemUsed').at(-1)?.playerId ?? jazz.id, jazz.id);
   for (const p of sockets) p.call('leaveGame');

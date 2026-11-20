@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { DOGS } from '../../config/dogs.js';
 import { HANDLING } from '../../config/handling.js';
-import { gaitTimeScale, sprintFraction, applyTurnPose } from './animation.js';
+import { gaitTimeScale, sprintFraction } from './animation.js';
+import { SkidView } from './skidView.js';
 import { DogAvatar } from './DogAvatar.js';
 
 // Another player's dog.  Their own game moves it; here it follows the positions the server passes
@@ -22,12 +23,15 @@ export class RemoteDog extends DogAvatar {
     this.steer = 0;
     this.steerTarget = 0;
     this.animation = data.animation || 'Idle';
+    this.drift = null;       // skidding round a corner, as its own game (or the server, for a computer dog) says: { side, tier, startedAt }
+    this.skid = new SkidView(this, scene);
   }
 
   get visible() { return this.group.visible; }
 
   modelReady() {
     this.play(this.animation);
+    this.skid.ready();
   }
 
   // News of where the dog is now.  keepClip: it is in the middle of its special, which plays its own clips
@@ -55,8 +59,13 @@ export class RemoteDog extends DogAvatar {
     this.lastMoveTime = now;
     this.targetRotation = data.rotation;
     this.animation = data.animation;
+    // in a skid (and which sparks it has): this game poses the dog for it, from when it first hears of it
+    const side = data.drift?.side === 1 || data.drift?.side === -1 ? data.drift.side : 0;
+    if (!side) this.drift = null;
+    else if (this.drift?.side === side) this.drift.tier = data.drift.tier ?? 0;
+    else this.drift = { side, tier: data.drift.tier ?? 0, startedAt: now };
 
-    if (!keepClip) this.play(data.animation);
+    if (!keepClip && !this.drift) this.play(data.animation);
   }
 
   // Put straight back on the track (a fall, a rescue, the far end of a burrow)
@@ -69,6 +78,7 @@ export class RemoteDog extends DogAvatar {
     this.speed = 0;
     this.velocity.set(0, 0, 0);
     this.lastMoveTime = 0;
+    this.drift = null;
     this.play('Idle');
   }
 
@@ -97,7 +107,9 @@ export class RemoteDog extends DogAvatar {
     );
     this.group.rotation.y += rotationDifference * smoothing;
 
-    if (this.currentAction && !playsOwnClips) {
+    const skidding = this.skid.clips(delta, playsOwnClips || !this.group.visible ? null : this.drift);
+
+    if (this.currentAction && !playsOwnClips && !skidding) {
       this.currentAction.timeScale = swimmingAt(this.group.position)
         ? (this.speed > 0.1 ? 1.1 : 0.6)
         : gaitTimeScale(this.currentAction, this.speed, this.config);
@@ -107,7 +119,8 @@ export class RemoteDog extends DogAvatar {
 
     if (this.mixer) {
       this.mixer.update(delta);
-      applyTurnPose(this.model, this.bones, this.steer, sprintFraction(this.speed, runSpeed, sprintSpeed));
+      this.skid.pose(delta, { steer: this.steer, effort: sprintFraction(this.speed, runSpeed, sprintSpeed), tier: this.drift?.tier ?? 0, speed: this.speed });
+      this.skid.settle(delta, { speed: this.speed });
     }
   }
 }

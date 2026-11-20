@@ -93,10 +93,67 @@ export function collectBones(root) {
   return bones;
 }
 
+// Fold the dog's legs under it for the slide of a skid (config.skid.bend), `weight` of the way (0 to 1).
+// Call after the animation mixer has updated.
+export function applySkidPose(bones, bend, weight) {
+  for (const [name, angle] of Object.entries(bend)) {
+    for (const side of ['L', 'R']) {
+      const bone = bones[name + side];
+      if (!bone) continue;
+      // (as in applyTurnPose: a bone the clip holds still is not rewritten by the mixer, so put it back first)
+      const skid = (bone.userData.skidPose ??= { animated: new THREE.Quaternion(), posed: new THREE.Quaternion(NaN, NaN, NaN, NaN) });
+      if (bone.quaternion.equals(skid.posed)) bone.quaternion.copy(skid.animated);
+      skid.animated.copy(bone.quaternion);
+      if (weight > 0) bone.rotateX(angle * weight);
+      skid.posed.copy(bone.quaternion);
+    }
+  }
+}
+
+/**
+ * Where the dog's paws are, standing (measured once, when its model has loaded and is in its standing clip):
+ * { rest: how high its lowest paw joint is off the ground, front, back: how far ahead of and behind its middle its
+ * paws are, side: how far out to each side } (metres, in the dog's own space: it faces +z)
+ */
+export function pawStance(group, bones) {
+  group.updateWorldMatrix(true, true);
+  const at = PAWS.filter(name => bones[name]).map(name => group.worldToLocal(bones[name].getWorldPosition(new THREE.Vector3())));
+  if (!at.length) return { rest: 0, front: 0.5, back: -0.5, side: 0.2 };
+  return {
+    rest: Math.min(...at.map(p => p.y)), front: Math.max(...at.map(p => p.z)), back: Math.min(...at.map(p => p.z)),
+    side: Math.max(...at.map(p => Math.abs(p.x))),
+  };
+}
+
+const PAWS = ['pawL', 'pawR', 'hindpawL', 'hindpawR'], pawAt = new THREE.Vector3();
+/** The height of the dog's lowest paw joint (world).  group: the dog in the scene, with its model posed */
+export function lowestPaw(group, bones) {
+  group.updateWorldMatrix(true, true);
+  let lowest = Infinity;
+  for (const name of PAWS) if (bones[name]) lowest = Math.min(lowest, bones[name].getWorldPosition(pawAt).y);
+  return lowest;
+}
+
+// A dog in the slide of a skid is not a statue: its tail wags hard, the tip a beat behind the root,
+// and its head nods and shakes with the judder of the skid while its neck sways.
+// time: seconds.  weight: how far into the slide it is (0 to 1).  life: config.skid.life.
+// Returns what applyTurnPose takes as `sway`: { bone: [sideways, nod] } in radians.
+export function skidSway(time, weight, life) {
+  const wag = time * life.wagRate * Math.PI * 2, look = time * life.lookRate * Math.PI * 2, judder = time * life.judderRate * Math.PI * 2;
+  const tail = i => [Math.sin(wag - i * 0.7) * life.wag * (1 - i * 0.12) * weight, 0];
+  return {
+    tail1: tail(0), tail2: tail(1), tail3: tail(2),
+    neck1: [Math.sin(look) * life.look * 0.5 * weight, Math.sin(judder - 0.8) * life.judder * 0.4 * weight],
+    neck2: [Math.sin(look - 0.3) * life.look * 0.5 * weight, Math.sin(judder - 0.4) * life.judder * 0.6 * weight],
+    head: [Math.sin(look - 0.6) * life.look * weight, Math.sin(judder) * life.judder * weight],
+  };
+}
+
 // Lean the dog and curve its body into a turn.  Call after the animation
 // mixer has updated.
 // steer: -1 (right) to 1 (left).  effort: 0 to 1, how hard the dog is running.
-export function applyTurnPose(model, bones, steer, effort) {
+// sway: more movement for the same bones, on top of the turn (skidSway), or null.
+export function applyTurnPose(model, bones, steer, effort, sway = null) {
   if (!model) return;
 
   model.rotation.z =
@@ -123,7 +180,8 @@ export function applyTurnPose(model, bones, steer, effort) {
       }
 
       turn.animated.copy(bone.quaternion);
-      bone.rotateZ(BEND_SIGN * bend * weight);
+      bone.rotateZ(BEND_SIGN * bend * weight + (sway?.[name]?.[0] ?? 0));
+      if (sway?.[name]?.[1]) bone.rotateX(sway[name][1]);
     }
   }
   applyHeadLook(model, steer);

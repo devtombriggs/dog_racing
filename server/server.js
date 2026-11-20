@@ -6,7 +6,7 @@ import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampl
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs } from '../shared/specials.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
@@ -422,14 +422,16 @@ function startSpecial(room, player) {
   if (spec.kind === 'sheep') { releaseSheep(room, player); return; }  // (the flock is on its own from here: he just runs on)
   if (spec.kind === 'quake') { earthquake(room, player); return; }    // (one stomp, and it is everyone else's problem)
   clearTimeout(activeSpecials.get(player)?.timer);
-  const now = Date.now();
+  // (Ralph's rocket paws last longer the further back he is)
+  const standings = raceStandings(room), place = standings.find(entry => entry.playerId === player.id)?.place ?? 1;
+  const now = Date.now(), durationMs = spec.lessPerPlaceMs ? specialDurationMs(spec, place, standings.length) : spec.durationMs;
   activeSpecials.set(player, {
-    spec, until: now + spec.durationMs,
+    spec, until: now + durationMs,
     timer: setTimeout(() => {
       if (rooms.get(room.code) === room && room.players.get(player.id) === player) endSpecial(room, player, 'done');
-    }, spec.durationMs)
+    }, durationMs)
   });
-  const started = { playerId: player.id, kind: spec.kind, durationMs: spec.durationMs };
+  const started = { playerId: player.id, kind: spec.kind, durationMs };
   if (spec.kind === 'flush') started.targets = sendPheasants(room, player);
   io.to(room.code).emit('specialStarted', started);
   botDrivers.get(player)?.specialStarted();
@@ -443,12 +445,13 @@ function endSpecial(room, player, reason) {
   io.to(room.code).emit('specialEnded', { playerId: player.id, reason });
 }
 
-// Jazz's Earthquake (shared/specials.js QUAKE): every other dog still racing is slowed, wherever it is.  Each dog's own game
+// Jazz's Earthquake (shared/specials.js QUAKE): every other dog still racing and on the ground is slowed, wherever it is,
+// its own special or not (only Ralph, flying, is out of it).  Each dog's own game
 // slows it (the server says who); the computer's dogs are slowed here (slowUntil, read in tickBots).
 function earthquake(room, player) {
   const now = Date.now(), slowed = [];
   for (const victim of room.players.values()) {
-    if (victim === player || victim.finished || activeSpecials.has(victim) || now < victim.shieldUntil || burrowRides.has(victim)) continue;
+    if (victim === player || victim.finished || activeSpecials.get(victim)?.spec.flyHeight || now < victim.shieldUntil || burrowRides.has(victim)) continue;
     victim.slowUntil = now + QUAKE.seconds * 1000;
     slowed.push(victim.id);
   }
@@ -544,8 +547,9 @@ function stopSheep(room) {
 function kelpDive(room, player) {
   const route = fireworkRoute(room.mapId), path = PICKUP_PATHS[room.mapId], L = route.length;
   const here = (player.lap - 1) * L + route.sAt(player.position);
-  // as far up the road as Poppy's wave takes her; on the last lap, not over the finish line
-  let landing = Math.min(here + KELP.distance, lapsFor(room.mapId) * L - KELP.beforeFinish);
+  // further the further back he is (as far as Poppy's wave takes her, from last); on the last lap, not over the finish line
+  const place = raceStandings(room).find(entry => entry.playerId === player.id)?.place ?? 1;
+  let landing = Math.min(here + kelpDistance(place), lapsFor(room.mapId) * L - KELP.beforeFinish);
   // (on to plain road: not into a jump, a pool, a hazard or the start of a catapult)
   const clear = s => !path.hazards.some(([a, b]) => { const mid = (a + b) / 2, d = Math.abs(s - mid) % L; return Math.min(d, L - d) <= (b - a) / 2 + 2; });
   for (let tries = 0; tries < 60 && landing > here && !clear(((landing % L) + L) % L); tries++) landing -= 4;
@@ -1471,6 +1475,9 @@ function applyMove(room, player, data) {
   }
 
   const previousPosition = [...player.position];
+  // (skidding round a corner, and which sparks it has: passed on for the other games to draw; shared/drift.js)
+  const side = data.drift?.side, tier = data.drift?.tier;
+  player.drift = side === 1 || side === -1 ? { side, tier: tier === 1 || tier === 2 || tier === 3 ? tier : 0 } : null;
 
   let onRoad = true;
   if (MAPS[room.mapId].procedural) {
@@ -1622,7 +1629,7 @@ function tickBots(room) {
       driver.finish();
       const out = driver.step(dt, {});
       Object.assign(player, { position: out.position, rotation: out.rotation, animation: out.animation });
-      io.to(room.code).emit('playerMoved', { playerId: player.id, position: player.position, rotation: player.rotation, animation: player.animation });
+      io.to(room.code).emit('playerMoved', { playerId: player.id, position: player.position, rotation: player.rotation, animation: player.animation, drift: player.drift ?? null });
       continue;
     }
     const carried = carriedBy(room, player), burrow = burrowRides.get(player)?.tunnel;
@@ -1648,10 +1655,10 @@ function tickBots(room) {
     }
     const sent = out?.position ?? player.position;
     applyMove(room, player, {
-      position: sent, rotation: out?.rotation ?? player.rotation, animation: out?.animation ?? player.animation,
+      position: sent, rotation: out?.rotation ?? player.rotation, animation: out?.animation ?? player.animation, drift: out?.drift ?? null,
       respawnRevision: raceStateOf(room, player)?.revision ?? 0
     });
-    io.to(room.code).emit('playerMoved', { playerId: player.id, position: player.position, rotation: player.rotation, animation: player.animation });
+    io.to(room.code).emit('playerMoved', { playerId: player.id, position: player.position, rotation: player.rotation, animation: player.animation, drift: player.drift ?? null });
     if (rooms.get(room.code) !== room || room.status !== 'racing') continue;      // that move ended the race
     const nowCarried = carriedBy(room, player);
     if (carried && !nowCarried) {
@@ -2191,7 +2198,8 @@ io.on('connection', (socket) => {
       playerId: playerId,
       position: player.position,
       rotation: player.rotation,
-      animation: player.animation
+      animation: player.animation,
+      drift: player.drift ?? null
     });
   });
 

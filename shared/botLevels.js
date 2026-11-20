@@ -19,16 +19,25 @@ export const BOT_LEVELS = {
     itemSense: 0,          // 0: uses items at random; 1: when they will do some good; 2: aims and saves them
     pickups: 0.5,          // chance it goes for a Treat Box or a Golden Bone it could reach
     dodges: false,         // steers round chew toys
+    // Drifting (shared/drift.js).  A computer dog may skid round a bend like a player's, but not every bend, never
+    // for long, and sometimes it gets it wrong:
+    drift: {
+      chance: 0.3,         // chance it skids round a bend it comes to
+      seconds: 1.1,        // the longest it holds one (so it seldom gets as far as blue sparks, and never past them)
+      wall: 0.22,          // chance a skid goes wrong: it runs wide into the wall, loses its speed and gets no boost
+    },
   },
   medium: {
     name: 'Medium',
     pace: 0.93, line: 0.3, wander: 0.18, foresight: 0.7, jumpMiss: 0.04, reaction: [0.25, 0.6],
     itemDelay: [1, 4], itemSense: 1, pickups: 0.8, dodges: true,
+    drift: { chance: 0.5, seconds: 1.3, wall: 0.14 },
   },
   hard: {
     name: 'Hard',
     pace: 1, line: 0.7, wander: 0.05, foresight: 1.2, jumpMiss: 0.005, reaction: [0.05, 0.25],
     itemDelay: [0.3, 1.2], itemSense: 2, pickups: 1, dodges: true,
+    drift: { chance: 0.75, seconds: 1.6, wall: 0.07 },
   },
 };
 export const BOT_LEVEL_IDS = Object.keys(BOT_LEVELS);

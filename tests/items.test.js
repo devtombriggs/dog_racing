@@ -199,3 +199,13 @@ test('Enzo\'s Belly Bounce: up and down every bounce with a burst of speed at th
   assert.equal(specialTouches(spec, [0, 0.3, 0], 0, [0.5, 0, 0.5]), true);
   assert.equal(specialTouches(spec, [0, 0.3, 0], 0, [6, 0, 0]), false, 'not one well off to the side');
 });
+
+test('Ralph\'s Rocket Paws last fifteen seconds from last place and a second and a half less for every place nearer the front; no other special changes', async () => {
+  const { SPECIALS, specialDurationMs } = await import('../shared/specials.js');
+  const ralph = SPECIALS.ralph;
+  assert.deepEqual([6, 5, 4, 3, 2].map(place => specialDurationMs(ralph, place, 6)), [15000, 13500, 12000, 10500, 9000]);
+  assert.equal(specialDurationMs(ralph, 2, 2), 15000, 'last of two is last');
+  assert.equal(specialDurationMs(ralph, 3, 4), 13500, 'one place off last, in any size of race');
+  assert.ok(specialDurationMs(ralph, 1, 6) >= 3000);
+  for (const [dog, spec] of Object.entries(SPECIALS)) if (dog !== 'ralph') assert.equal(specialDurationMs(spec, 2, 6), spec.durationMs, dog);
+});

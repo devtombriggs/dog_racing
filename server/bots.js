@@ -18,9 +18,10 @@ import { PICKUP_PATHS, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSpeedLoss, pickupShare } from '../shared/dogStats.js';
-import { HANDLING, JUMP, STEEP_JUMP, DROP } from '../shared/handling.js';
+import { HANDLING, JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../shared/handling.js';
 import { BONE_BOOST, PAD_KICK, TOY } from '../shared/items.js';
-import { SPECIALS, SPECIAL_ITEM } from '../shared/specials.js';
+import { SPECIALS, SPECIAL_ITEM, bellyBounce } from '../shared/specials.js';
+import { DRIFT, driftPerks, driftTurn, driftChargeRate, driftTier, driftBoost, driftBoostNow } from '../shared/drift.js';
 import { WENDOVER, woodlandWaterAt, woodlandDogY, woodlandSwimMultiplier } from '../shared/wendoverData.js';
 import { BURROWS } from '../shared/burrows.js';
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
@@ -252,6 +253,14 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   let position = [0, 0, 0], groundY = 0, slope = 0;
   let jumpHeight = 0, jumpSpeed = 0, jumpGravity = JUMP.gravity, jumping = false, ringHop = 0;
   // its clocks, in seconds of its own running time
+  let specialBegan = 0;        // when its special last started (Enzo's bounces are counted from it)
+  // Drifting (shared/drift.js), toned down for a computer dog by its level's `drift`:
+  //   skid       the skid it is in: { side: 1 left / -1 right, charge, until, wallAt (when it will go wrong, or null) }
+  //   skidBoost  the boost it let go into: { speed, quick, easeOut, until }
+  //   inBend     it is in a bend it has already made its mind up about
+  //   wideUntil  it has run wide into the wall, and is against it until then: { until, side }
+  const perks = driftPerks(dog), drifting = L.drift ?? { chance: 0, seconds: 0, wall: 0 };
+  let skid = null, skidBoost = null, inBend = false, wide = null;
   let time = 0, startAt = between(L.reaction), stunUntil = 0, boneUntil = -1, effect = null, kick = null;       // kick: { speed, until, quick } from a held boost pad
   let progressAt = 0, progressS = 0, travelled = 0, finishing = false;
   // how it is driving
@@ -270,7 +279,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     s = found.s;
     const reach = route.branchAt?.(s) ? Infinity : route.pointAt(s).halfWidth;       // (it may be on a second road, well out to the side)
     lateral = clamp(found.lateral, -reach, reach);
-    sideSpeed = 0; yaw = rotation; hint = -1;
+    sideSpeed = 0; yaw = rotation; hint = -1; skid = null; inBend = false;
     position = [...at]; groundY = at[1];
     jumpHeight = jumpSpeed = 0; jumping = false; ringHop = 0;
     if (change) {                          // a landing, a respawn, the far end of a burrow: { speed, seconds, running }
@@ -296,6 +305,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       * (1 + (BONE_BOOST.speedMultiplier - 1) * bone)
       * (world.special?.speed ?? 1)
       * (world.slowed ?? 1)                                      // (Jazz's Earthquake)
+      // (a slow dog is a little faster than flat out in a skid; out of one, its boost.  The better of the two, and neither on top of a Golden Bone)
+      * (boneLeft > 0 ? 1 : Math.max(skid ? perks.speed : 1, skidBoost ? driftBoostNow(skidBoost.until - time, skidBoost.speed, skidBoost.easeOut) : 1))
       * (time < stunUntil ? 0.15 : 1);
   }
 
@@ -304,10 +315,48 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     const point = route.pointAt(at), bend = Math.abs(point.curvature) / Math.max(0.5, 1 - point.curvature * side);
     if (bend < 1e-4) return top;
     // (on wet ground a dog slides wide, so it can hold less of a bend)
-    const hold = cornering * (1 - 0.45 * route.slipAt(at));
+    // (in a skid it turns tighter, and the turn costs it no speed: that is what a skid is for)
+    const hold = cornering * (1 - 0.45 * route.slipAt(at)) * (skid ? driftTurn(0.6, perks.control) : 1);
     const demand = bend * top / hold;                       // how much of its steering the bend needs flat out
-    if (demand <= 1) return top * (1 - turnLoss * demand);
-    return Math.max(4, Math.min(top * (1 - turnLoss), lerp(turnSlow, hold, 0.5) / bend));
+    if (demand <= 1) return top * (1 - (skid ? 0 : turnLoss) * demand);
+    return Math.max(4, Math.min(top * (1 - (skid ? 0 : turnLoss)), lerp(turnSlow, hold, 0.5) / bend));
+  }
+
+  // ----- drifting.  At each bend it comes to it may go into a skid (its level's chance); it holds it to the end of
+  // the bend or for as long as its level allows, whichever is first, and lets go into whatever boost its sparks
+  // have earned by then.  Now and then (its level's chance again) the skid goes wrong instead: it runs wide into
+  // the wall, loses speed as a player's dog would, and gets nothing.
+  const BEND = 0.018;       // how tight a bend has to be to skid round (1 / its radius in metres)
+  function driftRound(dt, ground, world) {
+    const bend = route.pointAt(s + Math.max(2, speed * 0.2)).curvature, tight = Math.abs(bend) >= BEND;
+    const effort = clamp((speed - runSpeed * 0.5) / (sprintSpeed - runSpeed * 0.5), 0, 1);
+    const able = !jumping && !finishing && !world.special && time >= stunUntil && !ground.swimming && !(wide && time < wide.until);
+    if (skid) {
+      if (!able || effort < DRIFT.endEffort) { skid = null; return; }                     // lost it: nothing for it
+      skid.charge += driftChargeRate(stats.drift, 0.5, perks.charge) * dt;
+      if (skid.wallAt != null && time >= skid.wallAt) {
+        // into the wall: the skid is over, and so is its speed
+        wide = { until: time + 0.7, side: skid.side };
+        speed = Math.min(speedAfterWall(speed, 0.35), sprintSpeed * WALL.scrape);
+        skid = skidBoost = null;
+      } else if (Math.abs(bend) < BEND * 0.6 || time >= skid.until) {
+        // out of the bend (or it has held it as long as it dares): let go
+        const earned = driftBoost(stats.drift, driftTier(skid.charge), perks);
+        if (earned && boneUntil <= time) {                 // (a Golden Bone's boost and a skid's do not add up)
+          skidBoost = { ...earned, until: time + earned.seconds + earned.easeOut };
+          if (speed > 0 && speed < sprintSpeed * earned.speed) speed = Math.min(sprintSpeed * earned.speed, speed + sprintSpeed * (earned.speed - 1) * earned.kick);
+        }
+        skid = null;
+      }
+      return;
+    }
+    if (!tight) { inBend = false; return; }
+    if (inBend) return;
+    inBend = true;                                    // (one go at each bend)
+    if (!able || effort < DRIFT.startEffort || random() >= drifting.chance) return;
+    const hold = lerp(0.6, 1, random()) * drifting.seconds;
+    // (a bend that curves to + is a turn to the right: its rotation falls)
+    skid = { side: -Math.sign(bend), charge: 0, until: time + hold, wallAt: random() < drifting.wall ? time + lerp(0.3, 0.8, random()) * hold : null };
   }
 
   // ----- where across the road to run
@@ -505,8 +554,10 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
    */
   function step(dt, world = {}) {
     time += dt;
-    const still = { position, rotation: yaw, animation, useItem: false, stuck: false };
+    const still = { position, rotation: yaw, animation, drift: null, useItem: false, stuck: false };
     if (time < startAt) { progressAt = time; return still; }
+    // Enzo's Belly Bounce: where he is in the bounce, and the burst of speed that goes with it (as a player's Enzo has it)
+    if (world.special?.bounce) world = { ...world, special: { ...world.special, ...bellyBounce(world.special, time - specialBegan), bouncing: true } };
 
     let ground = route.groundAt(position[0], position[2], s, dog, stats.swimming, hint, heightAt, jumping);
     hint = ground.hint;
@@ -516,8 +567,10 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       if (!(kick && kick.until > time) && speed > 0) speed += sprintSpeed * (ground.kick.speed - 1) * PAD_KICK.instant;
       kick = { speed: ground.kick.speed, until: time + ground.kick.hold + PAD_KICK.easeOut, quick: ground.kick.quick ?? PAD_KICK.quick };
     }
+    driftRound(dt, ground, world);
     const top = topSpeed(ground, world);
     let cap = finishing ? 0 : top * L.pace;
+    if (wide && time < wide.until) cap = Math.min(cap, sprintSpeed * WALL.scrape);       // (against the wall)
     if (world.special?.speed) cap = top;                     // a special carries the dog along by itself
     const limit = route.limitAt(s + Math.max(4, speed * 0.4));
     let target = finishing ? lateral : chooseLine(world, limit);
@@ -547,6 +600,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     const hazards = finishing ? { cap, jump: false } : watchHazards(world, cap);
     cap = Math.min(cap, hazards.cap);
     if (hazards.dodge != null) target = hazards.dodge;
+    if (wide && time < wide.until) target = wide.side * limit;                           // (run wide: out to the wall on the outside of the bend)
     const boneLeft = boneUntil - time;
     const effort = clamp((speed - runSpeed * 0.5) / (sprintSpeed - runSpeed * 0.5), 0, 1);
     const push = acceleration
@@ -554,6 +608,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       * (world.special?.speed ? 2.5 : 1)
       * (boneLeft > 0 ? BONE_BOOST.accelerationMultiplier : 1)
       * (kick && kick.until > time ? kick.quick : 1)
+      * (skidBoost && skidBoost.until > time ? skidBoost.quick : 1)
       * (route.steep && slope < 0 ? 1 - 4 * slope : 1)
       * (ground.swimming ? waterAcceleration : 1);
     speed = speed < cap ? Math.min(cap, speed + push * dt) : Math.max(cap, speed - (finishing ? 9 : BRAKING) * dt);
@@ -576,7 +631,11 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     travelled += along;
 
     // ----- up and down
-    if (world.special?.flyHeight) {
+    if (world.special?.bouncing) {
+      // up and down the same arc, again and again; when it ends in mid-air he drops and lands
+      jumping = true; jumpSpeed = 0; jumpGravity = JUMP.gravity;
+      jumpHeight = world.special.height;
+    } else if (world.special?.flyHeight) {
       // Ralph's rocket paws: up to flying height and held there (low over the catapult and the cannon,
       // which fire him like anyone else)
       jumping = true; jumpSpeed = 0; jumpGravity = JUMP.gravity;
@@ -618,7 +677,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     else if (time - progressAt > STUCK_SECONDS) { stuck = true; progressAt = time; }
 
     return {
-      position, rotation: yaw, animation, stuck,
+      position, rotation: yaw, animation: skid ? 'Sprint' : animation, stuck,
+      drift: skid ? { side: skid.side, tier: driftTier(skid.charge) } : null,      // (for the players' games to draw)
       useItem: !finishing && wantsToUse({ ...world, swimming: ground.swimming }, dt),
     };
   }
@@ -626,19 +686,20 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   return {
     place, step,
     /** Knocked over: nearly stopped, and slow until it is back on its paws. */
-    hit(stunMs) { stunUntil = time + stunMs / 1000; speed *= 0.15; boneUntil = -1; kick = null; },
+    hit(stunMs) { stunUntil = time + stunMs / 1000; speed *= 0.15; boneUntil = -1; kick = null; skid = skidBoost = null; },
     /** A golden bone (the item, or one off the road). */
     boost() {
       boneUntil = time + BONE_BOOST.duration + BONE_BOOST.easeOut;
+      skidBoost = null;
       if (speed > 0) speed += sprintSpeed * (BONE_BOOST.speedMultiplier - 1) * BONE_BOOST.instantKick;
     },
     /** Its special has begun: straight up to full pace. */
-    specialStarted() { if (special?.speed && speed > 0) speed = Math.max(speed, sprintSpeed); },
+    specialStarted() { specialBegan = time; if (special?.speed && speed > 0) speed = Math.max(speed, sprintSpeed); },
     /** Over the line: it runs on a little way, slowing, and stops. */
     finish() { finishing = true; },
     get stopped() { return finishing && speed < 0.1; },
     get speed() { return speed; },
-    get state() { return { s, lateral, speed, jumping, travelled }; },
+    get state() { return { s, lateral, speed, jumping, travelled, skid: skid ? { ...skid, tier: driftTier(skid.charge) } : null, boosting: Boolean(skidBoost && skidBoost.until > time), wide: Boolean(wide && wide.until > time) }; },
     sprintSpeed, runSpeed,
   };
 }

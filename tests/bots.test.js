@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { botRoute, createBot } from '../server/bots.js';
+import { DRIFT } from '../shared/drift.js';
 import { BOT_LEVELS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
@@ -47,14 +48,15 @@ test('the levels: easy is slower, sees less far ahead and fluffs more jumps than
   assert.ok(distance('easy') < distance('medium') && distance('medium') < distance('hard'));
 });
 
-test('a computer dog runs at its own dog\'s speed, never faster, and stays on the road', () => {
+test('a computer dog runs at its own dog\'s speed, never faster but for the boost out of a skid, and stays on the road', () => {
   for (const mapId of ['farmyard', 'modbury_heights', 'wendover']) {
     for (const dog of ['second_dog', 'pablo']) {       // (not Ralph: on Wendover he leaves the road for his burrows)
       const bot = run({
         mapId, dog, level: 'hard', seconds: 60,
         watch: (move, state, route) => {
           assert.ok(Math.abs(state.lateral) <= route.pointAt(state.s).halfWidth, `${mapId}: ${dog} is off the road at ${state.s}`);
-          assert.ok(state.speed <= bot_top(dog) * 1.09, `${mapId}: ${dog} at ${state.speed} m/s`);       // (1.08: the most a downhill gives)
+          // (1.08: the most a downhill gives; out of a skid, the skid's boost on top of it: shared/drift.js)
+          assert.ok(state.speed <= bot_top(dog) * 1.09 * (state.boosting ? DRIFT.boostSpeed : 1), `${mapId}: ${dog} at ${state.speed} m/s`);
           assert.ok(move.position.every(Number.isFinite) && Number.isFinite(move.rotation));
         },
       });
@@ -126,4 +128,82 @@ test('a knock, a golden bone and a held item', () => {
   assert.equal(uses('hard', { item: 'firework', place: 3 }), true);
   assert.equal(uses('hard', { item: 'collar', place: 2, threat: 200 }), false);
   assert.equal(uses('hard', { item: 'collar', place: 2, threat: 12 }), true, 'something is coming for it');
+});
+
+test('a computer Enzo bounces in his Belly Bounce: up and down off the road, a burst of speed on each bounce, and down again when it ends', async () => {
+  const { SPECIALS } = await import('../shared/specials.js');
+  const spec = SPECIALS.enzo, route = botRoute('speed_bowl'), start = route.pointAt(40);
+  const bot = createBot({ mapId: 'speed_bowl', dog: 'enzo', level: 'hard', seed: 7 });
+  bot.place([start.x, start.y, start.z], start.heading);
+  const height = move => move.position[1] - route.pointAt(bot.state.s).y;
+  for (let t = 0; t < 6; t += TICK) assert.ok(Math.abs(height(bot.step(TICK, {}))) < 0.2, 'on the road before it');
+  const plain = bot.speed;
+  bot.specialStarted();
+  const heights = [], speeds = [];
+  for (let t = 0; t < spec.bounce.seconds * 3; t += TICK) { heights.push(height(bot.step(TICK, { special: spec }))); speeds.push(bot.speed); }
+  assert.ok(Math.max(...heights) > spec.bounce.height * 0.9, `up to the top of the bounce (${Math.max(...heights).toFixed(2)} m)`);
+  assert.ok(Math.min(...heights) < 0.35, 'and down on to the road again');
+  assert.ok(heights.filter((h, i) => i > 0 && h < 0.5 && heights[i - 1] >= 0.5).length >= 2, 'more than once');
+  assert.ok(Math.max(...speeds) > plain * spec.speed, `faster than the special's flat speed on the bursts (${Math.max(...speeds).toFixed(1)} against ${(plain * spec.speed).toFixed(1)})`);
+  // it ends: he comes down and stays down
+  const after = []; for (let t = 0; t < 2; t += TICK) after.push(height(bot.step(TICK, {})));
+  assert.ok(Math.abs(after.at(-1)) < 0.2 && Math.max(...after.slice(-10)) < 0.2, 'back on the road');
+});
+
+test('computer dogs drift: at some bends, not for long, into the turn, with a boost when it comes off and none when it hits the wall', async () => {
+  const { BOT_LEVELS } = await import('../shared/botLevels.js');
+  const { DRIFT_PERKS } = await import('../shared/drift.js');
+  const { WALL } = await import('../shared/handling.js');
+  for (const id of ['easy', 'medium', 'hard']) {
+    const d = BOT_LEVELS[id].drift;
+    assert.ok(d.chance > 0 && d.chance < 1 && d.seconds > 0.5 && d.seconds < 2 && d.wall > 0 && d.wall < 0.3, id);
+  }
+  assert.ok(BOT_LEVELS.easy.drift.chance < BOT_LEVELS.medium.drift.chance && BOT_LEVELS.medium.drift.chance < BOT_LEVELS.hard.drift.chance, 'a better dog drifts more often');
+  assert.ok(BOT_LEVELS.easy.drift.wall > BOT_LEVELS.medium.drift.wall && BOT_LEVELS.medium.drift.wall > BOT_LEVELS.hard.drift.wall, '...and gets it wrong less');
+
+  // round the kart oval for two minutes: what each level does with its bends
+  const watch = (dog, level, seed) => {
+    const route = botRoute('speed_bowl'), start = route.pointAt(0), bot = createBot({ mapId: 'speed_bowl', dog, level, seed });
+    bot.place([start.x, start.y, start.z], start.heading);
+    const seen = { skids: 0, longest: 0, boosts: 0, walls: 0, tiers: new Set(), wrongWay: 0, rightWay: 0, fastest: 0, reported: 0 };
+    let was = null, since = 0, yaw = null, wasBoosting = false, wasWide = false;
+    for (let t = 0; t < 120; t += TICK) {
+      const move = bot.step(TICK, {}), { skid, boosting, wide } = bot.state;
+      if (skid && !was) { seen.skids += 1; since = t; }
+      if (skid) {
+        seen.longest = Math.max(seen.longest, t - since); seen.tiers.add(skid.tier);
+        assert.deepEqual(move.drift, { side: skid.side, tier: skid.tier }, 'what it tells the players\' games');
+        assert.equal(move.animation, 'Sprint');
+        seen.reported += 1;
+        // it turns the way it is skidding (rotation grows turning left)
+        if (yaw != null && Math.abs(route.pointAt(bot.state.s).curvature) > 0.02) { const turn = Math.atan2(Math.sin(move.rotation - yaw), Math.cos(move.rotation - yaw)); if (turn * skid.side < -1e-4) seen.wrongWay += 1; else if (turn * skid.side > 1e-4) seen.rightWay += 1; }
+      } else assert.equal(move.drift, null);
+      if (boosting && !wasBoosting) seen.boosts += 1;
+      if (wide && !wasWide) { seen.walls += 1; assert.ok(bot.speed <= bot.sprintSpeed * WALL.scrape + 1e-6, 'slowed by the wall'); assert.equal(boosting, false, 'and no boost for it'); }
+      seen.fastest = Math.max(seen.fastest, bot.speed / bot.sprintSpeed);
+      was = skid; wasBoosting = boosting; wasWide = wide; yaw = move.rotation;
+    }
+    return seen;
+  };
+  const total = level => [1, 2, 3, 4, 5, 6].map(seed => watch('gsp', level, seed)).reduce((a, b) => ({
+    skids: a.skids + b.skids, longest: Math.max(a.longest, b.longest), boosts: a.boosts + b.boosts, walls: a.walls + b.walls, wrongWay: a.wrongWay + b.wrongWay, rightWay: a.rightWay + b.rightWay,
+    tiers: new Set([...a.tiers, ...b.tiers]), fastest: Math.max(a.fastest, b.fastest),
+  }));
+  const easy = total('easy'), hard = total('hard');
+  for (const [id, seen] of [['easy', easy], ['hard', hard]]) {
+    assert.ok(seen.skids > 3, `${id}: it does drift (${seen.skids})`);
+    assert.ok(seen.longest <= BOT_LEVELS[id].drift.seconds + 0.11, `${id}: never for long (${seen.longest.toFixed(2)} s)`);
+    // (now and then it is moving across the road the other way for a step: the skid is still the bend's way)
+    assert.ok(seen.rightWay > 3 * seen.wrongWay, `${id}: into the bend (${seen.rightWay} steps to ${seen.wrongWay})`);
+    assert.ok(!seen.tiers.has(3), `${id}: never as far as purple sparks`);
+    assert.ok(seen.boosts + seen.walls <= seen.skids, id);
+  }
+  assert.ok(hard.skids > easy.skids, `a hard dog drifts more (${hard.skids} to ${easy.skids})`);
+  assert.ok(hard.boosts > 0, 'and gets boosts from it');
+  assert.ok(easy.walls + hard.walls > 0, 'some of them hit the wall');
+  // Ralph gets a bone's boost from his, as a player's Ralph does
+  const ralph = [1, 2, 3].map(seed => watch('ralph', 'hard', seed));
+  assert.ok(ralph.some(r => r.boosts > 0 && r.fastest > 1.2), `Ralph: ${ralph.map(r => r.fastest.toFixed(2))}`);
+  assert.ok(ralph.every(r => r.fastest <= 1.31), `never more than a bone gives: ${ralph.map(r => r.fastest.toFixed(2))}`);
+  assert.ok(DRIFT_PERKS.ralph);
 });

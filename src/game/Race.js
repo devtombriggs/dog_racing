@@ -539,7 +539,9 @@ export class Race {
           spread = { left: half - across, right: -half - across };
         }
       }
-      avatar.duo.update(delta, { speed, sprintSpeed: local.sprintSpeed, action: avatar.currentAction, spread });
+      // (in a skid one twin rides the other: config.skid.stack)
+      const stack = avatar.config.skid?.stack ? avatar.skid.slideWeight : 0;
+      avatar.duo.update(delta, { speed, sprintSpeed: local.sprintSpeed, action: avatar.currentAction, spread, stack });
     }
 
     this.chaseCamera.update(delta, Boolean(local.launchFlight));
@@ -570,6 +572,8 @@ export class Race {
     this.quake.dispose();
     this.minimap.dispose();
     this.goldenBones.dispose();
+    this.local.skid.dispose();
+    for (const remote of this.remotes.values()) remote.skid.dispose();
     this.input.dispose();
     this.#timer.disconnect();
     this.stage.dispose();

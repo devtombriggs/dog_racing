@@ -28,7 +28,7 @@ function Settings({ session, state, close }) {
         )}
         <label className="zr-toggle">
           <input type="checkbox" checked={state.accessibilityMode} onChange={event => session.setAccessibilityMode(event.target.checked)} />
-          <span>Accessibility mode<small>Your dog runs by itself · ↑ jumps · ↓ uses the item</small></span>
+          <span>Accessibility mode<small>Your dog runs by itself · ↑ jumps · ↓ uses the item · hold ← or → round a bend to drift</small></span>
         </label>
         <button className="zr-btn zr-btn--yellow" data-pad-first="" data-pad-back="" onClick={close}>Done</button>
       </div>
@@ -49,13 +49,15 @@ function Controls({ close }) {
             <tr><td>A / D or ← / →</td><td>Steer</td></tr>
             <tr><td>Space</td><td>Jump</td></tr>
             <tr><td>Shift or E</td><td>Use the item</td></tr>
+            <tr><td>K or C (hold)</td><td>Drift round a corner</td></tr>
             <tr><td>Esc</td><td>Menu</td></tr>
             <tr><th colSpan="2">Controller</th></tr>
             <tr><td>Right trigger</td><td>Go</td></tr>
             <tr><td>Left trigger</td><td>Brake, then reverse</td></tr>
             <tr><td>Left stick or D-pad</td><td>Steer</td></tr>
             <tr><td>A</td><td>Jump</td></tr>
-            <tr><td>X, B or a bumper</td><td>Use the item</td></tr>
+            <tr><td>X, B or left bumper</td><td>Use the item</td></tr>
+            <tr><td>Right bumper (hold)</td><td>Drift round a corner</td></tr>
           </tbody>
         </table>
         <button className="zr-btn zr-btn--yellow" data-pad-first="" data-pad-back="" onClick={close}>Done</button>

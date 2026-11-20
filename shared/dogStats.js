@@ -3,17 +3,18 @@
 // computer-controlled dogs with the same numbers a player's dog runs on.
 
 // Each dog is rated 1 to 10.  A 7 is the handling the game was tuned around.
+// drift: how good a drifter (shared/drift.js): roughly the reverse of speed, so the slow dogs make their time in the corners
 export const DOG_STATS = {
-  gsp: { speed: 8, acceleration: 7, agility: 7, swimming: 6 },           // Pippa: the all-rounder (second fastest, nothing below 6)
-  second_dog: { speed: 9, acceleration: 5, agility: 5, swimming: 4 },    // Meela (her card says 10 for speed: DOG_STATS_SHOWN)
-  black_lab: { speed: 7, acceleration: 7, agility: 8, swimming: 10 },    // Poppy
-  pablo: { speed: 6, acceleration: 9, agility: 10, swimming: 5 },
-  ralph: { speed: 5, acceleration: 10, agility: 9, swimming: 4 },
-  enzo: { speed: 6, acceleration: 6, agility: 8, swimming: 4 },
-  rocky: { speed: 7, acceleration: 7, agility: 10, swimming: 6 },
-  kombu: { speed: 7, acceleration: 8, agility: 9, swimming: 4 },         // (his special is a strong one)
-  jazz: { speed: 6.5, acceleration: 9, agility: 10, swimming: 5.5 },         // the Great Dane: Pablo, and a shade better
-  baz_naz: { speed: 6, acceleration: 8.5, agility: 9.5, swimming: 5 },       // Baz and Naz, the pug twins: Pablo's speed and swimming, just under him on the rest
+  gsp: { speed: 8, acceleration: 7, agility: 7, swimming: 6, drift: 6 },           // Pippa: the all-rounder (second fastest, nothing below 6)
+  second_dog: { speed: 9, acceleration: 5, agility: 5, swimming: 4, drift: 4 },    // Meela (her card says 10 for speed: DOG_STATS_SHOWN)
+  black_lab: { speed: 7, acceleration: 7, agility: 8, swimming: 10, drift: 7 },    // Poppy
+  pablo: { speed: 6, acceleration: 9, agility: 10, swimming: 5, drift: 9 },
+  ralph: { speed: 5, acceleration: 10, agility: 9, swimming: 4, drift: 10 },
+  enzo: { speed: 6, acceleration: 6, agility: 8, swimming: 4, drift: 9 },
+  rocky: { speed: 7, acceleration: 7, agility: 10, swimming: 6, drift: 7 },
+  kombu: { speed: 7, acceleration: 8, agility: 9, swimming: 4, drift: 7 },         // (his special is a strong one)
+  jazz: { speed: 6.5, acceleration: 9, agility: 10, swimming: 5.5, drift: 8 },         // the Great Dane: Pablo, and a shade better
+  baz_naz: { speed: 6, acceleration: 8.5, agility: 9.5, swimming: 5, drift: 9 },       // Baz and Naz, the pug twins: Pablo's speed and swimming, just under him on the rest
 };
 
 // What a dog's card says where that is not the number it runs on: Meela is shown as a 10 for speed, and runs as a 9
