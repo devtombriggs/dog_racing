@@ -36,7 +36,7 @@ class Account {
   /** Asks the server who is signed in.  Returns a ticket for the race connection (or null for a guest). */
   async refresh() {
     try {
-      const me = await request('GET', '/api/me');
+      const me = await request('GET', `/api/me?t=${Date.now()}`);          // (never a cached answer)
       this.#ticket = me.ticket;
       this.#set({ ready: true, offline: false, user: me.user, stats: me.stats, google: me.google, pending: me.pending });
       return me.ticket;
@@ -55,10 +55,19 @@ class Account {
   }
 
   // Signing in and out; each tells the race connection afterwards (onChange)
-  async signUp(details) { await request('POST', '/auth/signup', details); await this.#changed(); }
-  async signIn(details) { await request('POST', '/auth/login', details); await this.#changed(); }
+  async signUp(details) { await request('POST', '/auth/signup', details); await this.#changed(); this.#checkSignedIn(); }
+  async signIn(details) { await request('POST', '/auth/login', details); await this.#changed(); this.#checkSignedIn(); }
   async signOut() { await request('POST', '/auth/logout'); await this.#changed(); }
-  async finishSignUp(username) { await request('POST', '/auth/finish', { username }); await this.#changed(); }
+  async finishSignUp(username) { await request('POST', '/auth/finish', { username }); await this.#changed(); this.#checkSignedIn(); }
+
+  // The server said yes, but asking again who this is says nobody: the browser did not keep the sign-in cookie, or a
+  // proxy in front of the game kept it from the server (or answered /api/me from a cache).  Better said than a quiet "Guest".
+  #checkSignedIn() {
+    if (this.state.user) return;
+    throw new Error(this.state.offline
+      ? 'Signed in, but the server could not be reached to check: try again in a moment'
+      : 'The server signed you in, but this browser did not keep it (the sign-in cookie never came back). Check the server is on https and that nothing caches /api.');
+  }
   async cancelSignUp() { await request('POST', '/auth/cancel'); await this.refresh(); }
   /** Is this username free?  { ok, problem } */
   checkUsername = name => request('GET', `/api/username?name=${encodeURIComponent(name)}`);

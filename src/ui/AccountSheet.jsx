@@ -16,13 +16,13 @@ const GOOGLE_G = (
   </svg>
 );
 
-/** The badge: "Guest · Sign In", or the player's username */
+/** The badge: "Guest · Sign In", or "Welcome, <username>" */
 export function AccountBadge({ onOpen }) {
   const { user } = useAccount();
   return (
     <button className="zr-account" onClick={onOpen} aria-label={user ? `Signed in as ${user.username}: your account` : 'Playing as a guest: sign in'}>
       {PERSON}
-      <span className="zr-account__name">{user ? user.username : <>Guest · <u>Sign In</u></>}</span>
+      <span className="zr-account__name">{user ? <span className="zr-account__welcome"><small>Welcome</small><b>{user.username}</b></span> : <>Guest · <u>Sign In</u></>}</span>
       <svg className="zr-account__more" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
     </button>
   );

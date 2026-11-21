@@ -118,7 +118,7 @@ export function MenuScreen({ session, state }) {
           <>
             <div className="zr-home__who">
               {user ? (
-                <p className="zr-home__as">{ICONS.person}<span>Racing as <b>{user.username}</b></span></p>
+                <p className="zr-home__as">{ICONS.person}<span>Welcome, <b>{user.username}</b></span></p>
               ) : (
                 <>
                   <label className="zr-home__name">

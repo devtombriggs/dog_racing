@@ -189,6 +189,9 @@
 .zr-account > svg:first-child { flex: none; width: 1.55em; height: 1.55em; fill: #fff; }
 .zr-account__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .zr-account__name u { text-underline-offset: 0.15em; }
+.zr-account__welcome { display: flex; flex-direction: column; gap: 0.1em; line-height: 1.05; }
+.zr-account__welcome small { font-size: 0.72em; font-weight: 400; color: #c4d3f5; }
+.zr-account__welcome b { overflow: hidden; text-overflow: ellipsis; font-size: 1.08em; }
 .zr-account__more { flex: none; width: 1.1em; height: 1.1em; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .zr-account:hover { transform: scale(1.03); filter: brightness(1.15); }
 .zr-account:focus-visible { outline: 0.15em solid var(--zr-yellow); outline-offset: 0.1em; }
