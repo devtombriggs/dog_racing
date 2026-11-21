@@ -1,3 +1,4 @@
+import { swimSpeed } from './dogStats.js';
 import features from './wendoverFeatures.json' with { type: 'json' };
 import pathData from './wendoverPath.json' with { type: 'json' };
 import { polylinePath } from './polylinePath.js';
@@ -67,14 +68,10 @@ export function woodlandBogAt(x,z) {
   return null;
 }
 
-// Share of a dog's own top speed it keeps in the water, from its swim stat: Poppy (10) is not slowed
-// at all, and is never quicker than she is on land; the weak swimmers (Meela and Ralph, 4) crawl at under half.
-//   10 -> 1   6 -> 0.62   5 -> 0.51   4 -> 0.45
-// The best a swimmer can do is SWIM_BEST: Poppy was 1.35, then 1.05, and still ran away with every pool.
-const SWIM_BEST=1;
+// Share of a dog's own top speed it keeps in the water, from its swim stat (shared/dogStats.js swimSpeed: the same
+// on every map).  Poppy was 1.35, then 1.05, then 1, and still ran away with every pool: now 0.9
 export function woodlandSwimMultiplier(swimming=4) {
-  const skill=Math.max(0,Math.min(1,(swimming-4)/6));
-  return Math.min(SWIM_BEST,0.45+0.9*skill**1.5);
+  return swimSpeed(swimming);
 }
 
 export function entersBurrow(previous,current,tunnel) {

@@ -26,7 +26,7 @@ test('Water Park: a closed lap with a grid, checkpoints in order and walls all t
   }
 });
 
-test('Water Park: two pools to swim, and Poppy is the only dog as fast in the water as on land', () => {
+test('Water Park: two pools to swim, and Poppy is the best in the water', () => {
   assert.deepEqual(T.pools.map(pool => pool.id), ['lagoon', 'river']);
   for (const pool of T.pools) {
     const deep = at(mid(pool));
@@ -38,8 +38,8 @@ test('Water Park: two pools to swim, and Poppy is the only dog as fast in the wa
   }
   const lagoon = at(mid(T.pools[0])), river = at(mid(T.pools[1]));
   const share = dog => T.speedFactor(lagoon, stats(dog));
-  assert.equal(share('black_lab'), 1, 'the water does not slow Poppy, and does not speed her up');
-  for (const dog of ['gsp', 'pablo', 'second_dog', 'ralph']) assert.ok(share(dog) < 0.6, dog);
+  assert.ok(Math.abs(share('black_lab') - 0.9) < 1e-9, 'Poppy keeps 90 % of her speed');
+  for (const dog of ['gsp', 'pablo', 'second_dog', 'ralph']) assert.ok(share(dog) >= 0.6 && share(dog) < share('black_lab'), dog);
   assert.ok(share('rocky') > share('pablo') && share('pablo') > share('ralph'));
   // the Lazy River flows with the race: everyone is carried a little
   for (const dog of Object.keys(DOG_STATS)) assert.ok(Math.abs(T.speedFactor(river, stats(dog)) - share(dog) - 0.15) < 1e-9, dog);

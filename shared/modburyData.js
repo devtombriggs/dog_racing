@@ -1,3 +1,4 @@
+import { swimSpeed } from './dogStats.js';
 // Modbury Heights — shared track + terrain definition.
 //
 // Pure JavaScript, no dependencies: import this SAME file in the React client and the Socket.IO
@@ -258,7 +259,7 @@ function buildTrack() {
     const stamina = stats.stamina ?? 0.5, swimming = stats.swimming ?? 0.5; let f = 1;
     if (q.grade > 0) f *= 1 - Math.min(0.5, q.grade * 2.4 * (1.5 - stamina));        // 10 % climb: -24 % average, -12 % for a top climber
     else f *= 1 + Math.min(0.08, -q.grade * 0.8);                                     // small natural boost downhill
-    if (q.inWater) f *= 1 - clamp01(q.waterDepth / 0.6) * (0.5 - 0.3 * swimming);     // deep wade/swim: -35 % average, -20 % for a strong swimmer
+    if (q.inWater) f *= swimSpeed(swimming * 10);                                    // wading or swimming, the same (shared/dogStats.js swimSpeed)
     if (q.surface === 'shoulder') f *= 0.72;                                          // soft sand / long grass off the trail
     return f;
   }

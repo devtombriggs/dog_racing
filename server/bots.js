@@ -197,7 +197,7 @@ function buildRoute(mapId) {
     if (track) {
       const q = track.query(x, z, hint);
       return {
-        y: q.dogY ?? q.y, hint: q.index, swimming: q.movement === 'swim',
+        y: q.dogY ?? q.y, hint: q.index, swimming: q.movement === 'swim', inWater: Boolean(q.inWater),
         speed: track.speedFactor ? track.speedFactor(q, { stamina: 0.5, swimming: clamp(swimming / 10, 0, 1) }, airborne) : 1,
         hills: Boolean(track.speedFactor),
         kick: airborne ? null : q.kick ?? null,       // a boost pad whose boost stays with the dog
@@ -205,7 +205,7 @@ function buildRoute(mapId) {
     }
     if (mapId === 'wendover') {
       const water = woodlandWaterAt(x, z);
-      if (water) return { y: woodlandDogY(water, dog), speed: water.inWater ? woodlandSwimMultiplier(swimming) : 1, hills: water.inWater, swimming: water.swimming, hint: -1 };
+      if (water) return { y: woodlandDogY(water, dog), speed: water.inWater ? woodlandSwimMultiplier(swimming) : 1, hills: water.inWater, swimming: water.swimming, inWater: water.inWater, hint: -1 };
     }
     return { y: heightAt ? heightAt(x, z) : pointAt(s).y, speed: 1, hills: false, swimming: false, hint: -1 };
   }
@@ -653,7 +653,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       // a rubber ring under it: thrown up and on at full pace
       jumping = true; jumpSpeed = route.bounce.force; jumpGravity = route.bounce.gravity;
       ringHop = route.bounce.pace;
-    } else if (!finishing && (hazards.jump || wantsToJump(world, ground))) {
+    } else if (!finishing && !ground.inWater && (hazards.jump || wantsToJump(world, ground))) {      // (no jumping out of water)
       const steep = route.steep && slope < STEEP_JUMP.below;
       jumping = true;
       jumpSpeed = steep ? STEEP_JUMP.force : JUMP.force;

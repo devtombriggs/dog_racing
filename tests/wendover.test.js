@@ -37,7 +37,7 @@ test('Wendover pools have smooth walk-in banks, deep swimming and dry exits', ()
       previous=water.groundY;
     }
   }
-  assert.ok(woodlandSwimMultiplier(10)/woodlandSwimMultiplier(4)>2.2,'Poppy gets a substantial swimming advantage');
+  assert.ok(woodlandSwimMultiplier(10)/woodlandSwimMultiplier(4)>=1.5,'Poppy gets a clear swimming advantage');
   assert.equal(woodlandSwimMultiplier(1),woodlandSwimMultiplier(4));
 });
 
@@ -106,12 +106,13 @@ test('each pool has one really thin tightrope plank: dry on top, back in the wat
   }
 });
 
-test('water speed follows the swim stat: Poppy is as fast in the water as on land and no faster, Meela and Ralph crawl', () => {
+test('water speed follows the swim stat: Poppy keeps 90 %, a weak swimmer 60 %, the same on every map', async () => {
+  const { swimSpeed } = await import('../shared/dogStats.js');
   const poppy = woodlandSwimMultiplier(10), pippa = woodlandSwimMultiplier(6), pablo = woodlandSwimMultiplier(5), meela = woodlandSwimMultiplier(4);
-  assert.equal(poppy, 1, 'the water does not slow Poppy, and does not speed her up');
-  assert.ok(Math.abs(pippa - 0.62) < 0.01 && Math.abs(pablo - 0.51) < 0.01, 'the others are as they were');
+  assert.ok(Math.abs(poppy - 0.9) < 1e-9, 'Poppy is slowed a little (Tom, 2026-11-21: 100 % was unplayable)');
+  assert.ok(Math.abs(pippa - 0.72) < 1e-9 && Math.abs(pablo - 0.66) < 1e-9 && Math.abs(meela - 0.6) < 1e-9);
   assert.ok(poppy > pippa && pippa > pablo && pablo > meela);
-  assert.ok(meela < 0.5 && meela > 0.4, 'weak swimmers keep under half their speed (Meela pays for her land speed here)');
+  for (const s of [4, 5, 6, 10]) assert.equal(woodlandSwimMultiplier(s), swimSpeed(s), 'one rule for every map');
 });
 
 test('Ralph\'s burrows are off the road: he has to swerve into them, and they never block other dogs', () => {

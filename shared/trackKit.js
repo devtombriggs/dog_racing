@@ -1,3 +1,4 @@
+import { swimSpeed } from './dogStats.js';
 // A generated track from a short description: the shared code behind Dune Dash, the Speed Bowl,
 // Kombu's House and Neon Nexus (shared/desertData.js, speedBowlData.js, kombuHouseData.js, neonData.js).
 //
@@ -45,7 +46,7 @@ const DOG = 0.7;                        // a dog is kept this far inside the edg
 const SWIM_DRAFT = 0.42;                // a swimming dog rides this far below the surface
 const WATER_BELOW_ROAD = 0.3;           // the water lies this far below the road either side of a pool
 // Share of top speed a dog keeps swimming, from its swim stat (0.4 = a 4, 1 = a 10): the same rule as the Water Park
-const swimShare = swimming => { const skill = Math.max(0, Math.min(1, (swimming * 10 - 4) / 6)); return Math.min(1, 0.45 + 0.6 * skill ** 1.5); };
+const swimShare = swimming => swimSpeed(swimming * 10);      // (stats here are 0 to 1: shared/dogStats.js swimSpeed)
 
 export const clamp01 = t => Math.min(1, Math.max(0, t));
 export const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -347,7 +348,7 @@ export function makeTrack(def, features = () => ({})) {
     if (airborne) return f;
     if (q.mud) f *= q.mudSpeed ?? 0.55;
     if (q.boost) f *= q.boost;
-    if (q.inWater) f *= 1 - clamp01(q.waterDepth / 0.6) * (1 - swimShare(stats.swimming ?? 0.5));
+    if (q.inWater) f *= swimShare(stats.swimming ?? 0.5);      // (wading or swimming, the same: Tom, 2026-11-21)
     return f;
   }
 

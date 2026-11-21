@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { racingLineAt, PICKUP_PATHS } from '../../../shared/pickupSpots.js';
 import { bellyBounce, ghostsThrough, SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
-import { BASE_SPEED, downhillSpeed, downhillShare } from '../../../shared/dogStats.js';
+import { BASE_SPEED, downhillSpeed, downhillShare, swimSpeed } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
 import { PAD_KICK } from '../../../shared/items.js';
 import { DRIFT, AUTO_DRIFT, DRIFT_ARC, driftPerks, driftCanStart, driftArc, driftSteering, driftStep, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow, autoDriftHeld, autoDriftCurvature } from '../../../shared/drift.js';
 import { DRIFT_HUD_COLOURS } from './driftEffects.js';
-import { DOGS, STAT_EFFECT, WATER_SPEED, WATER_ACCELERATION, statScale, swimShare, turnSpeedLoss, pickupShare } from '../../config/dogs.js';
+import { DOGS, STAT_EFFECT, WATER_ACCELERATION, statScale, swimShare, turnSpeedLoss, pickupShare } from '../../config/dogs.js';
 import { HANDLING, RUNNING_JUMP_SPEED } from '../../config/handling.js';
 import { CONTACT, dogMass, dogOverlap } from './contact.js';
 import { gaitTimeScale, sprintFraction } from './animation.js';
@@ -124,7 +124,7 @@ export class LocalDog extends DogAvatar {
       stamina: stats.stamina == null ? 0.5 : THREE.MathUtils.clamp(stats.stamina / 10, 0, 1),
       swimming: stats.swimming == null ? 0.5 : THREE.MathUtils.clamp(stats.swimming / 10, 0, 1)
     };
-    this.waterSpeed = swimShare(stats.swimming, WATER_SPEED);
+    this.waterSpeed = swimSpeed(stats.swimming);      // (shared/dogStats.js: the same on every map)
     this.waterAcceleration = swimShare(stats.swimming, WATER_ACCELERATION);
   }
 
@@ -186,7 +186,7 @@ export class LocalDog extends DogAvatar {
       this.isJumping ||
       this.tunnelRide ||
       specials.busy(this.id) ||          // no jumping in the middle of a special
-      world.poolAt(this.position)?.swimming ||
+      this.#inWater ||                   // no jumping out of water, deep or shallow (Tom, 2026-11-21: it was a way through it fast)
       !this.mixer
     ) {
       return;
@@ -522,6 +522,14 @@ export class LocalDog extends DogAvatar {
     this.#followGround(frame);
     this.#animate(frame);
     this.#showGround(frame);
+  }
+
+  // Standing in water of any depth: a pool, the sea, a river, or water beside the road (no jumping from it)
+  get #inWater() {
+    const { world } = this.race, { position } = this;
+    if (world.poolAt(position)?.inWater) return true;
+    if (world.coastalTrack?.query(position.x, position.z).inWater) return true;
+    return this.offTrack && world.isOverWater(position);
   }
 
   // In the air (from a jump off the road) the dog is off nothing: that is how the stream is cleared

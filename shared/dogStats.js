@@ -79,6 +79,16 @@ export function downhillSpeed(stats, slope) {
   return 1 + (DOWNHILL.boost * statScale(stats.downhill, STAT_EFFECT.speed) / statScale(stats.speed, STAT_EFFECT.speed) - 1) * share;
 }
 
+// In the water (every map): the share of its own top speed a dog keeps, from its Swim rating.  Tom, 2026-11-21: Poppy
+// (10) was unplayable at 100 %, and the rest crawled at under half: now she keeps 90 % and a 4 keeps 60 %, a point
+// of Swim worth `perPoint` in between.  It is the same however deep the water: wading is swimming
+export const SWIM = { worst: 0.6, perPoint: 0.06, best: 0.9 };
+
+/** Share of its top speed a dog keeps in water, from its Swim rating (1 to 10) */
+export function swimSpeed(swimming = 4) {
+  return Math.min(SWIM.best, Math.max(SWIM.worst, SWIM.worst + SWIM.perPoint * (swimming - 4)));
+}
+
 // Real dog speeds at the dogs' scale of 3 (an easy canter and a gallop) and how fast speed builds,
 // before each dog's own stats
 export const BASE_SPEED = { run: 11, sprint: 17, acceleration: 14 };

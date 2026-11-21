@@ -314,9 +314,7 @@ export const DOGS = {
 
 // The ratings themselves, and what each point does, are in shared/dogStats.js (the server uses them too)
 
-// Water slows a dog to this share of its top speed: a 4 or below is slowed
-// more than by off-track ground, a 10 is not slowed at all
-export const WATER_SPEED = [0.4, 1];
+// (how much water slows a dog is shared/dogStats.js swimSpeed; how quickly it picks up speed in it is this)
 export const WATER_ACCELERATION = [0.5, 1];
 
 // One colour per seat in a game (the server gives each player a `slot`)

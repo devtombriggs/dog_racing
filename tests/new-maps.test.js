@@ -119,7 +119,7 @@ test('Kombu\'s House: up the drive, in at the glass doors, the living room, roun
   assert.equal(T.pointAt(T.pool.sEnd).section, 'D');
   assert.ok(T.pool.sEnd - T.pool.sStart > 60, 'a good length of it');
   const share = swimming => T.speedFactor(deep, { swimming: swimming / 10 });
-  assert.ok(share(10) > 0.95 && share(4) < 0.55, 'Poppy keeps her speed; a poor swimmer loses half');
+  assert.ok(Math.abs(share(10) - 0.9) < 1e-9 && Math.abs(share(4) - 0.6) < 1e-9, 'Poppy keeps 90 % of her speed; a poor swimmer 60 %');
   // the kitchen: knives and forks come down where their shadows were, stand in the floor and go; there is always a way through each row
   const one = T.cutleryDrops[0], C = T.cutlery, when = phase => phase - one.offset + C.period * 2, seen = t => T.hazardsAt(t).find(h => h.id === one.id);
   assert.ok(!seen(when(0.5)).active && seen(when(0.5)).warning > 0 && seen(when(0.5)).drop > 10, 'a shadow first, the knife still high up');

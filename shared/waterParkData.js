@@ -1,3 +1,4 @@
+import { swimSpeed } from './dogStats.js';
 // Water Park — shared track definition, rules and moving hazards.
 //
 // Pure JavaScript, no dependencies: import this SAME file in the React client and the Socket.IO
@@ -56,7 +57,7 @@ const POOL_RAMP = 7;                    // metres of slope into and out of each 
 const SWIM_DRAFT = 0.42;                // a swimming dog rides this far below the surface
 // Share of top speed a dog keeps swimming, from its swim stat (0.4 = a 4, 1 = a 10): Poppy is not slowed
 // at all, and never quicker than on land; the weak swimmers crawl.   10 -> 1   6 -> 0.57   5 -> 0.49   4 -> 0.45
-const swimShare = swimming => { const skill = Math.max(0, Math.min(1, (swimming * 10 - 4) / 6)); return Math.min(1, 0.45 + 0.6 * skill ** 1.5); };
+const swimShare = swimming => swimSpeed(swimming * 10);      // (stats here are 0 to 1: shared/dogStats.js swimSpeed)
 const RIVER_FLOW = 0.15;                // the Lazy River carries every dog along by this much of its top speed
 const SLIDE_SPEED = 1.45;               // share of top speed on the slide
 const RING = { spacing: 13.5, radius: 2.4, zigzag: 1.1 };
@@ -234,7 +235,7 @@ function buildTrack() {
     if (q.slide) return SLIDE_SPEED;
     if (q.grade > 0) f *= 1 - Math.min(0.3, q.grade * 1.8 * (1.5 - stamina));
     else f *= 1 + Math.min(0.06, -q.grade * 0.7);
-    if (q.inWater && !airborne) f *= 1 - clamp01(q.waterDepth / 0.6) * (1 - swimShare(stats.swimming ?? 0.5)) + q.flow * clamp01(q.waterDepth / 0.6);
+    if (q.inWater && !airborne) f *= swimShare(stats.swimming ?? 0.5) + q.flow * clamp01(q.waterDepth / 0.6);      // (wading or swimming, the same)
     return f;
   }
 
