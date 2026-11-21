@@ -246,6 +246,13 @@
 .zr-toggle input { width: 22px; height: 22px; margin: 0; accent-color: var(--zr-green); cursor: pointer; }
 .zr-toggle span { display: flex; flex-direction: column; }
 .zr-toggle small { color: #c4d3f5; font-weight: 400; }
+/* the music and effects volume (VolumeSliders.jsx) */
+.zr-volume { margin: 0 0 10px; padding: 10px 16px; border: 2px solid #ffffff35; border-radius: 16px; background: #ffffff10; }
+.zr-volume__row { display: grid; grid-template-columns: 1fr minmax(120px, 1.4fr) 3.2em; align-items: center; gap: 12px; padding: 4px 0; text-align: left; font-weight: 700; cursor: pointer; }
+.zr-volume__row span { display: flex; flex-direction: column; }
+.zr-volume__row small { color: #c4d3f5; font-weight: 400; font-size: 12px; }
+.zr-volume__row input { width: 100%; margin: 0; accent-color: var(--zr-yellow); cursor: pointer; }
+.zr-volume__row b { text-align: right; font-variant-numeric: tabular-nums; }
 .zr-row {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
   margin-bottom: 12px; padding: 14px 16px;

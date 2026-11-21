@@ -238,8 +238,15 @@ export function createAccounts(db, env = {}, { fetchImpl = globalThis.fetch, now
       if (!route) return false;
       // (a form posted from another site is not let through: these come from the game's own pages)
       if (req.method === 'POST') {
+        // (compared by host, not http/https: a proxy in front that ends HTTPS can make the scheme look wrong)
         const from = req.headers.origin;
-        if (from && from !== origin(req) && !(env.ALLOW_ORIGIN ?? '').split(',').includes(from)) { send(res, 403, { error: 'Not allowed' }); return true; }
+        const hostOf = text => { try { return new URL(text).host.toLowerCase(); } catch { return null; } };
+        const ours = [origin(req), `http://${req.headers['x-forwarded-host'] ?? ''}`.split(',')[0], `http://${req.headers.host ?? ''}`, ...(env.ALLOW_ORIGIN ?? '').split(',')]
+          .map(hostOf).filter(Boolean);
+        if (from && !ours.includes(hostOf(from))) {
+          console.warn(`[accounts] refused a post from ${from} (expected ${[...new Set(ours)].join(' or ')})`);
+          send(res, 403, { error: 'Not allowed' }); return true;
+        }
       }
       Promise.resolve()
         .then(() => route(req, res, url))

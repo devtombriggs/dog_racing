@@ -45,10 +45,10 @@ export const SPECIALS = {
   // (Kombu's is over in a moment: the server moves him; shared/specials.js KELP has the rules)
   kombu: { kind: 'kelp', name: 'Kelp Dive', durationMs: 1100 },
   // Baz and Naz: the rope is `rope.reach` thick up and down the road and as wide as the road is; a dog more than
-  // `rope.clear` above it has jumped it.  ghost: whatever stands on the road does not stop them (the walls still do).
+  // `rope.clear` above it has jumped it.  speed: 1.6 (Tom, 2026-11-21: 1.4 was too little).  ghost: whatever stands on the road does not stop them (the walls still do).
   // Like Poppy's wave it steers itself (Tom, 2026-11-21), but straight up the middle of the road (`wander` 0), so the
   // rope reaches both edges and they come out of it in the middle
-  baz_naz: { kind: 'rope', name: 'Trip Wire', durationMs: 6000, speed: 1.4, ghost: true, steerLocked: true, wander: 0, rope: { reach: 1.4, clear: 0.9, edge: 0.9, span: 14 } },
+  baz_naz: { kind: 'rope', name: 'Trip Wire', durationMs: 6000, speed: 1.6, ghost: true, steerLocked: true, wander: 0, rope: { reach: 1.4, clear: 0.9, edge: 0.9, span: 14 } },
   // Jazz: over in a moment for her (the stomp); QUAKE below has what it does to everyone else
   jazz: { kind: 'quake', name: 'Earthquake', durationMs: 900 },
   // Casper charges for `durationMs`, knocking over any dog he runs into (`hitRadius` round him, `reach` in front); when

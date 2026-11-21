@@ -76,6 +76,12 @@ test('accounts: a post from another site is refused, and too many tries are slow
   const accounts = createAccounts(openDb());
   const elsewhere = await call(accounts, 'POST', '/auth/login', { body: { email: 'a@b.co', password: 'x' }, headers: { origin: 'https://evil.example' } });
   assert.equal(elsewhere.status, 403);
+  // behind a proxy that ends HTTPS, the page is https:// even though the backend is told http
+  const behindProxy = await call(accounts, 'POST', '/auth/signup', { body: { email: 'p@example.com', username: 'Proxied', password: 'woofwoofwoof' },
+    headers: { host: 'zoomies.example', origin: 'https://zoomies.example', 'x-forwarded-proto': 'http', 'x-forwarded-host': 'zoomies.example' } });
+  assert.equal(behindProxy.status, 200);
+  const sneaky = await call(accounts, 'POST', '/auth/login', { body: { email: 'a@b.co', password: 'x' }, headers: { origin: 'https://zoomies.example.evil.co' } });
+  assert.equal(sneaky.status, 403);
   let last;
   for (let i = 0; i < 21; i++) last = await call(accounts, 'POST', '/auth/login', { body: { email: 'a@b.co', password: 'xxxxxxxx' } });
   assert.equal(last.status, 429);

@@ -1,6 +1,7 @@
 // A controller in the menus (Xbox layout; the race itself reads the controller in game/PlayerInput.js):
 //
-//   D-pad or left stick   move the highlight to the nearest button or tile that way
+//   D-pad or left stick   move the highlight to the nearest button or tile that way (on a slider,
+//                         left and right move the slider)
 //   A                     choose it
 //   B                     back: presses the button marked data-pad-back (or, where that is
 //                         data-pad-back="focus", only moves the highlight to it: Leave Game is never one press)
@@ -47,6 +48,15 @@ function highlight(element) {
   element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
+// A slider (the volume): left and right move it a step, as the arrow keys do
+function nudge(slider, by) {
+  const step = Number(slider.step) || 1, min = Number(slider.min || 0), max = Number(slider.max || 100);
+  const next = Math.min(max, Math.max(min, Number(slider.value) + by * step));
+  if (next === Number(slider.value)) return;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(slider, String(next));     // (so React sees it)
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function act(within, pressed, direction) {
   const all = things(within);
   const current = all.includes(document.activeElement) ? document.activeElement : null;
@@ -68,6 +78,7 @@ function act(within, pressed, direction) {
   }
   if (!current) { highlight(first()); return; }              // (the first press only shows where the highlight is)
   if (pressed(A)) { current.click(); return; }
+  if (current.type === 'range' && (direction === 'left' || direction === 'right')) { nudge(current, direction === 'right' ? 1 : -1); return; }
   if (direction) {
     const others = all.filter(element => element !== current);
     const index = pickInDirection(current.getBoundingClientRect(), others.map(element => element.getBoundingClientRect()), direction);

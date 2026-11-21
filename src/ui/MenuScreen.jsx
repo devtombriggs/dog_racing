@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fullscreen } from '../fullscreen.js';
 import { MuteButton } from './MuteButton.jsx';
+import { VolumeSliders } from './VolumeSliders.jsx';
 import { AccountBadge, AccountSheet } from './AccountSheet.jsx';
 import { useAccount } from './useAccount.js';
 import { account } from '../session/account.js';
@@ -26,6 +27,7 @@ function Settings({ session, state, close }) {
     <div className="zr-sheet" onClick={close}>
       <div className="zr-card" role="dialog" aria-label="Settings" onClick={event => event.stopPropagation()}>
         <h2>Settings</h2>
+        <VolumeSliders />
         {fullscreen.available && (
           <label className="zr-toggle">
             <input type="checkbox" checked={full} onChange={() => fullscreen.toggle()} />

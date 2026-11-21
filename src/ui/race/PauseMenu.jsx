@@ -3,6 +3,7 @@ import { fullscreen } from '../../fullscreen.js';
 import { buttonStyle } from '../styles.js';
 import { gameAudio } from '../../audio/GameAudio.js';
 import { useMuted } from '../useMuted.js';
+import { VolumeSliders } from '../VolumeSliders.jsx';
 
 // The menu over the race: Esc opens and closes it.  Resume, full screen on or off, sound on or off,
 // back to the main menu.
@@ -47,6 +48,7 @@ export function PauseMenu({ session }) {
           </button>
         )}
         <button style={quiet} aria-pressed={muted} onClick={() => gameAudio.toggleMuted()}>Sound: {muted ? 'off' : 'on'}</button>
+        <VolumeSliders className="pause-volume" />
         <button style={quiet} onClick={session.leaveGame}>Quit to Main Menu</button>
         <small>Esc or Start closes this menu</small>
       </div>

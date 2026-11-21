@@ -6,7 +6,7 @@
 // drift: how good a drifter (shared/drift.js): roughly the reverse of speed, so the slow dogs make their time in the corners
 // downhill: the Speed a dog runs on where the road drops (Jimmy on his wheels: downhillSpeed below); most dogs have none
 export const DOG_STATS = {
-  gsp: { speed: 8, acceleration: 7, agility: 7, swimming: 6, drift: 6 },           // Pippa: the all-rounder (second fastest, nothing below 6)
+  gsp: { speed: 7.5, acceleration: 7, agility: 7, swimming: 6, drift: 6 },         // Pippa: the all-rounder (second fastest, nothing below 6; Tom, 2026-11-21: 8 ran away with it)
   second_dog: { speed: 9, acceleration: 5, agility: 5, swimming: 4, drift: 4 },    // Meela (her card says 10 for speed: DOG_STATS_SHOWN)
   black_lab: { speed: 7, acceleration: 7, agility: 8, swimming: 10, drift: 7 },    // Poppy
   pablo: { speed: 6, acceleration: 9, agility: 10, swimming: 5, drift: 9 },

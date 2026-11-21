@@ -46,6 +46,17 @@ const MUTE_KEY = 'zoomies.muted';
 const mutedByAddress = () => { try { return new URLSearchParams(window.location.search).get('mute') === '1'; } catch { return false; } };
 const mutedBefore = () => { try { return window.localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } };
 
+// The player's volume sliders (remembered on this computer), each 0 to 1 of the usual level: the music, and the
+// effects (the countdown and the dogs' calls).
+const VOLUME_KEY = 'zoomies.volume';
+const clamp01 = value => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 1));
+function volumeBefore() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(VOLUME_KEY) ?? '{}');
+    return { music: clamp01(saved.music ?? 1), effects: clamp01(saved.effects ?? 1) };
+  } catch { return { music: 1, effects: 1 }; }
+}
+
 export class GameAudio {
   #selection = {};
   #race = { countdown: null, music: null };
@@ -53,8 +64,28 @@ export class GameAudio {
   #voices = false;         // voice chat is connected to someone
   #muted = mutedByAddress() || mutedBefore();
   #listeners = new Set();
+  #volume = volumeBefore();
+  #volumeListeners = new Set();
 
   get muted() { return this.#muted; }
+
+  /** { music, effects }, each 0 to 1 */
+  get volume() { return this.#volume; }
+
+  /** kind: 'music' | 'effects'; level 0 to 1 */
+  setVolume(kind, level) {
+    if (!(kind in this.#volume)) return;
+    this.#volume = { ...this.#volume, [kind]: clamp01(level) };
+    try { window.localStorage.setItem(VOLUME_KEY, JSON.stringify(this.#volume)); } catch { /* private browsing */ }
+    this.#applyVolumes();
+    for (const listener of this.#volumeListeners) listener(this.#volume);
+  }
+
+  /** listener({ music, effects }) whenever a slider moves; returns the way to stop listening */
+  onVolumeChange(listener) {
+    this.#volumeListeners.add(listener);
+    return () => this.#volumeListeners.delete(listener);
+  }
 
   setMuted(muted) {
     this.#muted = Boolean(muted);
@@ -76,11 +107,14 @@ export class GameAudio {
   // Turn the music down while voice chat is connected (and back up when it is not)
   setVoiceChatActive(active) {
     this.#voices = Boolean(active);
-    this.#applyMusicVolume();
+    this.#applyVolumes();
   }
 
-  #applyMusicVolume() {
-    try { if (this.#race.music) this.#race.music.volume = this.#musicVolume * (this.#voices ? MUSIC_UNDER_VOICES : 1); } catch { /* no audio support */ }
+  #applyVolumes() {
+    try {
+      if (this.#race.music) this.#race.music.volume = this.#musicVolume * this.#volume.music * (this.#voices ? MUSIC_UNDER_VOICES : 1);
+      for (const audio of [...Object.values(this.#selection), this.#race.countdown]) if (audio) audio.volume = this.#volume.effects;
+    } catch { /* no audio support */ }
   }
 
   playSelection(dogId) {
@@ -90,6 +124,7 @@ export class GameAudio {
       this.#selection[dogId] ??= new Audio(src);
       const audio = this.#selection[dogId];
       audio.muted = this.#muted;
+      audio.volume = this.#volume.effects;
       audio.currentTime = 0;
       audio.play().catch(() => { /* autoplay blocked or file missing: stay silent */ });
     } catch { /* no audio support */ }
@@ -118,7 +153,7 @@ export class GameAudio {
         }
         this.#race[key] = audio;
       }
-      this.#applyMusicVolume();
+      this.#applyVolumes();
     } catch { /* no audio support */ }
   }
 
