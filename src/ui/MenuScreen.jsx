@@ -54,11 +54,11 @@ function Controls({ close }) {
             <tr><td>Esc</td><td>Menu</td></tr>
             <tr><th colSpan="2">Controller</th></tr>
             <tr><td>Right trigger</td><td>Go</td></tr>
-            <tr><td>Left trigger</td><td>Brake, then reverse</td></tr>
+            <tr><td>Left trigger (hold)</td><td>Drift round a corner while going; otherwise brake, then reverse</td></tr>
             <tr><td>Left stick or D-pad</td><td>Steer</td></tr>
             <tr><td>A</td><td>Jump</td></tr>
             <tr><td>X, B or left bumper</td><td>Use the item</td></tr>
-            <tr><td>Right bumper (hold)</td><td>Drift round a corner</td></tr>
+            <tr><td>Right bumper (hold)</td><td>Drift too</td></tr>
           </tbody>
         </table>
         <button className="zr-btn zr-btn--yellow" data-pad-first="" data-pad-back="" onClick={close}>Done</button>

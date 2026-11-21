@@ -15,6 +15,7 @@ test('controller: right trigger goes, left trigger brakes, the stick and the D-p
   assert.equal(readPad(pad({ buttons: { [RT]: 0.4 } })).accelerate, true, 'a trigger part of the way in is enough');
   assert.equal(readPad(pad({ buttons: { [RT]: 0.05 } })).accelerate, false, 'a finger resting on it is not');
   assert.equal(readPad(pad({ buttons: { [LT]: 1 } })).brake, true);
+  assert.equal(readPad(pad({ buttons: { [LT]: 0.4 } })).drift, true, 'the left trigger drifts too (going wins over braking)');
   assert.equal(readPad(pad({ buttons: { [A]: 1 } })).jump, true);
   for (const button of [X, B, LB]) assert.equal(readPad(pad({ buttons: { [button]: 1 } })).item, true);
   assert.deepEqual([readPad(pad({ buttons: { [RB]: 1 } })).drift, readPad(pad({ buttons: { [RB]: 1 } })).item], [true, false], 'the right bumper drifts');

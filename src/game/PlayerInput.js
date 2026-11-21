@@ -4,11 +4,12 @@ const CONTROL_KEYS = new Set([
 ]);
 
 // A controller, laid out like an Xbox 360 pad (the browser's "standard" gamepad mapping):
-//   right trigger  go              left trigger  brake / reverse
+//   right trigger  go              left trigger  drift, held while going round a corner (as Team Sonic Racing);
+//                                                otherwise brake / reverse
 //   left stick or D-pad  steer     A  jump       X, B or the left bumper  use the item
-//   right bumper  drift (held)
+//   right bumper  drift too (held)
 const PAD = {
-  go: 7, brake: 6, jump: 0, item: [2, 1, 4], drift: 5, left: 14, right: 15,
+  go: 7, brake: 6, jump: 0, item: [2, 1, 4], drift: [6, 5], left: 14, right: 15,
   triggerAt: 0.12,       // how far a trigger has to be pulled to count
   deadZone: 0.18,        // how far the stick has to move before it steers
 };
@@ -27,7 +28,7 @@ export function readPad(gamepad) {
   return {
     accelerate: pulled(PAD.go), brake: pulled(PAD.brake),
     turn: dpad || (tilt ? Math.max(-1, Math.min(1, -tilt)) : 0),      // (stick to the left is a left turn)
-    jump: pressed(PAD.jump), item: PAD.item.some(pressed), drift: pressed(PAD.drift),
+    jump: pressed(PAD.jump), item: PAD.item.some(pressed), drift: PAD.drift.some(pulled),      // (while going, the go button wins over the brake: LocalDog)
   };
 }
 
