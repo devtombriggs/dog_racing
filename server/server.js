@@ -15,10 +15,25 @@ import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 import { createBot, AWAY_DRIVER } from './bots.js';
 import { LOCAL_PLAYERS, RACE_DOGS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { openDb } from './db.js';
+import { createAccounts, sessionTokenOf } from './accounts.js';
 
 const PORT = Number(env.PORT || 3001);
 
-const io = new Server(PORT, {
+// Player accounts and the leaderboards (server/db.js): in memory unless DB_PATH names a file
+const db = openDb(env.DB_PATH || ':memory:');
+const accounts = createAccounts(db, env);
+setInterval(() => db.clearOldSessions(), 3600e3).unref?.();
+// Signing in and the leaderboards are plain web requests (server/accounts.js); the races share the port
+const httpServer = createServer((req, res) => {
+  if (accounts.handle(req, res)) return;
+  if (req.url.startsWith('/socket.io')) return;                  // (socket.io answers these itself)
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
+});
+
+const io = new Server(httpServer, {
   // (ask each game every 5 s whether it is still there, and give up on one that has not answered in 5:
   // a dead connection is noticed in about ten seconds; socket.io's own settings take up to 45)
   pingInterval: 5000,
@@ -882,11 +897,32 @@ function endRace(room) {
   room.status = 'finished';
   for (const player of room.players.values()) endSpecial(room, player, 'done');
   broadcastStandings(room);
+  recordRace(room);
   if (room.grandPrix) { endGrandPrixRace(room); updateLobby(room); return; }
   room.returnTimer = setTimeout(() => returnToLobby(room), LOBBY_RETURN_MS);
   room.returnTimer.unref?.();
   io.to(room.code).emit('raceEnded', { returnMs: LOBBY_RETURN_MS });
   updateLobby(room);
+}
+
+// The race for the leaderboards: a row for each signed-in player still in it (guests and computer dogs are not kept)
+function recordRace(room) {
+  const places = new Map(raceStandings(room).map(entry => [entry.playerId, entry.place]));
+  const results = [...room.players.values()].filter(player => player.userId && !player.bot).map(player => ({
+    userId: player.userId, mapId: room.mapId, dog: player.dog, place: places.get(player.id), racers: room.players.size,
+    finished: player.finished, raceSeconds: player.finishTime, bestLap: player.bestLap,
+    grandPrix: room.grandPrix?.id ?? null, singlePlayer: room.singlePlayer,
+  }));
+  if (!results.length) return;
+  try { db.recordRace(results); } catch (error) { console.error('Could not record the race:', error); }
+}
+
+function recordGrandPrix(room, table) {
+  const results = table.map((entry, index) => ({ entry, place: index + 1 }))
+    .filter(({ entry }) => room.players.get(entry.playerId)?.userId && !entry.bot)
+    .map(({ entry, place }) => ({ userId: room.players.get(entry.playerId).userId, grandPrix: room.grandPrix.id, place, points: entry.points }));
+  if (!results.length) return;
+  try { db.recordGrandPrix(results); } catch (error) { console.error('Could not record the Grand Prix:', error); }
 }
 
 // ---------------------------------
@@ -912,6 +948,7 @@ function endGrandPrixRace(room) {
     .map(player => ({ playerId: player.id, name: player.name, dog: player.dog, bot: Boolean(player.bot), points: gp.points.get(player.id) ?? 0,
       gained: gained.get(player.id)?.points ?? 0, place: gained.get(player.id)?.place ?? room.players.size }))
     .sort((a, b) => b.points - a.points || a.place - b.place);
+  if (final) recordGrandPrix(room, table);
   const returnMs = final ? GRAND_PRIX_FINAL_MS : LOBBY_RETURN_MS;
   room.returnTimer = setTimeout(() => (final ? returnToLobby(room) : nextGrandPrixRace(room)), returnMs);
   room.returnTimer.unref?.();
@@ -987,6 +1024,8 @@ function startRaceIn(room) {
     player.checkpoint = 0;
     player.finished = false;
     player.finishTime = null;
+    player.lapStartedAt = null;     // (null: the lap began at GO)
+    player.bestLap = null;          // the quickest whole lap this race, in seconds
     burrowRides.delete(player);
     burrowsUsed.set(player, new Set());
     if (room.mapId === 'wendover') woodlandRaceStates.set(player, { revision: 0 });
@@ -1344,6 +1383,10 @@ function checkRaceProgress(room, player, previousPosition) {
   const crossedFinish = crossedFinishLine(previousPosition, player.position, map.startFinish);
 
   if (!crossedFinish) return;
+
+  const lapEnded = Date.now(), lapSeconds = (lapEnded - (player.lapStartedAt ?? room.startedAt)) / 1000;
+  player.bestLap = Math.min(player.bestLap ?? Infinity, lapSeconds);
+  player.lapStartedAt = lapEnded;
 
   if (player.lap >= lapsFor(room.mapId)) {
     player.finished = true;
@@ -1772,6 +1815,13 @@ io.on('connection', (socket) => {
   // Who this connection is.  Usually itself; a browser that has come back after a refresh takes up the
   // seat (and the id) it had before.  seatToken is the secret that browser proves it with.
   let playerId = socket.id, seatToken = null, superseded = false;
+  // The player's account, if they are signed in (server/accounts.js): from the session cookie the connection
+  // came with, and after that whatever the game says (it signs in and out while connected)
+  let account = socket.request ? db.userForSession(sessionTokenOf(socket.request)) : null;
+  socket.on('account', (data, callback) => {
+    account = data?.ticket ? accounts.userForTicket(data.ticket) : null;
+    callback?.({ user: account });
+  });
 
   // COMING BACK AFTER A REFRESH: the browser says who it was; if its seat is being held, it has it again
   socket.on('resume', (data, callback) => {
@@ -1843,7 +1893,8 @@ io.on('connection', (socket) => {
     leaveRoom(socket, playerId);
 
     const roomCode = generateRoomCode();
-    const player = createPlayer(playerId, playerName(data?.name, 'Host'));
+    const player = createPlayer(playerId, account?.username ?? playerName(data?.name, 'Host'));
+    player.userId = account?.id ?? null;
     const localKey = data?.local === true && typeof data.localKey === 'string' && data.localKey.length >= 16 && data.localKey.length <= 64 ? data.localKey : null;
 
     const room = {
@@ -1943,9 +1994,10 @@ io.on('connection', (socket) => {
 
     const player = createPlayer(
       playerId,
-      playerName(data?.name, `Player ${room.players.size + 1}`),
+      account?.username ?? playerName(data?.name, `Player ${room.players.size + 1}`),
       slot
     );
+    player.userId = account?.id ?? null;
 
     room.players.set(playerId, player);
     playerRooms.set(playerId, roomCode);
@@ -2308,4 +2360,8 @@ io.on('connection', (socket) => {
   });
 });
 
-console.log(`Multiplayer server running on port ${PORT}`);
+// (NO_LISTEN=1: the tests drive the handlers without a network port)
+if (env.NO_LISTEN !== '1') httpServer.listen(PORT, () => console.log(`Multiplayer server running on port ${PORT}${env.DB_PATH ? ` (database: ${env.DB_PATH})` : ' (database in memory)'}${accounts.google ? ' · Google sign-in on' : ''}`));
+
+// (for the tests: the database and sign-in the server is using)
+export const forTests = { db, accounts };

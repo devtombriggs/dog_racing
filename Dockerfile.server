@@ -11,6 +11,8 @@ COPY shared/ ./shared/
 # Server-side terrain sampling uses the same heightmaps as the browser.
 COPY public/models/*_heightmap.bin ./public/models/
 
+RUN mkdir -p /data && chown node:node /data
+
 EXPOSE 3001
 
 CMD ["node", "server/server.js"]

@@ -18,4 +18,17 @@ services:
     container_name: dog-racing-backend
     expose:
       - "3001"
+    environment:
+      # the database (accounts, leaderboards) lives on the volume below, so it outlasts a rebuild
+      DB_PATH: /data/zoomies.db
+      # Google sign-in: set these in a .env file beside this one (see .env.example); left empty, it is off
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # the address players reach the game at, e.g. https://zoomies.example.com (left empty: worked out per request)
+      PUBLIC_URL: ${PUBLIC_URL:-}
+    volumes:
+      - zoomies-data:/data
     restart: unless-stopped
+
+volumes:
+  zoomies-data:

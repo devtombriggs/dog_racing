@@ -4,6 +4,7 @@ import { GameSession } from './session/GameSession.js';
 import { useSession } from './session/useSession.js';
 import { startMenuPad } from './ui/menuPad.js';
 import { MenuScreen } from './ui/MenuScreen.jsx';
+import { LeaderboardsScreen } from './ui/LeaderboardsScreen.jsx';
 import { JoinScreen } from './ui/JoinScreen.jsx';
 import { LocalJoinScreen } from './ui/LocalJoinScreen.jsx';
 import { DogSelectScreen } from './ui/DogSelectScreen.jsx';
@@ -13,6 +14,7 @@ import { PauseMenu } from './ui/race/PauseMenu.jsx';
 
 const SCREENS = {
   menu: MenuScreen,
+  leaderboards: LeaderboardsScreen,
   join: JoinScreen,
   localJoin: LocalJoinScreen,
   selection: DogSelectScreen,

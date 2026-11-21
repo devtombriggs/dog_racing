@@ -4,6 +4,7 @@ import { LOCAL_PLAYERS } from '../../shared/botLevels.js';
 import { SERVER_URL, VOICE_CHAT } from '../config/env.js';
 import { gameAudio } from '../audio/GameAudio.js';
 import { createVoiceChat } from '../voiceChat.js';
+import { account } from './account.js';
 
 const ACCESSIBILITY_KEY = 'dogRacing.accessibilityMode.v2';
 
@@ -62,11 +63,10 @@ export class GameSession {
   singlePlayer = false;
 
   state = {
-    screen: 'menu',          // 'menu' | 'join' | 'localJoin' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
+    screen: 'menu',          // 'menu' | 'leaderboards' | 'join' | 'localJoin' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
     raceNumber: 0,           // counts the races this visit: each one gets a fresh race screen
     notice: '',              // a passing word about someone else ("Berri lost connection"), shown for a few seconds
     room: null,
-    playerName: '',
     availableLobbies: null,
     lobbyListError: '',
     joiningRoom: null,
@@ -103,6 +103,9 @@ export class GameSession {
   #joinRequest = 0;
   #events = null;
   #muteKeyOn = false;
+  // the race connection has been told who is signed in (src/session/account.js): hosting and joining wait for it
+  #accountTold = Promise.resolve();
+  #stopAccount = null;
 
   constructor({ guest = false } = {}) {
     this.guest = guest;
@@ -251,9 +254,21 @@ export class GameSession {
   // SOCKET CONNECTION
   // ---------------------------------
 
+  // Tells the server who is signed in on this page (a guest: nobody), on connecting and after every sign in or out
+  #tellAccount() {
+    const socket = this.socket;
+    this.#accountTold = account.ticket().then(ticket => new Promise((resolve) => {
+      if (!socket?.connected) return resolve();
+      const timer = setTimeout(resolve, 3000);           // (an older server says nothing back)
+      socket.emit('account', { ticket }, () => { clearTimeout(timer); resolve(); });
+    })).catch(() => {});
+    return this.#accountTold;
+  }
+
   connect() {
     const socket = io(SERVER_URL);
     this.socket = socket;
+    if (!this.guest) { this.#stopAccount?.(); this.#stopAccount = account.onChange(() => this.#tellAccount()); }
 
     // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
     const voice = VOICE_CHAT && !this.guest ? createVoiceChat({
@@ -274,6 +289,7 @@ export class GameSession {
         // Say who this browser is.  After a refresh, or a dropped connection, the server may still be
         // holding this player's seat: then they are straight back in their room, on the same dog.
         if (!this.guest) socket.emit('resume', { token: seatToken() }, response => this.#resumed(response));
+        if (!this.guest) this.#tellAccount();
       },
 
       disconnect: () => {
@@ -397,6 +413,7 @@ export class GameSession {
     this.voice?.dispose();
     this.voice = null;
     this.#listenForMuteKey(false);
+    this.#stopAccount?.(); this.#stopAccount = null;
     if (!this.guest) gameAudio.stopRace();
     this.#endLocal();
     socket.disconnect();
@@ -427,7 +444,6 @@ export class GameSession {
   // MENU
   // ---------------------------------
 
-  setPlayerName = (playerName) => this.set({ playerName });
 
   setAccessibilityMode = (accessibilityMode) => {
     this.set({ accessibilityMode });
@@ -447,6 +463,10 @@ export class GameSession {
     this.set({ error: '', availableLobbies: null, lobbyListError: '', screen: 'join' });
   };
 
+  openLeaderboards = () => {
+    this.set({ error: '', screen: 'leaderboards' });
+  };
+
   backToMenu = () => {
     this.set({ error: '', screen: 'menu' });
   };
@@ -459,13 +479,13 @@ export class GameSession {
     this.singlePlayer = false;
     this.set({ error: '' });
 
-    this.socket.emit('hostGame', { name: this.state.playerName }, (response) => {
+    this.#accountTold.then(() => this.socket.emit('hostGame', { name: account.name }, (response) => {
       if (!response?.success) {
         this.set({ error: response?.error || 'Failed to host game' });
         return;
       }
       this.set({ room: response.room, screen: 'selection' });
-    });
+    }));
   };
 
   // ---------------------------------
@@ -483,14 +503,14 @@ export class GameSession {
 
     this.singlePlayer = true;
 
-    this.socket.emit('hostGame', { name: this.state.playerName, singlePlayer: true }, (response) => {
+    this.#accountTold.then(() => this.socket.emit('hostGame', { name: account.name, singlePlayer: true }, (response) => {
       if (!response?.success) {
         this.singlePlayer = false;
         this.set({ error: response?.error || 'Failed to create single-player game' });
         return;
       }
       this.set({ room: response.room, screen: 'selection' });
-    });
+    }));
   };
 
   // ---------------------------------
@@ -506,7 +526,7 @@ export class GameSession {
     if (!this.socket?.connected) { this.set({ error: 'Not connected to server' }); return; }
     const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
     this.singlePlayer = true;
-    this.socket.emit('hostGame', { name: this.state.playerName || 'Player 1', local: true, localKey: key }, (response) => {
+    this.socket.emit('hostGame', { name: account.name || 'Player 1', local: true, localKey: key }, (response) => {
       if (!response?.success) {
         this.singlePlayer = false;
         this.set({ error: response?.error || 'Failed to create the game' });
@@ -582,7 +602,7 @@ export class GameSession {
     this.set({ error: '', joiningRoom: roomCode });
     const requestId = ++this.#joinRequest;
 
-    this.socket.timeout(8000).emit('joinGame', { roomCode, name: this.state.playerName }, (timeoutError, response) => {
+    this.#accountTold.then(() => this.socket.timeout(8000).emit('joinGame', { roomCode, name: account.name }, (timeoutError, response) => {
       if (requestId !== this.#joinRequest) return;
       this.set({ joiningRoom: null });
       if (timeoutError) {
@@ -594,7 +614,7 @@ export class GameSession {
         return;
       }
       this.set({ room: response.room, screen: 'selection' });
-    });
+    }));
   };
 
   // ---------------------------------

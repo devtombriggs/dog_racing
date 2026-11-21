@@ -27,7 +27,8 @@ env.SOLO_BOTS = '0';
 env.ROOM_BOTS = '0';
 // (the players in these tests stand still for minutes at a time: they are not to be taken for stalled)
 env.STALLED_AFTER_MS = '86400000';
-await import('../server/server.js');
+env.NO_LISTEN = '1';      // (no network port: the handlers are called directly)
+const { forTests } = await import('../server/server.js');
 
 let nextId = 0;
 function client() {
@@ -279,6 +280,47 @@ for (const [mapId, map] of Object.entries(MAPS)) {
     host.call('leaveGame'); guest.call('leaveGame');
   });
 }
+
+test('a signed-in player\'s race goes on the leaderboards with its best lap; a guest\'s does not', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const { db } = forTests;
+  const user = db.createPasswordUser({ email: 'racer@example.com', username: 'Racer', password: 'longenough' });
+  // (the ticket the game is given by GET /api/me)
+  const ticketFor = () => new Promise((resolve) => {
+    const res = { writeHead() {}, setHeader() {}, getHeader() {}, end: text => resolve(JSON.parse(text).ticket) };
+    forTests.accounts.handle({ method: 'GET', url: '/api/me', headers: { cookie: `zr_session=${db.createSession(user.id)}` }, socket: {} }, res);
+  });
+  const host = client(), guest = client();
+  return ticketFor().then((ticket) => {
+    assert.equal(host.call('account', { ticket }).user.username, 'Racer');
+    const mapId = 'speed_bowl', map = MAPS[mapId];
+    const room = host.call('hostGame', { mapId, name: 'Ignored' }).room;
+    assert.equal(room.players[0].name, 'Racer', 'a signed-in player races under their username');
+    guest.call('joinGame', { roomCode: room.code, name: 'Visitor' });
+    host.call('selectDog', { dog: 'jazz' }); guest.call('selectDog', { dog: 'pablo' });
+    host.call('setReady', { ready: true }); guest.call('setReady', { ready: true });
+    host.call('startRace'); host.call('raceLoaded'); guest.call('raceLoaded');
+    for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+    const move = position => host.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: 0 });
+    const finishPoint = distance => map.startFinish.position.map((value, axis) => value + distance * map.startFinish.forward[axis]);
+    for (let lap = 1; lap <= lapsFor(mapId); lap++) {
+      for (const checkpoint of map.checkpoints) { move([checkpoint.x, checkpoint.y ?? 0, checkpoint.z]); context.mock.timers.tick(lap === 2 ? 1000 : 3000); }
+      move(finishPoint(-2)); move(finishPoint(2));
+    }
+    assert.ok(latest(room.code, 'playerFinished'));
+    guest.call('leaveGame');           // (the guest leaves: the race ends with the host home)
+    const boards = db.leaderboards();
+    const lapSeconds = map.checkpoints.length;                  // (lap 2: a second at each checkpoint)
+    assert.deepEqual(boards.fastestLaps[mapId].map(row => [row.username, row.dog, row.seconds]), [['Racer', 'jazz', lapSeconds]]);
+    assert.deepEqual(boards.mostRaces.map(row => row.username), ['Racer']);
+    assert.equal(db.playerStats(user.id).wins, 1);
+    // signed out again: back to a guest's name
+    assert.equal(host.call('account', { ticket: null }).user, null);
+    host.call('leaveGame');
+    assert.equal(host.call('hostGame', { name: 'Guesty' }).room.players[0].name, 'Guesty');
+    host.call('leaveGame');
+  });
+});
 
 test('Treat Road falls, respawns at the last checkpoint, and rejects pre-respawn movement', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });

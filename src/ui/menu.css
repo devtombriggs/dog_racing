@@ -84,65 +84,118 @@
   background: url('/ui/home.webp') center / cover;
   filter: blur(26px) brightness(0.8);
 }
-/* the picture at its own shape, as large as fits: everything on it is placed in parts of its width (cqw),
-   so the real buttons sit exactly over the ones painted into the picture */
+/* the picture at its own shape, as large as fits (on a screen wider or taller than it, the blurred copy fills
+   the rest): everything on it is placed in parts of its size (cqw, cqh), so the real buttons sit exactly
+   over the ones painted into it.  (Tom's picture, 2026-11-21: three buttons, the sign-in badge and the
+   three small buttons bottom left.) */
 .zr-home__stage {
   position: relative;
-  /* (as tall as the screen; on a screen narrower than the picture its sides are off the screen, but never
-     so far that the buttons in the middle would not fit) */
   flex: none;
-  width: min(calc(100dvh * 1672 / 941), 290vw);
-  aspect-ratio: 1672 / 941;
+  width: min(calc(100dvh * 1666 / 944), 100vw);
+  aspect-ratio: 1666 / 944;
   container-type: size;
   background: url('/ui/home.webp') center / 100% 100%;
   box-shadow: 0 0 60px #0008;
 }
+/* (a tall, narrow screen: as tall as the screen, its sides off the screen but never so far that the buttons
+   in the middle would not fit; the badge and the small buttons come to the corners of the screen) */
+@media (max-aspect-ratio: 1/1) {
+  .zr-home__stage { width: min(calc(100dvh * 1666 / 944), 290vw); }
+  .zr-home .zr-account { position: fixed; top: 12px; right: 12px; left: auto; width: auto; height: 52px; font-size: 18px; }
+  .zr-home .zr-home__corner { position: fixed; left: 12px; bottom: 12px; }
+}
 .zr-home__server {
   position: absolute; margin: 0; z-index: 1;
-  top: clamp(8px, 2.6vh, 26px); right: clamp(8px, 2vw, 34px);
+  bottom: clamp(6px, 1.6vh, 18px); right: clamp(8px, 1.6vw, 26px);
   display: flex; align-items: center; gap: 0.6em;
-  padding: 0.75em 1.2em;
+  padding: 0.55em 1em;
   border: 2px solid #ffffff40; border-radius: 999px;
-  background: #0d2a3f;
-  color: #fff; font: 700 clamp(11px, 2.1vh, 20px)/1 var(--zr-text);
+  background: #0d2a3fcc;
+  color: #fff; font: 700 clamp(10px, 1.6vh, 15px)/1 var(--zr-text);
 }
 .zr-home__server i { width: 0.8em; height: 0.8em; border-radius: 50%; background: #2fe56b; box-shadow: 0 0 0.5em #2fe56b; }
 .zr-home__server b { color: #44f07c; }
 .zr-home__server--off i { background: #ff6b5e; box-shadow: none; }
 .zr-home__server--off b { color: #ff9a90; }
 
+/* the three big buttons, over the painted ones */
 .zr-home__menu {
   position: absolute;
-  left: 50%; top: 51.6cqh; bottom: 2.2cqh;
-  width: 32.4cqw;
-  transform: translateX(-50%);
-  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  left: 31.4cqw; top: 52.6cqh;
+  width: 37.2cqw; height: 39.6cqh;
+  display: flex; flex-direction: column; justify-content: space-between;
 }
-/* (two buttons: they keep the places of the top two painted ones) */
-.zr-home__menu--two { bottom: 20.6cqh; }
+.zr-home__menu .zr-btn { width: 100%; height: 12.2cqh; padding: 0; font-size: 3.1cqw; border-width: 0.24cqw; }
+.zr-home__menu .zr-btn svg { width: 1.5em; height: 1.5em; flex: none; }
+.zr-btn--purple {
+  background: linear-gradient(#b27bff 0%, #8a46f0 48%, #7333dd 52%, #5f25c4 100%);
+  box-shadow: 0 0.22em 0 #3d1590, 0 0.4em 0.7em #0b1c4a66, inset 0 0.12em 0 #ffffff70;
+}
+
+/* Multiplayer: who you are, above the buttons */
+.zr-home__who {
+  position: absolute; left: 50%; top: 41.6cqh; transform: translateX(-50%);
+  display: flex; align-items: center; justify-content: center; gap: 1cqw; flex-wrap: wrap;
+  width: 60cqw;
+}
 .zr-home__name {
   display: flex; align-items: center; gap: 1cqw;
-  width: 25.4cqw; height: 6.9cqh; padding: 0 1.6cqw;
+  width: 25.4cqw; height: 7.4cqh; padding: 0 1.6cqw;
   border: 0.22cqw solid #fff; border-radius: 999px;
   background: #101a2c;
   box-shadow: 0 0.4cqw 1cqw #0006;
 }
-.zr-home__name svg { flex: none; width: 2cqw; height: 2cqw; fill: #fff; }
+.zr-home__name svg, .zr-home__as svg { flex: none; width: 2cqw; height: 2cqw; fill: #fff; }
 .zr-home__name input {
   flex: 1; min-width: 0; border: 0; outline: 0; background: none;
-  color: #fff; font: 700 1.4cqw/1 var(--zr-text);
+  color: #fff; font: 700 1.5cqw/1 var(--zr-text);
 }
 .zr-home__name input::placeholder { color: #d5dcea; }
 .zr-home__name:focus-within { border-color: var(--zr-yellow); }
-.zr-home__menu .zr-btn { width: 28.6cqw; height: 9cqh; padding: 0; font-size: 2.35cqw; border-width: 0.24cqw; }
-.zr-home__menu .zr-btn--big { width: 32.4cqw; height: 11cqh; font-size: 2.8cqw; }
-.zr-home__menu .zr-btn svg { width: 1.5em; height: 1.5em; flex: none; }
+.zr-home__or { color: #fff; font: 400 1.7cqw/1 var(--zr-display); text-transform: uppercase; -webkit-text-stroke: 0.3cqw var(--zr-navy); paint-order: stroke fill; }
+.zr-home__who .zr-home__signin { height: 7.4cqh; padding: 0 2cqw; font-size: 1.9cqw; border-width: 0.22cqw; }
+.zr-home__as {
+  display: flex; align-items: center; gap: 1cqw; margin: 0;
+  height: 7.4cqh; padding: 0 2.2cqw;
+  border: 0.22cqw solid #fff; border-radius: 999px; background: #101a2ce6;
+  color: #fff; font: 700 1.6cqw/1 var(--zr-text);
+}
+.zr-home__as b { color: var(--zr-yellow); }
+.zr-home__problem {
+  position: absolute; left: 50%; bottom: calc(100% + 1cqh); transform: translateX(-50%);
+  margin: 0; padding: 0.6cqw 1.4cqw; border-radius: 999px; white-space: nowrap;
+  background: #7a1f1fee; color: #fff; font: 700 1.3cqw/1.2 var(--zr-text);
+}
+.zr-home__back { position: absolute; left: 50%; bottom: 1.6cqh; transform: translateX(-50%); font-size: 1.5cqw; }
+.zr-home__back:enabled:hover { transform: translateX(-50%) scale(1.03); }
+
 .zr-home__error {
-  position: absolute; left: 50%; top: 44cqh; transform: translateX(-50%);
+  position: absolute; left: 50%; top: 35cqh; transform: translateX(-50%); z-index: 2;
   margin: 0; padding: 0.6cqw 1.4cqw; border-radius: 999px;
   background: #7a1f1fee; color: #fff; font: 700 1.2cqw/1.2 var(--zr-text); white-space: nowrap;
 }
-.zr-home__corner { position: absolute; z-index: 1; left: clamp(8px, 2.2vw, 38px); bottom: clamp(8px, 3.4vh, 34px); display: flex; gap: clamp(6px, 1.4vh, 16px); }
+
+/* the account badge, over the painted "Guest · Sign In" */
+.zr-account {
+  position: absolute; z-index: 2;
+  left: 80.5cqw; top: 1.8cqh; width: 18.3cqw; height: 7.2cqh;
+  display: flex; align-items: center; gap: 0.6em; padding: 0 0.9em 0 1em;
+  border: 0.15em solid #fff; border-radius: 999px;
+  background: linear-gradient(#1d2d5a, #0f1a3a);
+  box-shadow: 0 0.15em 0.5em #0007;
+  color: #fff; font: 700 1.35cqw/1 var(--zr-text);
+  cursor: pointer; transition: transform 120ms ease, filter 120ms ease;
+}
+.zr-account > svg:first-child { flex: none; width: 1.55em; height: 1.55em; fill: #fff; }
+.zr-account__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.zr-account__name u { text-underline-offset: 0.15em; }
+.zr-account__more { flex: none; width: 1.1em; height: 1.1em; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.zr-account:hover { transform: scale(1.03); filter: brightness(1.15); }
+.zr-account:focus-visible { outline: 0.15em solid var(--zr-yellow); outline-offset: 0.1em; }
+
+/* the three small buttons, over the painted ones */
+.zr-home__corner { position: absolute; z-index: 1; left: 1.75cqw; bottom: 2.7cqh; display: flex; gap: 1.25cqw; }
+.zr-home__corner .zr-iconbtn { font-size: 7.4cqh; }
 .zr-iconbtn {
   display: grid; place-items: center;
   width: 1em; height: 1em; padding: 0; font-size: clamp(34px, 9vh, 86px);
@@ -204,9 +257,16 @@
 
 /* a page with one box on it (join a game, split screen) */
 .zr-page {
+  position: relative; isolation: isolate;
   min-height: 100dvh; height: 100dvh; overflow-y: auto;
   display: grid; place-items: center; padding: 20px;
-  background: linear-gradient(#0b1c4a88, #0b1c4a88), url('/ui/home.webp') center / cover;
+  background: #1b5fb8;
+}
+/* (the home picture behind, blurred: its painted buttons are not to be taken for real ones) */
+.zr-page::before {
+  content: ''; position: fixed; inset: -40px; z-index: -1;
+  background: linear-gradient(#0b1c4a77, #0b1c4a77), url('/ui/home.webp') center / cover;
+  filter: blur(14px);
 }
 
 /* ---------- dog select and map select: a board on the sky ---------- */
@@ -501,3 +561,79 @@ html[data-pad] .zr-tile--cup:focus { box-shadow: inset 0 0 0 clamp(2px, 0.4vh, 4
 html[data-pad] .zr-home__name input:focus { outline: none; box-shadow: none; }
 html[data-pad] .zr-home__name:focus-within { border-color: #ffd22e; box-shadow: 0 0 0 4px #14224f, 0 0 22px 8px #ffd22eaa; }
 html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scale(1.05); }
+
+/* ---------- the account box ---------- */
+.zr-card--account { width: min(460px, 92vw); }
+.zr-form { display: flex; flex-direction: column; gap: 12px; margin: 0 0 6px; text-align: left; }
+.zr-form .zr-btn { align-self: center; margin-top: 4px; }
+.zr-form .zr-error { margin: 0; }
+.zr-field { display: flex; flex-direction: column; gap: 4px; font-weight: 700; }
+.zr-field span { color: var(--zr-yellow); font: 400 15px var(--zr-display); letter-spacing: 0.05em; text-transform: uppercase; }
+.zr-field input {
+  padding: 11px 16px; border: 3px solid #ffffff55; border-radius: 999px;
+  background: #101a2c; color: #fff; font: 700 16px var(--zr-text); outline: 0;
+}
+.zr-field input::placeholder { color: #8d9bc0; font-weight: 400; }
+.zr-field input:focus { border-color: var(--zr-yellow); }
+.zr-google {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  width: 100%; padding: 11px 16px; border: 3px solid #fff; border-radius: 999px;
+  background: #fff; color: #1f1f1f; font: 700 16px var(--zr-text); cursor: pointer;
+  box-shadow: 0 4px 0 #9fb2dd;
+}
+.zr-google:hover { filter: brightness(0.96); }
+.zr-google:focus-visible { outline: 3px solid var(--zr-yellow); outline-offset: 3px; }
+.zr-google__g { width: 22px; height: 22px; }
+.zr-or { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: #c4d3f5; font-size: 13px; }
+.zr-or::before, .zr-or::after { content: ''; flex: 1; height: 2px; background: #ffffff30; }
+.zr-switch { margin: 10px 0 4px !important; }
+.zr-link { padding: 0; border: 0; background: none; color: var(--zr-yellow); font: 700 15px var(--zr-text); text-decoration: underline; cursor: pointer; }
+.zr-statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 6px 0 14px; }
+.zr-statgrid div { display: flex; flex-direction: column; padding: 10px 4px; border: 2px solid #ffffff30; border-radius: 16px; background: #ffffff12; }
+.zr-statgrid b { font: 400 28px/1 var(--zr-display); color: var(--zr-yellow); -webkit-text-stroke: 5px var(--zr-navy); paint-order: stroke fill; }
+.zr-statgrid span { margin-top: 4px; font-size: 12px; color: #d6e2ff; }
+
+/* ---------- leaderboards ---------- */
+.zr-lb > .zr-btn { align-self: center; }
+.zr-lb { width: min(860px, 96vw); max-height: 96dvh; display: flex; flex-direction: column; padding: 18px 22px 20px; }
+.zr-lb__title { margin: 0 auto 6px !important; }
+.zr-lb__title img { display: block; height: clamp(54px, 10vh, 96px); width: auto; }
+.zr-lb__you { margin: 0 0 10px !important; }
+.zr-lb__you b { color: var(--zr-yellow); }
+.zr-lb__tabs { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 12px; }
+.zr-lb__tab {
+  padding: 7px 14px; border: 3px solid #ffffff55; border-radius: 999px;
+  background: #101a2c; color: #fff; font: 400 15px/1 var(--zr-display); letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer;
+}
+.zr-lb__tab:hover { border-color: #fff; }
+.zr-lb__tab[aria-selected="true"] { border-color: #fff; background: linear-gradient(#b27bff, #7333dd); box-shadow: 0 3px 0 #3d1590; }
+.zr-lb__tab:focus-visible, .zr-lb__map:focus-visible { outline: 3px solid var(--zr-yellow); outline-offset: 2px; }
+.zr-lb__body { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 12px; padding: 0 4px; }
+.zr-lb__maps { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; scrollbar-width: thin; }
+.zr-lb__map {
+  flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 92px; padding: 4px;
+  border: 3px solid transparent; border-radius: 14px; background: #ffffff10; color: #d6e2ff; font: 700 11px/1.15 var(--zr-text); cursor: pointer;
+}
+.zr-lb__map img { width: 78px; height: 78px; border-radius: 10px; object-fit: cover; }
+.zr-lb__map[aria-selected="true"] { border-color: var(--zr-yellow); background: #ffd22e26; color: #fff; }
+.zr-lb__heading { display: flex; align-items: baseline; justify-content: center; gap: 14px; flex-wrap: wrap; margin: 2px 0 10px; font: 400 24px/1 var(--zr-display); text-transform: uppercase; letter-spacing: 0.03em; -webkit-text-stroke: 5px var(--zr-navy); paint-order: stroke fill; }
+.zr-lb__heading small { font: 700 14px var(--zr-text); color: var(--zr-yellow); -webkit-text-stroke: 0; text-transform: none; }
+.zr-lb__note { margin: 0 0 8px !important; font-size: 13px; }
+.zr-lb__rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.zr-lb__rows li {
+  display: flex; align-items: center; gap: 12px; padding: 6px 14px 6px 8px;
+  border: 2px solid #ffffff26; border-radius: 999px; background: #ffffff10; text-align: left;
+}
+.zr-lb__rows li.zr-lb__me { border-color: var(--zr-yellow); background: #ffd22e22; }
+.zr-lb__place {
+  flex: none; display: grid; place-items: center; width: 36px; height: 36px; border: 3px solid #fff; border-radius: 50%;
+  font: 400 18px/1 var(--zr-display); color: #fff; -webkit-text-stroke: 4px var(--zr-navy); paint-order: stroke fill; background: #3a4a7c;
+}
+.zr-lb__place--1 { background: linear-gradient(#ffe873, #ffab00); }
+.zr-lb__place--2 { background: linear-gradient(#f1f5ff, #a9b6cf); }
+.zr-lb__place--3 { background: linear-gradient(#f0b37a, #b86a2c); }
+.zr-lb__face { flex: none; width: 40px; height: 40px; border: 2px solid #fff; border-radius: 50%; object-fit: cover; background: #101a2c; }
+.zr-lb__who { flex: 1; min-width: 0; display: flex; flex-direction: column; font: 700 17px/1.15 var(--zr-text); overflow: hidden; text-overflow: ellipsis; }
+.zr-lb__who small { font-size: 12px; font-weight: 400; color: #c4d3f5; }
+.zr-lb__value { flex: none; font: 400 20px/1 var(--zr-display); color: var(--zr-yellow); letter-spacing: 0.03em; font-variant-numeric: tabular-nums; -webkit-text-stroke: 4px var(--zr-navy); paint-order: stroke fill; }
+.zr-lb__empty { padding: 30px 0; font-weight: 700; }
