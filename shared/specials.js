@@ -45,20 +45,23 @@ export const SPECIALS = {
   // (Kombu's is over in a moment: the server moves him; shared/specials.js KELP has the rules)
   kombu: { kind: 'kelp', name: 'Kelp Dive', durationMs: 1100 },
   // Baz and Naz: the rope is `rope.reach` thick up and down the road and as wide as the road is; a dog more than
-  // `rope.clear` above it has jumped it.  ghost: whatever stands on the road does not stop them (the walls still do)
-  baz_naz: { kind: 'rope', name: 'Trip Wire', durationMs: 6000, speed: 1.3, ghost: true, rope: { reach: 1.4, clear: 0.9, edge: 0.9, span: 14 } },
+  // `rope.clear` above it has jumped it.  ghost: whatever stands on the road does not stop them (the walls still do).
+  // Like Poppy's wave it steers itself (Tom, 2026-11-21), but straight up the middle of the road (`wander` 0), so the
+  // rope reaches both edges and they come out of it in the middle
+  baz_naz: { kind: 'rope', name: 'Trip Wire', durationMs: 6000, speed: 1.4, ghost: true, steerLocked: true, wander: 0, rope: { reach: 1.4, clear: 0.9, edge: 0.9, span: 14 } },
   // Jazz: over in a moment for her (the stomp); QUAKE below has what it does to everyone else
   jazz: { kind: 'quake', name: 'Earthquake', durationMs: 900 },
   // Casper charges for `durationMs`, knocking over any dog he runs into (`hitRadius` round him, `reach` in front); when
   // the time is up (`pass`) the ball goes up the road after the leader: a Treat Box firework in every way but its looks
   // (shared/firework.js), so it knocks over any dog it passes on the way.  If Casper is leading, it has nobody to go for
   casper: { kind: 'rugby', name: 'Try Time', durationMs: 6000, speed: 1.5, hitRadius: 2.0, reach: 1.5, pass: true },
+  // (steerLocked: the special steers the dog up the road by itself, weaving `wander` of the half width to each side)
   // Jimmy: a dragon for `durationMs` from last place (far enough at this speed to cover what Poppy's wave covers), and
   // `lessPerPlaceMs` less for every place nearer the front; `fireworks`: how many he sends after the leader from last
   // place, how far apart, and how many fewer for each place nearer the front (dragonFireworks below).  They are the
   // Treat Box firework (shared/firework.js, FIREWORK in shared/items.js) in every way but who lights them
   jimmy: { kind: 'dragon', name: 'Dragon Dance', durationMs: 7000, lessPerPlaceMs: 1000, speed: 1.6, fireworks: { count: 5, everyMs: 2000, lessPerPlace: 1 } },
-  black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true },
+  black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true, wander: 0.5 },
 };
 
 // Kombu's Kelp Dive: seaweed comes up out of the ground, pulls him under, and puts him down further up

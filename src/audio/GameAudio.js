@@ -40,11 +40,38 @@ const RACE_AUDIO = {
 // share of its usual volume.  (A voice is already as loud as a browser will play it.)
 const MUSIC_UNDER_VOICES = 0.3;
 
+// Muted: the player's mute button (remembered on this computer), or ?mute=1 in the address, which starts the game
+// muted without changing what is remembered (for testing).  Voice chat is not muted by it: it has its own controls.
+const MUTE_KEY = 'zoomies.muted';
+const mutedByAddress = () => { try { return new URLSearchParams(window.location.search).get('mute') === '1'; } catch { return false; } };
+const mutedBefore = () => { try { return window.localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } };
+
 export class GameAudio {
   #selection = {};
   #race = { countdown: null, music: null };
   #musicVolume = 0.35;      // this map's music at its usual volume
   #voices = false;         // voice chat is connected to someone
+  #muted = mutedByAddress() || mutedBefore();
+  #listeners = new Set();
+
+  get muted() { return this.#muted; }
+
+  setMuted(muted) {
+    this.#muted = Boolean(muted);
+    if (!mutedByAddress()) { try { window.localStorage.setItem(MUTE_KEY, this.#muted ? '1' : '0'); } catch { /* private browsing */ } }
+    for (const audio of [...Object.values(this.#selection), this.#race.countdown, this.#race.music]) {
+      try { if (audio) audio.muted = this.#muted; } catch { /* no audio support */ }
+    }
+    for (const listener of this.#listeners) listener(this.#muted);
+  }
+
+  toggleMuted() { this.setMuted(!this.#muted); }
+
+  /** listener(muted) whenever it changes; returns the way to stop listening */
+  onMutedChange(listener) {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
 
   // Turn the music down while voice chat is connected (and back up when it is not)
   setVoiceChatActive(active) {
@@ -62,6 +89,7 @@ export class GameAudio {
     try {
       this.#selection[dogId] ??= new Audio(src);
       const audio = this.#selection[dogId];
+      audio.muted = this.#muted;
       audio.currentTime = 0;
       audio.play().catch(() => { /* autoplay blocked or file missing: stay silent */ });
     } catch { /* no audio support */ }
@@ -83,6 +111,7 @@ export class GameAudio {
         if (!config[key]) continue;
         const audio = new Audio(config[key]);
         audio.preload = 'auto';
+        audio.muted = this.#muted;
         if (key === 'music') {
           audio.loop = true;
           this.#musicVolume = config.musicVolume ?? 0.35;
@@ -106,3 +135,4 @@ export class GameAudio {
 
 // One set of speakers: everything in the game plays through this
 export const gameAudio = new GameAudio();
+

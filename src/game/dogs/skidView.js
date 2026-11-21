@@ -3,6 +3,7 @@ import { DRIFT } from '../../../shared/drift.js';
 import { applyTurnPose, applySkidPose, skidSway, lowestPaw, pawStance } from './animation.js';
 import { createDriftEffects } from './driftEffects.js';
 import { createSkateboard } from './skateboard.js';
+import { createWheelFire } from './wheelFire.js';
 
 // How a skid looks, for any dog in the race: the player's own (LocalDog) and everyone else's (RemoteDog,
 // which is told by the server that the dog is skidding).  What each dog does in one is its `skid` in
@@ -17,6 +18,7 @@ import { createSkateboard } from './skateboard.js';
 //     avatar.mixer.update(delta);
 //     view.pose(delta, { steer, effort, tier, speed, spinning });
 //     view.settle(delta, { pitch, speed, grounded });   // pitch: the tilt the dog has anyway (the slope it is on)
+//     view.wheels(delta, { share, speed });     // Jimmy: fire from his wheels downhill (share 0 to 1: wheelFire.js)
 //   view.dispose();
 export class SkidView {
   constructor(avatar, scene) {
@@ -30,6 +32,7 @@ export class SkidView {
     this.stance = null;       // where its paws are, standing (animation.js pawStance)
     this.board = null;        // Ralph's skateboard
     this.effects = null;      // dust and sparks (made the first time it skids)
+    this.fire = null;         // Jimmy's wheel fire downhill (wheelFire.js)
     this.posed = false;       // it has moved the model about, and has to put it back
     this.settled = false;
   }
@@ -37,6 +40,7 @@ export class SkidView {
   // The model is in: where its paws are when it stands, and (Ralph) a skateboard long enough to stand on
   ready() {
     const { avatar } = this, { config } = avatar;
+    if (avatar.model && !this.fire) this.fire = createWheelFire(this.scene, avatar);
     if (!config.skid || !avatar.model) return;
     avatar.mixer?.update(0);
     this.stance = pawStance(avatar.group, avatar.bones);
@@ -142,7 +146,13 @@ export class SkidView {
     }
   }
 
+  // Downhill, fire from the wheels of a dog that has them (none for the rest)
+  wheels(delta, { share, speed }) {
+    this.fire?.update(delta, { share, speed });
+  }
+
   dispose() {
+    this.fire?.dispose();
     this.effects?.dispose();
     this.board?.dispose();
     this.effects = this.board = null;

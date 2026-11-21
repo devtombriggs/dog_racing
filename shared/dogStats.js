@@ -61,15 +61,22 @@ export function statScale(value, perPoint) {
 }
 
 // Downhill (a dog with a `downhill` rating: Jimmy, whose wheels run away with him).  Where the road drops, his top
-// speed is that of a dog with that Speed: none of it on the level, all of it once the road falls `full` in every
+// speed is that of a dog with that Speed, times `boost`: none of it on the level, all of it once the road falls `full` in every
 // metre, and in between in proportion.  `slope` is the rise per metre forward under the dog (minus is downhill).
-export const DOWNHILL = { from: 0.015, full: 0.09 };
+// boost: and that much faster again (Tom, 2026-11-21: Meela's speed and a boost on top, fire from his wheels)
+export const DOWNHILL = { from: 0.015, full: 0.09, boost: 1.15 };
+
+/** How much of its downhill speed a dog has on this slope: 0 (none, or level, or a climb) to 1 (all of it) */
+export function downhillShare(stats, slope) {
+  if (!stats?.downhill || !(slope < -DOWNHILL.from)) return 0;
+  return Math.min(1, (-slope - DOWNHILL.from) / (DOWNHILL.full - DOWNHILL.from));
+}
 
 /** How much faster than its own top speed a dog is on this slope: 1 for a dog with no `downhill`, or on the level or a climb */
 export function downhillSpeed(stats, slope) {
-  if (!stats?.downhill || !(slope < -DOWNHILL.from)) return 1;
-  const share = Math.min(1, (-slope - DOWNHILL.from) / (DOWNHILL.full - DOWNHILL.from));
-  return 1 + (statScale(stats.downhill, STAT_EFFECT.speed) / statScale(stats.speed, STAT_EFFECT.speed) - 1) * share;
+  const share = downhillShare(stats, slope);
+  if (!share) return 1;
+  return 1 + (DOWNHILL.boost * statScale(stats.downhill, STAT_EFFECT.speed) / statScale(stats.speed, STAT_EFFECT.speed) - 1) * share;
 }
 
 // Real dog speeds at the dogs' scale of 3 (an easy canter and a gallop) and how fast speed builds,

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { racingLineAt, PICKUP_PATHS } from '../../../shared/pickupSpots.js';
 import { bellyBounce, ghostsThrough, SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
-import { BASE_SPEED, downhillSpeed } from '../../../shared/dogStats.js';
+import { BASE_SPEED, downhillSpeed, downhillShare } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
 import { PAD_KICK } from '../../../shared/items.js';
 import { DRIFT, AUTO_DRIFT, DRIFT_ARC, driftPerks, driftCanStart, driftArc, driftSteering, driftStep, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow, autoDriftHeld, autoDriftCurvature } from '../../../shared/drift.js';
@@ -16,6 +16,9 @@ import { DogAvatar } from './DogAvatar.js';
 
 const OFF_TRACK_SPEED_MULTIPLIER = 0.5;
 const OFF_TRACK_ACCELERATION_MULTIPLIER = 0.6;
+// Ralph's invisible walls while he flies (#keepToRoad): how far in from each edge of the road they stand, and how fast
+// (metres a second) they close in on him if he took off wider than that
+const FLY_EDGE = { inset: 0.5, closeIn: 4 };
 const REVERSE_SPEED = 2.5;
 const BRAKING = 22;
 const FRICTION = 9;
@@ -513,6 +516,7 @@ export class LocalDog extends DogAvatar {
     this.#advance(frame);
     this.#bumpOtherDogs(frame);
     this.#feelGround(frame);
+    this.#keepToRoad(frame);
     this.race.rescue.update(delta, this);
     this.#rise(frame);
     this.#followGround(frame);
@@ -662,13 +666,13 @@ export class LocalDog extends DogAvatar {
     }
 
     // Poppy's wave steers itself: it follows the road, wandering from side to side, so it only
-    // hits the dogs that happen to be in its way
+    // hits the dogs that happen to be in its way.  The twins' Trip Wire steers itself up the middle (wander 0)
     if (special?.steerLocked) {
       const line = racingLineAt(mapId, position.x, position.z, rescue.lineS);
       if (line) {
         const leftX = Math.cos(line.rotationY), leftZ = -Math.sin(line.rotationY);
         const offset = (position.x - line.x) * leftX + (position.z - line.z) * leftZ;
-        const wander = Math.sin(performance.now() / 1000 * 1.1) * 0.5 * line.halfWidth;
+        const wander = Math.sin(performance.now() / 1000 * 1.1) * (special.wander ?? 0.5) * line.halfWidth;
         const want = line.rotationY +
           THREE.MathUtils.clamp((wander - offset) / Math.max(line.halfWidth, 1) * 0.9, -0.6, 0.6);
         group.rotation.y +=
@@ -789,6 +793,24 @@ export class LocalDog extends DogAvatar {
         position.copy(to);
       }
     }
+  }
+
+  // Ralph flying (his Rocket Paws) is off the ground, so nothing beside the road slows him: an invisible wall at each edge
+  // keeps him on it, or he could cut across a corner and miss a checkpoint (and with it the lap).  He slides along it.
+  // If he takes off wider than that, the wall closes in on him gently rather than snapping him back.
+  #keepToRoad(frame) {
+    if (!frame.special?.flyHeight) { this.flyEdge = null; return; }
+    const { position } = this, { mapId, rescue } = this.race;
+    const line = racingLineAt(mapId, position.x, position.z, rescue.lineS);
+    if (!line) return;
+    const leftX = Math.cos(line.rotationY), leftZ = -Math.sin(line.rotationY);
+    const offset = (position.x - line.x) * leftX + (position.z - line.z) * leftZ;
+    const limit = Math.max(1, line.halfWidth - FLY_EDGE.inset);
+    this.flyEdge = Math.max(limit, Math.min(this.flyEdge ?? Math.abs(offset), Math.abs(offset)) - FLY_EDGE.closeIn * frame.delta);
+    if (Math.abs(offset) <= this.flyEdge) return;
+    const back = Math.sign(offset) * this.flyEdge - offset;
+    position.x += leftX * back;
+    position.z += leftZ * back;
   }
 
   // ---------------------------------
@@ -1025,6 +1047,8 @@ export class LocalDog extends DogAvatar {
         // (in the slide: sat back a little and let down on to its paws, its belly or its board)
         this.skid.settle(delta, { pitch: this.model.rotation.x, speed: this.currentSpeed, grounded: !this.isJumping });
       }
+      // (Jimmy downhill: fire from his wheels, while they are on the road)
+      this.skid.wheels(delta, { share: this.isJumping ? 0 : downhillShare(this.stats, this.slope), speed: this.currentSpeed });
     }
   }
 

@@ -373,7 +373,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       + L.wander * (0.6 * Math.sin(time * 0.5 + phase[0]) + 0.4 * Math.sin(time * 1.3 + phase[1])));
 
     // Poppy's wave steers itself, wandering from side to side
-    if (world.special?.steerLocked) return clamp(Math.sin(time * 1.1) * 0.5 * route.pointAt(s).halfWidth, -limit, limit);
+    if (world.special?.steerLocked) return clamp(Math.sin(time * 1.1) * (world.special.wander ?? 0.5) * route.pointAt(s).halfWidth, -limit, limit);
 
     // a Treat Box (when it holds nothing) or a Golden Bone it could reach
     const sideways = clamp(0.3 * speed, 1, 5.5);

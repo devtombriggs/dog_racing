@@ -9,7 +9,7 @@ export const DRIFT_HUD_COLOURS = ['#e8e2d0', '#7cc8ff', '#ffb055', '#d39bff'];
 
 // Round dots that fly, fall and fade, each with its own colour, size and opacity.
 // glow: drawn as light (sparks); otherwise as kicked-up dirt.  grow: how much bigger a dot is at the end of its life
-function dotMaterial({ size, glow, grow, opacity }) {
+export function dotMaterial({ size, glow, grow, opacity }) {
   return new THREE.ShaderMaterial({
     uniforms: { uSize: { value: size }, uScale: { value: 400 }, uGrow: { value: grow }, uOpacity: { value: opacity }, uSoft: { value: glow ? 0.12 : 0.0 } },
     vertexShader: `
@@ -37,7 +37,7 @@ function dotMaterial({ size, glow, grow, opacity }) {
 }
 
 // A pool of them: the oldest is reused when they run out
-function pool(scene, count, material, { gravity, drag }) {
+export function pool(scene, count, material, { gravity, drag }) {
   const positions = new Float32Array(count * 3), colours = new Float32Array(count * 3), left = new Float32Array(count);
   const velocity = new Float32Array(count * 3), life = new Float32Array(count), span = new Float32Array(count);
   const geometry = new THREE.BufferGeometry();

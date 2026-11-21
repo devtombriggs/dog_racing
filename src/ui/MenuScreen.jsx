@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fullscreen } from '../fullscreen.js';
+import { MuteButton } from './MuteButton.jsx';
 
 // The first screen: your name, and how you want to play.
 //   Single Player   (Tom, 2026-11-19: no Grand Prix or Maps buttons here for now; leaderboards and sign-in will come)
@@ -112,6 +113,7 @@ export function MenuScreen({ session, state }) {
         <div className="zr-home__corner">
           <button className="zr-iconbtn" aria-label="Settings" onClick={() => setSheet('settings')}>{ICONS.gear}</button>
           <button className="zr-iconbtn" aria-label="Controls" onClick={() => setSheet('controls')}>{ICONS.pad}</button>
+          <MuteButton />
         </div>
       {sheet === 'settings' && <Settings session={session} state={state} close={() => setSheet(null)} />}
       {sheet === 'controls' && <Controls close={() => setSheet(null)} />}

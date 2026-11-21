@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { fullscreen } from '../../fullscreen.js';
 import { buttonStyle } from '../styles.js';
+import { gameAudio } from '../../audio/GameAudio.js';
+import { useMuted } from '../useMuted.js';
 
-// The menu over the race: Esc opens and closes it.  Resume, full screen on or off, back to the main menu.
+// The menu over the race: Esc opens and closes it.  Resume, full screen on or off, sound on or off,
+// back to the main menu.
 // The race does not stop while it is open (the other dogs are still running).
 //
 // A browser may take Esc for itself to leave full screen without telling the game: so leaving full
@@ -10,6 +13,7 @@ import { buttonStyle } from '../styles.js';
 export function PauseMenu({ session }) {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState(fullscreen.isOn());
+  const muted = useMuted();
   const ours = useRef(false);            // full screen is being changed by this menu's button
 
   useEffect(() => {
@@ -42,6 +46,7 @@ export function PauseMenu({ session }) {
             Full screen: {full ? 'on' : 'off'}
           </button>
         )}
+        <button style={quiet} aria-pressed={muted} onClick={() => gameAudio.toggleMuted()}>Sound: {muted ? 'off' : 'on'}</button>
         <button style={quiet} onClick={session.leaveGame}>Quit to Main Menu</button>
         <small>Esc or Start closes this menu</small>
       </div>

@@ -237,7 +237,8 @@ test('Jimmy: under Ralph all round, Meela\'s speed downhill; his Dragon Dance sc
   assert.equal(jimmy.downhill, meela.speed);
   assert.equal(downhillSpeed(jimmy, 0), 1); assert.equal(downhillSpeed(jimmy, 0.2), 1); assert.equal(downhillSpeed(jimmy, -DOWNHILL.from), 1);
   const top = dog => BASE_SPEED.sprint * statScale(dog.speed, STAT_EFFECT.speed);
-  assert.ok(Math.abs(top(jimmy) * downhillSpeed(jimmy, -DOWNHILL.full) - top(meela)) < 1e-9 && Math.abs(top(jimmy) * downhillSpeed(jimmy, -0.4) - top(meela)) < 1e-9, 'Meela\'s top speed, and no more however steep');
+  assert.ok(Math.abs(top(jimmy) * downhillSpeed(jimmy, -DOWNHILL.full) - top(meela) * DOWNHILL.boost) < 1e-9 && Math.abs(top(jimmy) * downhillSpeed(jimmy, -0.4) - top(meela) * DOWNHILL.boost) < 1e-9, 'Meela\'s top speed with a boost on top, and no more however steep');
+  assert.ok(DOWNHILL.boost > 1 && DOWNHILL.boost <= 1.2);
   const part = downhillSpeed(jimmy, -(DOWNHILL.from + DOWNHILL.full) / 2);
   assert.ok(part > 1 && part < downhillSpeed(jimmy, -DOWNHILL.full));
   for (const [id, dog] of Object.entries(DOG_STATS)) if (id !== 'jimmy') assert.equal(downhillSpeed(dog, -0.3), 1, `${id} has no such thing`);

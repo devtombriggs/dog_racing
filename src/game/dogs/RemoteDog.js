@@ -4,6 +4,7 @@ import { HANDLING } from '../../config/handling.js';
 import { gaitTimeScale, sprintFraction } from './animation.js';
 import { SkidView } from './skidView.js';
 import { DogAvatar } from './DogAvatar.js';
+import { DOG_STATS, downhillShare } from '../../../shared/dogStats.js';
 
 // Another player's dog.  Their own game moves it; here it follows the positions the server passes
 // on, smoothed, and plays the clip their game says it is in.
@@ -25,6 +26,7 @@ export class RemoteDog extends DogAvatar {
     this.animation = data.animation || 'Idle';
     this.drift = null;       // skidding round a corner, as its own game (or the server, for a computer dog) says: { side, tier, startedAt }
     this.skid = new SkidView(this, scene);
+    this.slope = 0;          // the slope it is on (rise per metre), from how it moves (for Jimmy's wheel fire)
   }
 
   get visible() { return this.group.visible; }
@@ -121,6 +123,13 @@ export class RemoteDog extends DogAvatar {
       this.mixer.update(delta);
       this.skid.pose(delta, { steer: this.steer, effort: sprintFraction(this.speed, runSpeed, sprintSpeed), tier: this.drift?.tier ?? 0, speed: this.speed });
       this.skid.settle(delta, { speed: this.speed });
+      // (Jimmy downhill: the slope he is on, from how his position is falling as he goes; his wheels catch fire)
+      if (this.skid.fire) {
+        const was = this.lastAt ?? this.group.position, run = Math.hypot(this.group.position.x - was.x, this.group.position.z - was.z);
+        if (run > 1e-4) this.slope += ((this.group.position.y - was.y) / run - this.slope) * (1 - Math.exp(-6 * delta));
+        (this.lastAt ??= new THREE.Vector3()).copy(this.group.position);
+        this.skid.wheels(delta, { share: downhillShare(DOG_STATS[this.dogId], this.slope), speed: this.speed });
+      }
     }
   }
 }
