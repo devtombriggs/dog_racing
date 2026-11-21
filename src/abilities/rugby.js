@@ -14,7 +14,7 @@ import * as THREE from 'three';
 
 const SHIRT = '/models/specials/casper_rugby_shirt.jpg';
 const BALL = { long: 0.42, round: 0.25 };        // half its length and half its width, in the game's metres (big enough to read as a rugby ball from the chase camera)
-const HELD = { ahead: 0.32, up: 0.05 };          // where he holds it: this far in front of his paws, and up
+const HELD = { ahead: 0.32, up: 0.05, lean: 0.2 };          // where he holds it: this far in front of his paws, and up; stood on end, its top leant forward this far (radians)
 const BACK = { name: 'CASPER', number: '7' };
 
 // The ball's skin: white, with a red swoosh and a black one down each side (no maker's name)
@@ -132,13 +132,14 @@ export function createRugbyKit({ scene, model }) {
     update(group) {
       ball.visible = holding && paws.length === 2 && model.visible && group.visible;
       if (!ball.visible) return;
-      // just in front of his paws, lying across him (which way he faces includes the spin he starts with)
+      // just in front of his paws, stood on end: one point up, the other down (Tom, 2026-11-21), its top leant a little
+      // the way he runs.  (Which way he faces includes the spin he starts with)
       const yaw = group.rotation.y + model.rotation.y;
       paws[0].getWorldPosition(a); paws[1].getWorldPosition(b);
       ahead.set(Math.sin(yaw), 0, Math.cos(yaw));
       ball.position.copy(a).add(b).multiplyScalar(0.5).addScaledVector(ahead, HELD.ahead);
       ball.position.y += HELD.up;
-      ball.rotation.set(0, yaw + Math.PI / 2, 0);
+      ball.rotation.set(HELD.lean - Math.PI / 2, yaw, 0, 'YXZ');
     },
     dispose() {
       this.off();

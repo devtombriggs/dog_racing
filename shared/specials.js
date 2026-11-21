@@ -126,6 +126,14 @@ export function quakeSeconds(place) {
   return byPlace[Math.min(Math.max(1, place ?? 1), byPlace.length) - 1];
 }
 
+/**
+ * Can a dog jump in the middle of this special?  Yes (Tom, 2026-11-21: in a special a dog could not get over anything),
+ * but for the ones that already have it off the ground and keep it at their own height: Ralph flying, Enzo bouncing
+ */
+export function jumpsInSpecial(spec) {
+  return !spec || !(spec.flyHeight || spec.bounce);
+}
+
 /** Enzo's Belly Bounce at `seconds` since it began: { height (m off the ground), speed (multiplier) } */
 export function bellyBounce(spec, seconds) {
   const b = spec.bounce, phase = (seconds % b.seconds) / b.seconds;

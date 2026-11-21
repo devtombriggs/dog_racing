@@ -208,3 +208,17 @@ test('computer dogs drift: at some bends, not for long, into the turn, with a bo
   assert.ok(ralph.every(r => r.fastest <= 1.31), `never more than a bone gives: ${ralph.map(r => r.fastest.toFixed(2))}`);
   assert.ok(DRIFT_PERKS.ralph);
 });
+
+test('in a special a dog can still jump (Tom, 2026-11-21: it could not get over anything), but for Ralph flying and Enzo bouncing', async () => {
+  const { SPECIALS, jumpsInSpecial } = await import('../shared/specials.js');
+  assert.ok(jumpsInSpecial(null));
+  for (const [dog, spec] of Object.entries(SPECIALS)) assert.equal(jumpsInSpecial(spec), !['ralph', 'enzo'].includes(dog), dog);
+  // a computer dog in one jumps what lies across the road, as it does out of one
+  const route = botRoute('wendover'), log = route.jumps.find(jump => jump.must) ?? route.jumps[0];
+  for (const dog of ['casper', 'pablo', 'black_lab', 'baz_naz', 'second_dog', 'jimmy']) {
+    let jumped = false;
+    run({ mapId: 'wendover', dog, level: 'hard', from: log.s0 - 40, seconds: 6, world: { special: SPECIALS[dog] },
+      watch: (move, state) => { if (state.jumping && Math.abs(route.ahead(state.s, (log.s0 + log.s1) / 2)) < 6) jumped = true; } });
+    assert.ok(jumped, `${dog} jumps it in its special`);
+  }
+});

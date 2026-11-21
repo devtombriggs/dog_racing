@@ -20,7 +20,7 @@ import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSpeedLoss, pickupShare, downhillSpeed } from '../shared/dogStats.js';
 import { HANDLING, JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../shared/handling.js';
 import { BONE_BOOST, PAD_KICK, TOY } from '../shared/items.js';
-import { SPECIALS, SPECIAL_ITEM, bellyBounce } from '../shared/specials.js';
+import { SPECIALS, SPECIAL_ITEM, bellyBounce, jumpsInSpecial } from '../shared/specials.js';
 import { DRIFT, driftPerks, driftArc, driftCurvature, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow } from '../shared/drift.js';
 import { WENDOVER, woodlandWaterAt, woodlandDogY, woodlandSwimMultiplier } from '../shared/wendoverData.js';
 import { BURROWS } from '../shared/burrows.js';
@@ -446,7 +446,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   }
 
   function wantsToJump(world, ground) {
-    if (jumping || ground.swimming || world.special || speed < 1 || route.onPad(s)) return false;
+    if (jumping || ground.swimming || !jumpsInSpecial(world.special) || speed < 1 || route.onPad(s)) return false;      // (in a special too, but for Ralph flying and Enzo bouncing)
     const steep = route.steep && slope < STEEP_JUMP.below;
     const force = steep ? STEEP_JUMP.force : JUMP.force, gravity = steep ? STEEP_JUMP.gravity : JUMP.gravity;
     const tick = 0.06;

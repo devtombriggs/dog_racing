@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { racingLineAt, PICKUP_PATHS } from '../../../shared/pickupSpots.js';
-import { bellyBounce, ghostsThrough, SPECIALS } from '../../../shared/specials.js';
+import { bellyBounce, ghostsThrough, jumpsInSpecial, SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
 import { BASE_SPEED, downhillSpeed, downhillShare, swimSpeed } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
@@ -185,7 +185,7 @@ export class LocalDog extends DogAvatar {
       session.raceFinished ||
       this.isJumping ||
       this.tunnelRide ||
-      specials.busy(this.id) ||          // no jumping in the middle of a special
+      !jumpsInSpecial(specials.physics(this.id)) ||      // (a special can be jumped in, but for Ralph flying and Enzo bouncing)
       this.#inWater ||                   // no jumping out of water, deep or shallow (Tom, 2026-11-21: it was a way through it fast)
       !this.mixer
     ) {
@@ -198,6 +198,8 @@ export class LocalDog extends DogAvatar {
     const steepHop = world.steepRun && this.slope < STEEP_JUMP.below;
     this.verticalVelocity = steepHop ? STEEP_JUMP.force : JUMP.force;
     this.jumpGravity = steepHop ? STEEP_JUMP.gravity : JUMP.gravity;
+    // (in a special that plays its own clips, the dog goes up as it is: Casper upright with the ball, Poppy on her wave)
+    if (specials.animating(this.id)) return;
     this.play('Jump');
 
     // A running dog takes off in stride: skip the standing crouch.
@@ -932,7 +934,7 @@ export class LocalDog extends DogAvatar {
 
         // Landing at a run goes straight back into the stride; only a
         // standing jump plays the settle-and-stand landing
-        if (Math.abs(this.currentSpeed) > RUNNING_JUMP_SPEED) {
+        if (Math.abs(this.currentSpeed) > RUNNING_JUMP_SPEED || this.race.specials.animating(this.id)) {
           this.isLanding = false;
         } else {
           this.isLanding = true;
