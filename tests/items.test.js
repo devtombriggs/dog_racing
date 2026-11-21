@@ -137,7 +137,7 @@ test('specials: never for the leader, more likely the further back, and a rammin
   assert.ok(chances.every((c, i) => i === 0 || c > chances[i - 1]), `rising with place: ${chances}`);
   assert.ok(Math.abs(chances[0] - 0.1) < 1e-9 && Math.abs(chances[3] - 0.3) < 1e-9, '2nd 10 %, last 30 %');
   assert.ok(Math.abs(specialChance(2, 2) - 0.3) < 1e-9, '2nd of two is last');
-  assert.deepEqual(Object.keys(SPECIALS).sort(), ['baz_naz', 'black_lab', 'enzo', 'gsp', 'jazz', 'kombu', 'pablo', 'ralph', 'rocky', 'second_dog'], 'every dog has one');
+  assert.deepEqual(Object.keys(SPECIALS).sort(), ['baz_naz', 'black_lab', 'casper', 'enzo', 'gsp', 'jazz', 'jimmy', 'kombu', 'pablo', 'ralph', 'rocky', 'second_dog'], 'every dog has one');
   // Pablo's team runs ahead of him: a dog 7 m in front is hit, one 7 m behind or beside is not
   const sled = SPECIALS.pablo;
   assert.ok(specialTouches(sled, [0, 0, 0], 0, [0, 0, 7]));
@@ -207,5 +207,49 @@ test('Ralph\'s Rocket Paws last fifteen seconds from last place and a second and
   assert.equal(specialDurationMs(ralph, 2, 2), 15000, 'last of two is last');
   assert.equal(specialDurationMs(ralph, 3, 4), 13500, 'one place off last, in any size of race');
   assert.ok(specialDurationMs(ralph, 1, 6) >= 3000);
-  for (const [dog, spec] of Object.entries(SPECIALS)) if (dog !== 'ralph') assert.equal(specialDurationMs(spec, 2, 6), spec.durationMs, dog);
+  for (const [dog, spec] of Object.entries(SPECIALS)) if (dog !== 'ralph' && dog !== 'jimmy') assert.equal(specialDurationMs(spec, 2, 6), spec.durationMs, dog);
+});
+
+test('Casper: Pablo and a little less; his Try Time is a six-second charge that knocks dogs over, and ends in a pass', async () => {
+  const { SPECIALS, specialTouches, ghostsThrough, specialDurationMs } = await import('../shared/specials.js');
+  const { DOG_STATS } = await import('../shared/dogStats.js');
+  for (const key of ['speed', 'acceleration', 'agility', 'swimming', 'drift']) assert.ok(DOG_STATS.casper[key] <= DOG_STATS.pablo[key] && DOG_STATS.casper[key] >= DOG_STATS.pablo[key] - 0.5, key);
+  assert.ok(['acceleration', 'agility', 'swimming'].every(key => DOG_STATS.casper[key] < DOG_STATS.pablo[key]), 'not as strong');
+  const charge = SPECIALS.casper;
+  assert.deepEqual([charge.kind, charge.durationMs, charge.pass], ['rugby', 6000, true]);
+  assert.equal(specialDurationMs(charge, 2, 6), 6000, 'the same from any place');
+  assert.ok(charge.speed > 1.3 && charge.speed < SPECIALS.pablo.speed && charge.durationMs < SPECIALS.pablo.durationMs, 'flat out, but shorter and slower than Pablo on his sled');
+  assert.ok(!charge.steerLocked && !charge.flyHeight && !charge.unseen, 'he steers it himself, on the ground, in plain sight');
+  // he knocks over a dog in front of him or beside him, not one well ahead, behind or off to the side
+  assert.ok(specialTouches(charge, [0, 0, 0], 0, [0.5, 0, 3]) && specialTouches(charge, [0, 0, 0], 0, [1.5, 0, 0]));
+  assert.ok(!specialTouches(charge, [0, 0, 0], 0, [0, 0, 5]) && !specialTouches(charge, [0, 0, 0], 0, [0, 0, -3]) && !specialTouches(charge, [0, 0, 0], 0, [4, 0, 1]));
+  assert.ok(!ghostsThrough(charge, { blocked: true, lateral: 2, halfWidth: 8 }), 'what stands on the road still stops him');
+});
+
+test('Jimmy: under Ralph all round, Meela\'s speed downhill; his Dragon Dance scales with his place like Ralph\'s rocket paws', async () => {
+  const { SPECIALS, KELP, specialDurationMs, dragonFireworks } = await import('../shared/specials.js');
+  const { DOG_STATS, downhillSpeed, DOWNHILL, statScale, STAT_EFFECT, BASE_SPEED } = await import('../shared/dogStats.js');
+  const { jimmy, ralph, second_dog: meela } = DOG_STATS;
+  for (const key of ['speed', 'acceleration', 'agility', 'swimming']) assert.ok(jimmy[key] <= ralph[key], key);
+  assert.ok(jimmy.speed < ralph.speed && jimmy.acceleration < ralph.acceleration && jimmy.agility < ralph.agility, 'worse than Ralph');
+  assert.ok(Object.values(DOG_STATS).every(dog => dog.speed >= jimmy.speed), 'the slowest dog');
+  // downhill: nothing on the level or a climb, all of Meela's speed once the road drops enough, part of it in between
+  assert.equal(jimmy.downhill, meela.speed);
+  assert.equal(downhillSpeed(jimmy, 0), 1); assert.equal(downhillSpeed(jimmy, 0.2), 1); assert.equal(downhillSpeed(jimmy, -DOWNHILL.from), 1);
+  const top = dog => BASE_SPEED.sprint * statScale(dog.speed, STAT_EFFECT.speed);
+  assert.ok(Math.abs(top(jimmy) * downhillSpeed(jimmy, -DOWNHILL.full) - top(meela)) < 1e-9 && Math.abs(top(jimmy) * downhillSpeed(jimmy, -0.4) - top(meela)) < 1e-9, 'Meela\'s top speed, and no more however steep');
+  const part = downhillSpeed(jimmy, -(DOWNHILL.from + DOWNHILL.full) / 2);
+  assert.ok(part > 1 && part < downhillSpeed(jimmy, -DOWNHILL.full));
+  for (const [id, dog] of Object.entries(DOG_STATS)) if (id !== 'jimmy') assert.equal(downhillSpeed(dog, -0.3), 1, `${id} has no such thing`);
+  // the dragon: seven seconds and five fireworks from last, a second and a firework less for each place nearer the front
+  const dragon = SPECIALS.jimmy;
+  assert.equal(dragon.kind, 'dragon');
+  assert.deepEqual([6, 5, 4, 3, 2].map(place => specialDurationMs(dragon, place, 6)), [7000, 6000, 5000, 4000, 3000]);
+  assert.deepEqual([6, 5, 4, 3, 2, 1].map(place => dragonFireworks(dragon, place, 6)), [5, 4, 3, 2, 1, 1]);
+  assert.deepEqual([specialDurationMs(dragon, 2, 2), dragonFireworks(dragon, 2, 2)], [7000, 5], 'last of two is last');
+  assert.equal(dragon.fireworks.everyMs, 2000);
+  assert.equal(dragonFireworks(SPECIALS.ralph, 6, 6), 0);
+  // ...and from last place it carries him about as far as Poppy's wave carries her
+  const metres = top(jimmy) * dragon.speed * dragon.durationMs / 1000;
+  assert.ok(Math.abs(metres - KELP.distance) < 5, `${metres} m against Poppy's ${KELP.distance}`);
 });

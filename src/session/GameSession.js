@@ -1,5 +1,6 @@
 import { io } from 'socket.io-client';
 import { MAPS, DEFAULT_MAP } from '../../shared/maps.js';
+import { LOCAL_PLAYERS } from '../../shared/botLevels.js';
 import { SERVER_URL, VOICE_CHAT } from '../config/env.js';
 import { gameAudio } from '../audio/GameAudio.js';
 import { createVoiceChat } from '../voiceChat.js';
@@ -73,7 +74,7 @@ export class GameSession {
     error: '',
     hoveredDog: null,
     mapTab: 'cups',          // the map screen's tab to open on: 'cups' (Grand Prix) | 'maps'
-    // split screen: the second player's session, while a local game is on (see startLocalGame)
+    // split screen: the other players' sessions, while a local game is on: { guests: [GameSession] } (see startLocalGame)
     local: null,
     connected: false,
     lap: 1,
@@ -511,29 +512,39 @@ export class GameSession {
         this.set({ error: response?.error || 'Failed to create the game' });
         return;
       }
-      const guest = new GameSession({ guest: true });
-      guest.singlePlayer = true;
-      guest.device = devices[1];
+      // one more session for each of the other players, each on a connection of its own
+      const guests = devices.slice(1, LOCAL_PLAYERS).map((device) => {
+        const guest = new GameSession({ guest: true });
+        guest.singlePlayer = true;
+        guest.device = device;
+        return guest;
+      });
+      const local = { guests };
       this.device = devices[0];
-      this.set({ room: response.room, local: { guest } });
-      guest.connect();
-      const failed = (error) => { this.leaveGame(); this.set({ error }); };
-      const timer = setTimeout(() => failed('Could not connect the second player'), 8000);
-      guest.socket.once('connect', () => {
-        guest.socket.emit('joinGame', { roomCode: response.room.code, name: 'Player 2', localKey: key }, (joined) => {
-          clearTimeout(timer);
-          if (this.state.local?.guest !== guest) return;          // (left in the meantime)
-          if (!joined?.success) { failed(joined?.error || 'Could not add the second player'); return; }
-          guest.set({ room: joined.room });
-          this.set({ screen: 'selection' });
+      this.set({ room: response.room, local });
+      const failed = (error) => { clearTimeout(timer); if (this.state.local === local) { this.leaveGame(); this.set({ error }); } };
+      const timer = setTimeout(() => failed('Could not connect every player'), 8000);
+      let joinedSoFar = 0;
+      guests.forEach((guest, i) => {
+        guest.connect();
+        guest.socket.once('connect', () => {
+          guest.socket.emit('joinGame', { roomCode: response.room.code, name: `Player ${i + 2}`, localKey: key }, (joined) => {
+            if (this.state.local !== local) return;          // (left in the meantime)
+            if (!joined?.success) { failed(joined?.error || `Could not add player ${i + 2}`); return; }
+            guest.set({ room: joined.room });
+            if (++joinedSoFar === guests.length) { clearTimeout(timer); this.set({ screen: 'selection' }); }
+          });
         });
       });
     });
   };
 
-  // Split screen, character select: player 0 or 1 takes a dog.  When the second has, on to the map.
+  /** Split screen: every player's session, player 1's (this one) first */
+  get localSessions() { return this.state.local ? [this, ...this.state.local.guests] : [this]; }
+
+  // Split screen, character select: player `index` (0 is player 1) takes a dog.  When the last has, on to the map.
   pickLocalDog = (index, dogId, picked) => {
-    const guest = this.state.local?.guest, socket = index === 0 ? this.socket : guest?.socket;
+    const sessions = this.localSessions, socket = sessions[index]?.socket;
     this.set({ error: '', hoveredDog: null });
     if (!socket?.connected) { this.set({ error: 'Not connected to server' }); return; }
     socket.emit('selectDog', { dog: dogId }, (response) => {
@@ -542,25 +553,23 @@ export class GameSession {
       socket.emit('setReady', { ready: true }, (ready) => {
         if (!ready?.success) { this.set({ error: ready?.error || 'Failed to ready up' }); return; }
         picked?.();
-        if (index === 1) this.set({ screen: 'mapSelect' });
+        if (index === sessions.length - 1) this.set({ screen: 'mapSelect' });
       });
     });
   };
 
-  // Split screen, back at character select: both dogs go back, to be picked again in turn
+  // Split screen, back at character select: every dog goes back, to be picked again in turn
   freeLocalDogs = () => {
-    this.socket?.emit('changeDog');
-    this.state.local?.guest.socket?.emit('changeDog');
+    for (const session of this.localSessions) session.socket?.emit('changeDog');
   };
 
   // The local game is over (left, or the connection went): the second player's session goes with it
   #endLocal() {
-    const guest = this.state.local?.guest;
+    const guests = this.state.local?.guests;
     this.device = null;
-    if (!guest) return;
+    if (!guests) return;
     this.state = { ...this.state, local: null };
-    guest.socket?.emit('leaveGame');
-    guest.disconnect();
+    for (const guest of guests) { guest.socket?.emit('leaveGame'); guest.disconnect(); }
   }
 
   // ---------------------------------

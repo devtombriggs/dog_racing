@@ -25,6 +25,8 @@ const SPECIAL_WORDS = {
   kombu: 'Seaweed pulls him under and puts him down far up the road',
   baz_naz: 'The twins pull their rope tight across the road, run faster through anything, and trip whoever it catches',
   jazz: 'One great stomp: every other dog can barely move for five seconds',
+  casper: 'Rugby shirt on, ball in paws: six seconds flat out on his back legs flattening any dog in his way, then the ball flies at the leader',
+  jimmy: 'Turns into a dragon, much faster, and fires up to five fireworks at the leader: more the further back he is',
   black_lab: 'Rides her own wave for five seconds: the fastest of the lot, but it steers itself',
 };
 
@@ -33,16 +35,17 @@ const SPECIAL_WORDS = {
 export function DogSelectScreen({ session, state }) {
   const { room, hoveredDog, connected, accessibilityMode, voiceEnabled, voiceStatus, error, local } = state;
 
-  // Split screen: player 1 picks, then player 2 (each time the screen is come back to, both pick again)
+  // Split screen: player 1 picks, then each of the others in turn (each time the screen is come back to, all pick again)
   const [turn, setTurn] = useState(0);
   useEffect(() => { if (local) session.freeLocalDogs(); }, [local, session]);
-  const picker = local && turn === 1 ? room?.players.find(player => player.id !== state.socketId && !player.bot) : null;
+  const players = local ? local.guests.length + 1 : 1, turnSession = local && turn > 0 ? local.guests[turn - 1] : session;
+  const picker = local && turn > 0 ? room?.players.find(player => player.id === turnSession?.socket?.id) : null;
   // (whose screen this is just now: in split screen, the player whose turn it is)
   const socketId = picker?.id ?? state.socketId;
-  const pick = id => (local ? session.pickLocalDog(turn, id, () => setTurn(1)) : session.selectDog(id));
+  const pick = id => (local ? session.pickLocalDog(turn, id, () => setTurn(now => Math.min(players - 1, now + 1))) : session.selectDog(id));
 
   // (split screen: only the controller of the player whose turn it is works this screen)
-  const turnDevice = local ? (turn === 0 ? session.device : local.device) : null;
+  const turnDevice = local ? turnSession?.device ?? null : null;
   const turnPad = !turnDevice ? null : turnDevice.type === 'pad' ? turnDevice.index : -1;
   useEffect(() => { restrictMenuPad(turnPad); return () => restrictMenuPad(null); }, [turnPad]);
 
@@ -64,7 +67,7 @@ export function DogSelectScreen({ session, state }) {
         <Paw /><h1 className="zr-title">{local ? `Player ${turn + 1}: Choose Your Dog` : 'Choose Your Dog'}</h1><Paw />
       </header>
       <p className="zr-screen__sub">
-        {local ? (turn === 0 ? 'Player 1 picks first, then player 2. You race on the left half of the screen.' : 'Player 2: your turn. You race on the right half of the screen.')
+        {local ? `${turn === 0 ? `Player 1 picks first, then ${players === 2 ? 'player 2' : 'the others in turn'}.` : `Player ${turn + 1}: your turn.`} You race ${(players === 2 ? ['on the left half', 'on the right half'] : ['in the top left', 'in the top right', 'in the bottom left', 'in the bottom right'])[turn]} of the screen.`
           : !room || room.players.length < 2
             ? 'Pick your partner. Own the track.'
             : `One of each dog per race · ${room.players.filter(player => player.dog).length} of ${room.players.length} players have picked`}
@@ -84,6 +87,7 @@ export function DogSelectScreen({ session, state }) {
               </div>
             ))}
           </div>
+          {dog.perk && <p className="zr-special zr-special--perk"><strong>▼ Downhill</strong>{dog.perk}</p>}
           {SPECIALS[shown] && <p className="zr-special"><strong>★ {SPECIALS[shown].name}</strong>{SPECIAL_WORDS[shown]}</p>}
           <button className="zr-btn zr-btn--yellow" disabled={!connected || Boolean(taken) || (multiplayer && !local && myDog === shown)} onClick={() => pick(shown)}>
             {taken ? `Taken · ${taken.name}` : myDog === shown ? 'Your pick ✓' : `Choose ${dog.displayName}`}

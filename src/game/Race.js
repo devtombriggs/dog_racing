@@ -124,7 +124,7 @@ export class Race {
       castShadow: this.world.castsShadows,
       wanted: () => !this.#disposed,
       onLoaded: () => {
-        this.specials.register(myId, this.local.specialsEntry);
+        this.specials.register(myId, { ...this.local.specialsEntry, own: true });
         this.#dogLoaded = true;
         this.#notifyLoaded();
       },

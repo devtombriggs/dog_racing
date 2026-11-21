@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { racingLineAt, PICKUP_PATHS } from '../../../shared/pickupSpots.js';
 import { bellyBounce, ghostsThrough, SPECIALS } from '../../../shared/specials.js';
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
-import { BASE_SPEED } from '../../../shared/dogStats.js';
+import { BASE_SPEED, downhillSpeed } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
 import { PAD_KICK } from '../../../shared/items.js';
 import { DRIFT, AUTO_DRIFT, driftPerks, driftCanStart, driftTurn, driftChargeRate, driftTier, driftBoost, driftBoostNow, autoDriftHeld, autoDriftTurn } from '../../../shared/drift.js';
@@ -565,6 +565,7 @@ export class LocalDog extends DogAvatar {
       goldenBones.speedMultiplier() *
       (special?.speed ?? 1) *
       (performance.now() < this.quakeUntil ? this.quakeSpeed : 1) *      // (Jazz's Earthquake)
+      downhillSpeed(stats, slope) *      // (Jimmy's wheels, where the road drops)
       (performance.now() < this.stunUntil ? 0.15 : 1);
     // (the last of a dog's speed comes slowly, and an agile dog is back up to speed sooner)
     const effectiveAcceleration = this.acceleration *
@@ -1056,6 +1057,7 @@ export class LocalDog extends DogAvatar {
     } else if (now < this.driftBoostUntil && !goldenBones.isBoosting()) {
       hud.setSurface(['', 'DRIFT BOOST!', 'SUPER DRIFT BOOST!', 'ULTRA DRIFT BOOST!'][this.driftBoostTier], DRIFT_HUD_COLOURS[this.driftBoostTier]);
     }
+    if (!this.drift && !this.offTrack && downhillSpeed(this.stats, this.slope) > 1.08) hud.setSurface('DOWNHILL — WHEELS AWAY!', '#62ffe6');      // (Jimmy)
     if (!special && now - this.wallAt < 700) hud.setSurface('HIT THE WALL!', '#ff8a6a');
     if (special) hud.setSurface(`${special.name.toUpperCase()}!`, '#ffe45c');
     else if (performance.now() < this.quakeUntil) hud.setSurface('EARTHQUAKE — HOLD ON!', '#ff8a6a');

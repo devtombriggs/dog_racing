@@ -2,13 +2,16 @@
 // the dog in first place.  The server flies it (shared/firework.js); this only draws it.
 //
 //   const fireworks = createFireworks({ scene });
-//   fireworks.launch({ id, position, yaw });  fireworks.move([{ id, position, yaw }]);
+//   fireworks.launch({ id, position, yaw, look });  fireworks.move([{ id, position, yaw }]);
+//       look: 'rugby' for the ball Casper passes at the end of his Try Time: it flies the same way, drawn as a
+//       spinning rugby ball with no sparks, and lands in a burst of turf
 //   fireworks.explode(id, position);          // reached the leader: the big burst
 //   fireworks.pass(position);                 // knocked a dog over on its way: a shower of sparks
 //   fireworks.fizzle(id, position);           // burned out
 //   each frame: fireworks.update(delta);      fireworks.dispose();
 import * as THREE from 'three';
 import { FIREWORK } from '../../shared/items.js';
+import { buildRugbyBall } from '../abilities/rugby.js';
 
 const SPARKS = 1800;             // most sparks alive at once, trails and bursts together
 const GRAVITY = 7;               // sparks fall, m/s²
@@ -101,12 +104,22 @@ export function createFireworks({ scene }) {
   function remove(id) {
     const rocket = rockets.get(id);
     if (rocket?.object) root.remove(rocket.object);
+    rocket?.object?.userData.dispose?.();
     rockets.delete(id);
   }
 
   const tail = new THREE.Vector3(), back = new THREE.Vector3(), aim = new THREE.Vector3();
   return {
-    launch({ id, position, yaw }) {
+    launch({ id, position, yaw, look = null }) {
+      if (look === 'rugby') {
+        const object = buildRugbyBall();
+        object.scale.setScalar(1.25);
+        object.position.fromArray(position);
+        object.rotation.y = yaw;
+        root.add(object);
+        rockets.set(id, { from: [...position], to: [...position], at: performance.now(), object, fuse: null, look });
+        return;
+      }
       const object = template.clone(true);
       object.scale.setScalar(1.5);
       object.position.fromArray(position);
@@ -126,6 +139,12 @@ export function createFireworks({ scene }) {
       }
     },
     explode(id, position) {
+      if (rockets.get(id)?.look === 'rugby') {              // the ball lands: turf and dust, no fireworks
+        remove(id);
+        shower(position, 110, 9, [0xffffff, 0x8fd66a, 0xcdb58a], 0.8);
+        flash(position, 0xffffff, 9, 0.3);
+        return;
+      }
       remove(id);
       const palette = BURSTS[Math.floor(Math.random() * BURSTS.length)];
       shower(position, 220, 15, palette, 1.25);
@@ -137,8 +156,9 @@ export function createFireworks({ scene }) {
       flash(position, 0xffc46b, 8, 0.25);
     },
     fizzle(id, position) {
+      const dud = rockets.get(id)?.look !== 'rugby';         // (a ball with nobody to go for just drops out of sight)
       remove(id);
-      if (position) shower(position, 40, 3.5, [0xff8a3c, 0x8a8a8a], 0.7);
+      if (position && dud) shower(position, 40, 3.5, [0xff8a3c, 0x8a8a8a], 0.7);
     },
 
     update(delta) {
@@ -149,7 +169,8 @@ export function createFireworks({ scene }) {
         object.position.set(from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k, from[2] + (to[2] - from[2]) * k);
         aim.fromArray(to);
         if (aim.distanceToSquared(object.position) > 0.01) object.lookAt(aim);   // nose along its flight, up and down slopes too
-        object.rotateZ(t / 1000 * 9 % (Math.PI * 2));                      // spinning as it goes
+        object.rotateZ(t / 1000 * (rocket.look ? 22 : 9) % (Math.PI * 2));                      // spinning as it goes (a ball spirals faster)
+        if (!rocket.fuse) continue;                                        // (a rugby ball has no fuse and leaves no sparks)
         rocket.fuse.scale.setScalar(0.8 + Math.random() * 0.5);
         // sparks pouring out of the tail
         back.set(0, 0, -1).applyQuaternion(object.quaternion);
@@ -187,7 +208,7 @@ export function createFireworks({ scene }) {
     dispose() {
       scene.remove(root);
       for (const f of flashes) f.sprite.material.dispose();
-      for (const rocket of rockets.values()) rocket.fuse.material.dispose();
+      for (const rocket of rockets.values()) { rocket.fuse?.material.dispose(); rocket.object.userData.dispose?.(); }
       template.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
       geometry.dispose(); material.dispose(); glow.dispose();
     },

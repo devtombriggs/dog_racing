@@ -48,7 +48,7 @@ const BONE = {
   seconds: [BONE_BOOST.duration, BONE_BOOST.duration + 0.5, BONE_BOOST.duration + 1],
 };
 const PERK = { speed: 1.08, control: 1.4, charge: 1.6, boost: BONE };
-export const DRIFT_PERKS = { enzo: PERK, ralph: PERK, baz_naz: PERK };
+export const DRIFT_PERKS = { enzo: PERK, ralph: PERK, baz_naz: PERK, jimmy: PERK };
 const NO_PERKS = { speed: 1, control: 1, charge: 1, boost: null };
 export const driftPerks = dogId => DRIFT_PERKS[dogId] ?? NO_PERKS;
 

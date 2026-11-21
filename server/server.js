@@ -6,14 +6,14 @@ import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampl
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs } from '../shared/specials.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
 import { GRAND_PRIX, pointsForPlace } from '../shared/grandPrix.js';
 import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 import { createBot, AWAY_DRIVER } from './bots.js';
-import { RACE_DOGS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
+import { LOCAL_PLAYERS, RACE_DOGS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { readFileSync } from 'node:fs';
 
 const PORT = Number(env.PORT || 3001);
@@ -29,8 +29,9 @@ const io = new Server(PORT, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo', 'baz_naz', 'jazz'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo', 'baz_naz', 'jazz', 'casper', 'jimmy'];
 const MAX_PLAYERS = RACE_DOGS;
+const LOCAL_SEATS = LOCAL_PLAYERS;       // the most players at one split screen
 const LOBBY_BROWSER = 'lobby-browser';
 // For trying the specials out: ALWAYS_SPECIAL=1 makes every Treat Box give the special, even to the leader,
 // and hands every dog its special at GO and again three seconds after each use.
@@ -433,6 +434,7 @@ function startSpecial(room, player) {
   });
   const started = { playerId: player.id, kind: spec.kind, durationMs };
   if (spec.kind === 'flush') started.targets = sendPheasants(room, player);
+  if (spec.fireworks) started.fireworks = dragonFireworks(spec, place, standings.length), dragonFire(room, player, spec, started.fireworks);
   io.to(room.code).emit('specialStarted', started);
   botDrivers.get(player)?.specialStarted();
 }
@@ -442,7 +444,26 @@ function endSpecial(room, player, reason) {
   if (!active) return;
   clearTimeout(active.timer);
   activeSpecials.delete(player);
+  if (reason !== 'done' && active.spec.fireworks) player.dragonBroken = true;      // (a fall ends the dragon, and no more fireworks come)
   io.to(room.code).emit('specialEnded', { playerId: player.id, reason });
+  // Casper's Try Time, run to its end: the ball goes up the road after the leader
+  if (reason === 'done' && active.spec.pass && room.status === 'racing' && !player.finished) launchFirework(room, player, { look: 'rugby' });
+}
+
+// Jimmy's Dragon Dance: a firework after the leader now, and another every `everyMs` until he has sent `count`.
+// Each is the Treat Box firework in every way, but if Jimmy himself is leading it goes for the dog behind him.
+// They keep coming after the dragon has gone (the last of five goes a second later), unless he falls, finishes or leaves.
+function dragonFire(room, player, spec, count) {
+  for (let i = 0; i < count; i++) {
+    const timer = setTimeout(() => {
+      room.specialTimers.delete(timer);
+      if (rooms.get(room.code) !== room || room.status !== 'racing' || room.players.get(player.id) !== player || player.finished) return;
+      if (i > 0 && player.dragonBroken) return;
+      launchFirework(room, player, { orBehind: true });
+    }, i * spec.fireworks.everyMs);
+    room.specialTimers.add(timer);
+  }
+  player.dragonBroken = false;
 }
 
 // Jazz's Earthquake (shared/specials.js QUAKE): every other dog still racing and on the ground is slowed, wherever it is,
@@ -692,23 +713,29 @@ function stopFrisbees(room) {
 // if the dog that lit it takes the lead there is nobody to chase and it burns out.  The server flies
 // it, moving it every FIREWORK.tickMs and telling everyone where it is.
 // ---------------------------------
-function fireworkTarget(room, ownerId) {
-  const leader = raceStandings(room).find(entry => !entry.finished);
-  return leader && leader.playerId !== ownerId ? leader.playerId : null;
+// orBehind (Jimmy's): if the dog that lit it is the one in front, it goes for the next dog behind instead
+function fireworkTarget(room, ownerId, orBehind = false) {
+  const racing = raceStandings(room).filter(entry => !entry.finished), leader = racing[0];
+  if (leader && leader.playerId !== ownerId) return leader.playerId;
+  return orBehind && leader && racing[1] ? racing[1].playerId : null;
 }
+// (a firework for a dog behind the one that lit it does not go round by the road: it turns and goes straight there)
+const fireworkTurnsBack = (room, f) => Boolean(f.orBehind && raceStandings(room).find(entry => !entry.finished)?.playerId === f.owner);
 
-function launchFirework(room, player) {
+// look: what it is drawn as, where that is not a rocket ('rugby': the ball Casper passes at the end of his Try Time)
+function launchFirework(room, player, { orBehind = false, look = null } = {}) {
   const route = fireworkRoute(room.mapId);
   if (!route) return;
   const forward = forwardOf(player.rotation);
   const [x, y, z] = player.position;
   const firework = {
-    id: `firework-${room.nextItemId++}`, owner: player.id, target: fireworkTarget(room, player.id), firedAt: Date.now(),
+    id: `firework-${room.nextItemId++}`, owner: player.id, target: fireworkTarget(room, player.id, orBehind), firedAt: Date.now(), orBehind,
     s: route.sAt(player.position) + FIREWORK.launchAhead, homing: false, passed: new Set(),
     position: [x + forward[0] * FIREWORK.launchAhead, y + FIREWORK.height, z + forward[2] * FIREWORK.launchAhead], yaw: player.rotation
   };
+  firework.homing = fireworkTurnsBack(room, firework);
   room.fireworks.set(firework.id, firework);
-  io.to(room.code).emit('fireworkLaunched', { id: firework.id, owner: firework.owner, target: firework.target, position: firework.position, yaw: firework.yaw });
+  io.to(room.code).emit('fireworkLaunched', { id: firework.id, owner: firework.owner, target: firework.target, position: firework.position, yaw: firework.yaw, ...(look ? { look } : {}) });
   room.fireworkTimer ??= setInterval(() => tickFireworks(room), FIREWORK.tickMs);
 }
 
@@ -718,7 +745,7 @@ function tickFireworks(room) {
   const now = Date.now(), dt = FIREWORK.tickMs / 1000, moved = [];
   const canBeHit = dog => !dog.finished && now >= dog.hitImmuneUntil && !burrowRides.has(dog) && !activeSpecials.has(dog);
   for (const f of room.fireworks.values()) {
-    const targetId = fireworkTarget(room, f.owner);
+    const targetId = fireworkTarget(room, f.owner, f.orBehind);
     const target = targetId ? room.players.get(targetId) : null;
     const age = (now - f.firedAt) / 1000;
     if (age > FIREWORK.duration || (!target && age > FIREWORK.noTargetSeconds)) {
@@ -728,7 +755,7 @@ function tickFireworks(room) {
     }
     if (targetId !== f.target) {
       f.target = targetId;
-      f.homing = false;                                          // back to the road to find the new leader
+      f.homing = fireworkTurnsBack(room, f);                     // back to the road to find the new leader
       io.to(room.code).emit('fireworkTarget', { id: f.id, target: f.target });
     }
     const from = f.position;
@@ -1820,13 +1847,13 @@ io.on('connection', (socket) => {
       code: roomCode,
       hostId: playerId,
       status: 'lobby',
-      // (split screen is a single-player room with one more seat, for the other half of the same screen:
-      // only the page that made the room has the key to it)
+      // (split screen is a single-player room with up to three more seats, for the other players at the same
+      // screen: only the page that made the room has the key to them)
       singlePlayer: data?.singlePlayer === true || localKey !== null,
       local: localKey !== null,
       localKey,
       // computer-controlled dogs: enough to fill the grid
-      bots: { count: localKey !== null ? Math.min(SOLO_BOTS, MAX_PLAYERS - 2) : data?.singlePlayer === true ? SOLO_BOTS : ROOM_BOTS, level: 'medium' },
+      bots: { count: data?.singlePlayer === true || localKey !== null ? SOLO_BOTS : ROOM_BOTS, level: 'medium' },       // (only as many as there are places left join: addBots)
       botTimer: null,
       grandPrix: null,         // the Grand Prix being run: { id, round, points }
       mapId,
@@ -1879,7 +1906,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    const secondSeat = room.local && room.players.size < 2 && data?.localKey === room.localKey;      // the other half of a split screen
+    const secondSeat = room.local && room.players.size < LOCAL_SEATS && data?.localKey === room.localKey;      // another player on the same split screen
     if (room.singlePlayer && room.hostId !== playerId && !secondSeat) {
       return callback({ success: false, error: 'This is a single-player game' });
     }

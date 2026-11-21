@@ -175,12 +175,23 @@ html, body, #root {
 }
 
 /* ---------------------------------
-   SPLIT SCREEN: two race screens side by side
+   SPLIT SCREEN: two race screens side by side, or three or four in quarters
    --------------------------------- */
-.split-race { display: flex; width: 100vw; height: 100vh; background: #0b1510; }
+.split-race { display: flex; flex-wrap: wrap; width: 100vw; height: 100vh; background: #0b1510; }
 .split-race__waiting { width: 50vw; display: grid; place-items: center; color: #b4c9b5; font: 600 18px Arial, sans-serif; }
-.race-half { contain: layout; }                                  /* (anything fixed inside stays in its half) */
-.race-half--right { border-left: 3px solid #0b1510; box-sizing: border-box; }
+.split-race--quarters .split-race__waiting { height: 50vh; }
+.race-half { contain: layout; }                                  /* (anything fixed inside stays in its share of the screen) */
+.race-half--1, .race-half--3 { border-left: 3px solid #0b1510; box-sizing: border-box; }
+.race-quarter.race-half--2, .race-quarter.race-half--3 { border-top: 3px solid #0b1510; box-sizing: border-box; }
+/* three players: the fourth quarter has the race order */
+.split-race__spare {
+  width: 50vw; height: 50vh; box-sizing: border-box; border-left: 3px solid #0b1510; border-top: 3px solid #0b1510;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: #16261b; color: #dfeee0; font-family: Arial, sans-serif;
+}
+.split-race__spare h2 { margin: 0 0 6px; font-size: 18px; letter-spacing: 1.5px; text-transform: uppercase; color: #ffd257; }
+.split-race__spare ol { margin: 0; padding-left: 26px; font-size: 18px; line-height: 1.7; }
+.split-race__spare .split-race__player { color: #ffd257; font-weight: 700; }
 .race-half__player {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 11; pointer-events: none;
   padding: 4px 12px; border-radius: 999px; background: rgba(10, 25, 15, 0.82); color: #ffd257;
@@ -192,6 +203,12 @@ html, body, #root {
 .race-half .race-speed { transform: scale(0.85); transform-origin: bottom right; }
 .race-half .race-standings { transform: scale(0.78); transform-origin: top left; }
 .race-half canvas[aria-label="Course map"] { transform: scale(0.7); transform-origin: bottom left; }
+/* a quarter is smaller again */
+.race-quarter .race-hud { transform: scale(0.68); }
+.race-quarter .race-speed { transform: scale(0.7); }
+.race-quarter .race-standings { transform: scale(0.58); }
+.race-quarter canvas[aria-label="Course map"] { transform: scale(0.5); }
+.race-quarter .race-half__player { top: 6px; font-size: 11px; padding: 3px 10px; }
 
 /* ---------------------------------
    THE MENU OVER THE RACE (Esc)

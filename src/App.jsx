@@ -1,3 +1,4 @@
+import { DOGS } from './config/dogs.js';
 import { useEffect, useState } from 'react';
 import { GameSession } from './session/GameSession.js';
 import { useSession } from './session/useSession.js';
@@ -20,17 +21,34 @@ const SCREENS = {
   race: RaceScreen
 };
 
-// Split screen: player 1's race on the left (their session is the game's own), player 2's on the right
-// (the session the first made for them: see GameSession.startLocalGame)
+// Split screen, one of the other players' share of it (the session the first player's made for them: see
+// GameSession.startLocalGame)
+function GuestRace({ guest, index, count }) {
+  const state = useSession(guest);
+  return state.screen === 'race' && state.room
+    ? <RaceScreen key={`race-${state.raceNumber}`} session={guest} state={state} split={{ index, count }} />
+    : <div className="split-race__waiting">Player {index + 1}…</div>;
+}
+
+// Split screen: two players side by side; three or four, a quarter of the screen each (player 1 top left, then
+// top right, bottom left, bottom right).  With three, the spare quarter has the race order in it.
 function SplitRace({ session, state }) {
-  const guest = state.local.guest;
-  const guestState = useSession(guest);
+  const guests = state.local.guests, count = guests.length + 1;
+  const here = new Set([session, ...guests].map(each => each.socket?.id));       // (the players at this screen)
   return (
-    <div className="split-race">
-      <RaceScreen key={`one-${state.raceNumber}`} session={session} state={state} split="left" />
-      {guestState.screen === 'race' && guestState.room
-        ? <RaceScreen key={`two-${guestState.raceNumber}`} session={guest} state={guestState} split="right" />
-        : <div className="split-race__waiting">Player 2…</div>}
+    <div className={`split-race split-race--${count === 2 ? 'halves' : 'quarters'}`}>
+      <RaceScreen key={`one-${state.raceNumber}`} session={session} state={state} split={{ index: 0, count }} />
+      {guests.map((guest, i) => <GuestRace key={i} guest={guest} index={i + 1} count={count} />)}
+      {count === 3 && (
+        <div className="split-race__spare">
+          <h2>Race order</h2>
+          <ol>
+            {state.standings.map(entry => (
+              <li key={entry.playerId} className={here.has(entry.playerId) ? 'split-race__player' : ''}>{entry.name} — {DOGS[entry.dog]?.displayName ?? 'Dog'}{entry.finished ? ' 🏁' : ''}</li>
+            ))}
+          </ol>
+        </div>
+      )}
     </div>
   );
 }

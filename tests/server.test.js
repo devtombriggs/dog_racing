@@ -1952,6 +1952,135 @@ test('Baz and Naz\'s Trip Wire: the rope trips a dog right across the road from 
   for (const p of [pippa, twins]) p.call('leaveGame');
 });
 
+test('Casper\'s Try Time: six seconds knocking over dogs he runs into, then the ball flies at the leader, knocking over a dog it passes', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const { SPECIALS } = await import('../shared/specials.js');
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const casper = client(), berri = client(), sam = client();
+  const room = casper.call('hostGame', { mapId: 'wendover', name: 'Casper' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  assert.equal(casper.call('selectDog', { dog: 'casper' }).success, true); berri.call('selectDog', { dog: 'black_lab' }); sam.call('selectDog', { dog: 'pablo' });
+  casper.call('startRace');
+  for (const p of [casper, berri, sam]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
+  const road = (s, lateral = 0) => { const p = PICKUP_PATHS.wendover.pointAt(s, lateral); return [p.x, p.y, p.z]; };
+  // Berri leads (two checkpoints), Sam is 2nd (one), Casper last
+  move(berri, cp(0)); move(berri, cp(1)); move(sam, cp(0));
+  context.mock.method(Math, 'random', () => 0);
+  move(casper, boxes[0].groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: casper.id, item: 'special' });
+  move(casper, road(200)); move(sam, road(300)); move(berri, road(420, 4));
+  casper.call('useItem');
+  assert.deepEqual(events('specialStarted').at(-1), { playerId: casper.id, kind: 'rugby', durationMs: SPECIALS.casper.durationMs });
+  assert.equal(events('playerHit').length, 0, 'nobody near him yet');
+  assert.equal(events('fireworkLaunched').length, 0, 'he has the ball');
+  // he runs into Sam: over Sam goes, and Casper carries on
+  const facing = PICKUP_PATHS.wendover.pointAt(299).rotationY;
+  move(casper, road(299), facing);
+  assert.deepEqual(events('playerHit').map(e => [e.playerId, e.by, e.item]), [[sam.id, casper.id, 'special']]);
+  assert.equal(events('specialHit').at(-1).playerId, casper.id);
+  // the six seconds are up: the special ends, and the ball is away after the leader
+  move(casper, road(330), facing);
+  context.mock.timers.tick(SPECIALS.casper.durationMs);
+  assert.deepEqual(events('specialEnded').at(-1), { playerId: casper.id, reason: 'done' });
+  const ball = events('fireworkLaunched').at(-1);
+  assert.deepEqual([ball.owner, ball.target, ball.look], [casper.id, berri.id, 'rugby']);
+  // Sam is back on his feet in its way; it takes him and then Berri
+  move(sam, road(380));
+  for (let i = 0; i < 100 && !events('fireworkExploded').length; i++) context.mock.timers.tick(50);
+  assert.deepEqual(events('fireworkPassed').map(e => e.playerId), [sam.id], 'smashing a dog on the way');
+  assert.deepEqual(events('fireworkExploded').at(-1).playerIds, [berri.id], 'and it reaches the dog in first place');
+  for (const p of [casper, berri, sam]) p.call('leaveGame');
+
+  // knocked out of nothing: but a fall ends the charge with no pass; and leading, the ball has nobody to go for
+  const c2 = client(), other = client();
+  const room2 = c2.call('hostGame', { mapId: 'wendover', name: 'Casper' }).room;
+  other.call('joinGame', { roomCode: room2.code, name: 'Other' });
+  c2.call('selectDog', { dog: 'casper' }); other.call('selectDog', { dog: 'gsp' });
+  c2.call('startRace');
+  for (const p of [c2, other]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events2 = name => server.events.filter(e => e.room === room2.code && e.event === name).map(e => e.data);
+  move(other, cp(0));
+  move(c2, boxes[0].groundPosition);
+  move(c2, cp(0)); move(c2, cp(1));
+  move(c2, road(400)); move(other, road(300));
+  c2.call('useItem');
+  context.mock.timers.tick(SPECIALS.casper.durationMs);
+  assert.equal(events2('fireworkLaunched').at(-1).target, null, 'in front himself: nobody to pass at');
+  context.mock.timers.tick(3000);
+  assert.equal(events2('fireworkGone').length, 1, 'it is gone a moment later');
+  assert.equal(events2('playerHit').length, 0);
+  for (const p of [c2, other]) p.call('leaveGame');
+});
+
+test('Jimmy\'s Dragon Dance: from last place seven seconds and five fireworks at the leader two seconds apart; leading, they go for the dog behind', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const jimmy = client(), berri = client(), sam = client();
+  const room = jimmy.call('hostGame', { mapId: 'wendover', name: 'Jimmy' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  assert.equal(jimmy.call('selectDog', { dog: 'jimmy' }).success, true); berri.call('selectDog', { dog: 'black_lab' }); sam.call('selectDog', { dog: 'pablo' });
+  jimmy.call('startRace');
+  for (const p of [jimmy, berri, sam]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, 0, map.checkpoints[i].z];
+  const road = (s, lateral = 0) => { const p = PICKUP_PATHS.wendover.pointAt(s, lateral); return [p.x, p.y, p.z]; };
+  // Berri leads, Sam is 2nd, Jimmy last
+  move(berri, cp(0)); move(berri, cp(1)); move(sam, cp(0));
+  context.mock.method(Math, 'random', () => 0);
+  move(jimmy, boxes[0].groundPosition);
+  assert.deepEqual(events('itemChanged').at(-1), { playerId: jimmy.id, item: 'special' });
+  move(jimmy, road(150)); move(sam, road(300, 5)); move(berri, road(420, 4));
+  jimmy.call('useItem');
+  assert.deepEqual(events('specialStarted').at(-1), { playerId: jimmy.id, kind: 'dragon', durationMs: 7000, fireworks: 5 });
+  context.mock.timers.tick(1);
+  const lit = () => events('fireworkLaunched').filter(e => e.owner === jimmy.id);
+  assert.equal(lit().length, 1, 'the first at once');
+  assert.equal(lit()[0].target, berri.id, 'at the leader');
+  for (let n = 2; n <= 5; n++) {
+    context.mock.timers.tick(1998);
+    assert.equal(lit().length, n - 1, `not before ${2 * (n - 1)} s`);
+    context.mock.timers.tick(2);
+    assert.equal(lit().length, n, `number ${n} at ${2 * (n - 1)} s`);
+  }
+  assert.ok(lit().every(e => e.target === berri.id));
+  assert.equal(events('specialEnded').filter(e => e.playerId === jimmy.id).at(-1)?.reason, 'done', 'the dragon went at seven seconds; the fifth firework a second later');
+  context.mock.timers.tick(20000);
+  assert.equal(lit().length, 5, 'and no more');
+  assert.ok(events('playerHit').some(e => e.playerId === berri.id && e.item === 'firework' && e.by === jimmy.id), 'they are fireworks like any other');
+  for (const p of [jimmy, berri, sam]) p.call('leaveGame');
+
+  // Two dogs: Jimmy takes it from behind (last of two), goes past and uses it in front: 4 fireworks, 6 seconds, at the dog behind
+  const j2 = client(), other = client();
+  const room2 = j2.call('hostGame', { mapId: 'wendover', name: 'Jimmy' }).room;
+  other.call('joinGame', { roomCode: room2.code, name: 'Other' });
+  j2.call('selectDog', { dog: 'jimmy' }); other.call('selectDog', { dog: 'gsp' });
+  j2.call('startRace');
+  for (const p of [j2, other]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events2 = name => server.events.filter(e => e.room === room2.code && e.event === name).map(e => e.data);
+  move(other, cp(0));
+  move(j2, boxes[0].groundPosition);
+  assert.deepEqual(events2('itemChanged').at(-1), { playerId: j2.id, item: 'special' });
+  move(j2, cp(0)); move(j2, cp(1));
+  move(j2, road(400)); move(other, road(380));
+  j2.call('useItem');
+  assert.deepEqual(events2('specialStarted').at(-1), { playerId: j2.id, kind: 'dragon', durationMs: 6000, fireworks: 4 });
+  context.mock.timers.tick(1);
+  assert.equal(events2('fireworkLaunched').at(-1).target, other.id, 'the dog behind him');
+  for (let i = 0; i < 40 && !events2('fireworkExploded').length; i++) context.mock.timers.tick(50);
+  assert.deepEqual(events2('fireworkExploded').at(-1)?.playerIds, [other.id], 'it turns round and finds them');
+  for (const p of [j2, other]) p.call('leaveGame');
+});
+
 test('Jazz\'s Earthquake: every other dog still racing is slowed for five seconds wherever it is, its own special or not, but not Ralph flying, and not Jazz', async context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const { QUAKE, SPECIALS } = await import('../shared/specials.js');
@@ -2025,7 +2154,7 @@ test('Ralph on his rocket paws is still fired by the cannon and thrown by the ca
   }
 });
 
-test('split screen: a single-player room with a second seat that only the page which made it can take; computer dogs fill the rest', context => {
+test('split screen: a single-player room with up to three more seats that only the page which made it can take; computer dogs fill the rest', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const one = client(), two = client(), stranger = client(), key = 'the-key-only-this-page-has';
   const room = one.call('hostGame', { name: 'Player 1', local: true, localKey: key }).room;
@@ -2034,7 +2163,7 @@ test('split screen: a single-player room with a second seat that only the page w
   assert.equal(stranger.call('joinGame', { roomCode: room.code }).success, false, 'not without the key');
   assert.equal(stranger.call('joinGame', { roomCode: room.code, localKey: 'another-key-altogether' }).success, false);
   assert.equal(two.call('joinGame', { roomCode: room.code, name: 'Player 2', localKey: key }).success, true);
-  assert.equal(stranger.call('joinGame', { roomCode: room.code, localKey: key }).success, false, 'two seats, no more');
+  // (two players: the same as ever.  Three and four are further down)
   one.call('selectDog', { dog: 'kombu' }); one.call('setReady', { ready: true });
   assert.equal(two.call('selectDog', { dog: 'kombu' }).success, false, 'one of each dog');
   two.call('selectDog', { dog: 'ralph' }); two.call('setReady', { ready: true });
@@ -2044,10 +2173,31 @@ test('split screen: a single-player room with a second seat that only the page w
   assert.equal(one.call('startRace').success, true);
   const start = latest(room.code, 'raceStarted');
   assert.deepEqual(start.players.map(p => Boolean(p.bot)), [false, false, true, true, true, true], 'two players and four computer dogs');
+  for (const p of [one, two]) p.call('leaveGame');
+  // four at one screen: four seats and no more, and two computer dogs to make six
+  const four = [client(), client(), client(), client()], fifth = client();
+  const big = four[0].call('hostGame', { name: 'Player 1', local: true, localKey: key }).room;
+  four.slice(1).forEach((socket, i) => assert.equal(socket.call('joinGame', { roomCode: big.code, name: `Player ${i + 2}`, localKey: key }).success, true, `player ${i + 2}`));
+  assert.equal(fifth.call('joinGame', { roomCode: big.code, localKey: key }).success, false, 'four seats, no more');
+  ['gsp', 'ralph', 'enzo', 'jazz'].forEach((dog, i) => { assert.equal(four[i].call('selectDog', { dog }).success, true); four[i].call('setReady', { ready: true }); });
+  four[0].call('setBots', { count: 5 });                   // (more than there is room for)
+  four[0].call('selectMap', { mapId: 'speed_bowl' });
+  assert.equal(four[0].call('startRace').success, true);
+  assert.deepEqual(latest(big.code, 'raceStarted').players.map(p => Boolean(p.bot)), [false, false, false, false, true, true], 'four players and two computer dogs');
+  for (const p of four) p.call('leaveGame');
+  // three: three computer dogs
+  const three = [client(), client(), client()];
+  const mid = three[0].call('hostGame', { name: 'Player 1', local: true, localKey: key }).room;
+  three.slice(1).forEach(socket => socket.call('joinGame', { roomCode: mid.code, localKey: key }));
+  ['gsp', 'ralph', 'enzo'].forEach((dog, i) => { three[i].call('selectDog', { dog }); three[i].call('setReady', { ready: true }); });
+  three[0].call('setBots', { count: 5 });
+  three[0].call('selectMap', { mapId: 'speed_bowl' });
+  assert.equal(three[0].call('startRace').success, true);
+  assert.deepEqual(latest(mid.code, 'raceStarted').players.map(p => Boolean(p.bot)), [false, false, false, true, true, true]);
+  for (const p of three) p.call('leaveGame');
   // an ordinary single-player room still has one seat
   const solo = client().call('hostGame', { singlePlayer: true }).room;
   assert.equal(two.call('joinGame', { roomCode: solo.code, localKey: key }).success, false);
-  for (const p of [one, two]) p.call('leaveGame');
 });
 
 test('Rocky\'s Sheep Stampede: five sheep up the road, each gone on the first dog it reaches or after ten seconds; Rocky is untouched', context => {

@@ -11,6 +11,12 @@
 //   Baz & Naz — Trip Wire:   the twins run out to the two edges of the road with their rope tight between them, faster, straight
 //                            through whatever is standing in the way; any dog the rope reaches is tripped unless it jumps it
 //   Jazz   — Earthquake:     one great stomp shakes the whole map: every other dog, however far off, can barely move for five seconds
+//   Casper — Try Time:       on with his rugby shirt and up on his back legs, the ball in his front paws: six seconds flat out,
+//                            knocking over any dog in his way; then he dives back on to all fours and the ball flies up the
+//                            road at the dog in first place, knocking over any dog it passes
+//   Jimmy  — Dragon Dance:   turns into a dragon, much faster, and sends fireworks up the road after the leader, two seconds
+//                            apart: five of them and seven seconds from last place, one fewer and a second less for each place
+//                            nearer the front
 //   Poppy  — Surf's Up:      belly-flops onto her own wave: the fastest of the lot, but it steers itself for five
 //                            seconds, so it only hits who happens to be in the way
 //
@@ -43,6 +49,15 @@ export const SPECIALS = {
   baz_naz: { kind: 'rope', name: 'Trip Wire', durationMs: 6000, speed: 1.3, ghost: true, rope: { reach: 1.4, clear: 0.9, edge: 0.9, span: 14 } },
   // Jazz: over in a moment for her (the stomp); QUAKE below has what it does to everyone else
   jazz: { kind: 'quake', name: 'Earthquake', durationMs: 900 },
+  // Casper charges for `durationMs`, knocking over any dog he runs into (`hitRadius` round him, `reach` in front); when
+  // the time is up (`pass`) the ball goes up the road after the leader: a Treat Box firework in every way but its looks
+  // (shared/firework.js), so it knocks over any dog it passes on the way.  If Casper is leading, it has nobody to go for
+  casper: { kind: 'rugby', name: 'Try Time', durationMs: 6000, speed: 1.5, hitRadius: 2.0, reach: 1.5, pass: true },
+  // Jimmy: a dragon for `durationMs` from last place (far enough at this speed to cover what Poppy's wave covers), and
+  // `lessPerPlaceMs` less for every place nearer the front; `fireworks`: how many he sends after the leader from last
+  // place, how far apart, and how many fewer for each place nearer the front (dragonFireworks below).  They are the
+  // Treat Box firework (shared/firework.js, FIREWORK in shared/items.js) in every way but who lights them
+  jimmy: { kind: 'dragon', name: 'Dragon Dance', durationMs: 7000, lessPerPlaceMs: 1000, speed: 1.6, fireworks: { count: 5, everyMs: 2000, lessPerPlace: 1 } },
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true },
 };
 
@@ -136,6 +151,11 @@ export function specialChance(place, racers) {
  */
 export function specialDurationMs(spec, place, racers) {
   return spec.lessPerPlaceMs ? Math.max(3000, spec.durationMs - spec.lessPerPlaceMs * Math.max(0, racers - place)) : spec.durationMs;
+}
+
+/** How many fireworks Jimmy's Dragon Dance sends, used from this place (1 = leading) in a race of this many dogs: never fewer than one */
+export function dragonFireworks(spec, place, racers) {
+  return spec?.fireworks ? Math.max(1, spec.fireworks.count - spec.fireworks.lessPerPlace * Math.max(0, racers - place)) : 0;
 }
 
 export function specialFor(dog) {

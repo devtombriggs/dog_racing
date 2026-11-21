@@ -14,6 +14,11 @@ export class RaceScene {
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(this.renderer.domElement);
 
+    // Keep the view the size of its box: going fullscreen, resizing the window, or a share of a split screen
+    // changing size (otherwise the canvas keeps the size the race started at, with a strip of background below it)
+    this.resizeObserver = new ResizeObserver(() => this.fit());
+    this.resizeObserver.observe(container);
+
     this.ambientLight = new THREE.AmbientLight(0xffffff, 1);
     this.scene.add(this.ambientLight);
 
@@ -47,11 +52,22 @@ export class RaceScene {
     this.camera.updateProjectionMatrix();
   }
 
+  fit() {
+    const width = this.container.clientWidth, height = this.container.clientHeight;
+    if (!width || !height) return;
+    const size = this.renderer.getSize(new THREE.Vector2());
+    if (size.x === width && size.y === height) return;
+    this.renderer.setSize(width, height);
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+  }
+
   render() {
     this.renderer.render(this.scene, this.camera);
   }
 
   dispose() {
+    this.resizeObserver.disconnect();
     const canvas = this.renderer.domElement;
     if (canvas.parentNode === this.container) this.container.removeChild(canvas);
     this.renderer.dispose();

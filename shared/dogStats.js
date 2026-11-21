@@ -4,6 +4,7 @@
 
 // Each dog is rated 1 to 10.  A 7 is the handling the game was tuned around.
 // drift: how good a drifter (shared/drift.js): roughly the reverse of speed, so the slow dogs make their time in the corners
+// downhill: the Speed a dog runs on where the road drops (Jimmy on his wheels: downhillSpeed below); most dogs have none
 export const DOG_STATS = {
   gsp: { speed: 8, acceleration: 7, agility: 7, swimming: 6, drift: 6 },           // Pippa: the all-rounder (second fastest, nothing below 6)
   second_dog: { speed: 9, acceleration: 5, agility: 5, swimming: 4, drift: 4 },    // Meela (her card says 10 for speed: DOG_STATS_SHOWN)
@@ -15,6 +16,8 @@ export const DOG_STATS = {
   kombu: { speed: 7, acceleration: 8, agility: 9, swimming: 4, drift: 7 },         // (his special is a strong one)
   jazz: { speed: 6.5, acceleration: 9, agility: 10, swimming: 5.5, drift: 8 },         // the Great Dane: Pablo, and a shade better
   baz_naz: { speed: 6, acceleration: 8.5, agility: 9.5, swimming: 5, drift: 9 },       // Baz and Naz, the pug twins: Pablo's speed and swimming, just under him on the rest
+  casper: { speed: 6, acceleration: 8.5, agility: 9.5, swimming: 4.5, drift: 8.5 },    // the Patterdale terrier: Pablo, a little less of everything but speed
+  jimmy: { speed: 4.5, acceleration: 9, agility: 8.5, swimming: 4, drift: 10, downhill: 9 },   // the Chinese crested in his wheel cart: the slowest dog (under Ralph all round), but Meela's speed downhill
 };
 
 // What a dog's card says where that is not the number it runs on: Meela is shown as a 10 for speed, and runs as a 9
@@ -22,10 +25,10 @@ export const DOG_STATS_SHOWN = { second_dog: { speed: 10 } };
 /** the rating written on a dog's card */
 export const shownStat = (dogId, key) => DOG_STATS_SHOWN[dogId]?.[key] ?? DOG_STATS[dogId]?.[key];
 
-export const DOG_NAMES = { gsp: 'Pippa', second_dog: 'Meela', black_lab: 'Poppy', pablo: 'Pablo', ralph: 'Ralph', kombu: 'Kombu', rocky: 'Rocky', enzo: 'Enzo', baz_naz: 'Baz & Naz', jazz: 'Jazz' };
+export const DOG_NAMES = { gsp: 'Pippa', second_dog: 'Meela', black_lab: 'Poppy', pablo: 'Pablo', ralph: 'Ralph', kombu: 'Kombu', rocky: 'Rocky', enzo: 'Enzo', baz_naz: 'Baz & Naz', jazz: 'Jazz', casper: 'Casper', jimmy: 'Jimmy' };
 
 // A short-legged dog changes stride (walk, trot, run, sprint) at lower speeds: its share of the big dogs' speeds
-export const DOG_STRIDE_BANDS = { pablo: 0.7, ralph: 0.5, baz_naz: 0.6 };
+export const DOG_STRIDE_BANDS = { pablo: 0.7, ralph: 0.5, baz_naz: 0.6, casper: 0.7, jimmy: 0.62 };
 
 // Every point above or below 7 changes the handling by the share given here.  Raise a share to make
 // the dogs feel more different.
@@ -55,6 +58,18 @@ export function pickupShare(agility, base, effort) {
 
 export function statScale(value, perPoint) {
   return Math.max(0.4, 1 + ((value ?? 7) - 7) * perPoint);
+}
+
+// Downhill (a dog with a `downhill` rating: Jimmy, whose wheels run away with him).  Where the road drops, his top
+// speed is that of a dog with that Speed: none of it on the level, all of it once the road falls `full` in every
+// metre, and in between in proportion.  `slope` is the rise per metre forward under the dog (minus is downhill).
+export const DOWNHILL = { from: 0.015, full: 0.09 };
+
+/** How much faster than its own top speed a dog is on this slope: 1 for a dog with no `downhill`, or on the level or a climb */
+export function downhillSpeed(stats, slope) {
+  if (!stats?.downhill || !(slope < -DOWNHILL.from)) return 1;
+  const share = Math.min(1, (-slope - DOWNHILL.from) / (DOWNHILL.full - DOWNHILL.from));
+  return 1 + (statScale(stats.downhill, STAT_EFFECT.speed) / statScale(stats.speed, STAT_EFFECT.speed) - 1) * share;
 }
 
 // Real dog speeds at the dogs' scale of 3 (an easy canter and a gallop) and how fast speed builds,

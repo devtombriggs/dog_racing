@@ -17,7 +17,7 @@
 import { PICKUP_PATHS, GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
-import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSpeedLoss, pickupShare } from '../shared/dogStats.js';
+import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSpeedLoss, pickupShare, downhillSpeed } from '../shared/dogStats.js';
 import { HANDLING, JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../shared/handling.js';
 import { BONE_BOOST, PAD_KICK, TOY } from '../shared/items.js';
 import { SPECIALS, SPECIAL_ITEM, bellyBounce } from '../shared/specials.js';
@@ -305,6 +305,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       * (1 + (BONE_BOOST.speedMultiplier - 1) * bone)
       * (world.special?.speed ?? 1)
       * (world.slowed ?? 1)                                      // (Jazz's Earthquake)
+      * downhillSpeed(stats, slope)                              // (Jimmy's wheels, where the road drops)
       // (a slow dog is a little faster than flat out in a skid; out of one, its boost.  The better of the two, and neither on top of a Golden Bone)
       * (boneLeft > 0 ? 1 : Math.max(skid ? perks.speed : 1, skidBoost ? driftBoostNow(skidBoost.until - time, skidBoost.speed, skidBoost.easeOut) : 1))
       * (time < stunUntil ? 0.15 : 1);
@@ -527,6 +528,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       case SPECIAL_ITEM:
         if (!special) return true;
         if (special.kind === 'jet') return true;
+        if (special.kind === 'dragon') return !leading || heldFor > 8;                         // Jimmy's fireworks want a leader to go after
         if (special.kind === 'flush' || special.kind === 'kelp' || special.kind === 'sheep' || special.kind === 'quake') return !leading || heldFor > 8;
         if (special.kind === 'rope') return inFront(aim ? 14 : 22, 40) || heldFor > 6;      // the twins' rope: with anyone at all just up the road
         return inFront(aim ? 22 : 35, aim ? 4 : 8) || heldFor > 6;    // the sled, the spin, the wave: with someone to run into

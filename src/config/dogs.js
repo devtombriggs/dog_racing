@@ -31,6 +31,12 @@ const BOARD_SKID = {
   bend: { thigh: -0.22, shin: 0.4, metatarsus: -0.22, upperarm: 0.26, forearm: -0.38, pastern: 0.12 },
   life: SKID_LIFE
 };
+// Jimmy's wheels lock and slide round behind him: he braces his front legs and steers the cart through it
+const CART_SKID = {
+  hop: ['Jump', 0.5], slide: 'Idle', pitch: -0.03,
+  bend: { upperarm: 0.42, forearm: -0.6, pastern: 0.18 },
+  life: { ...SKID_LIFE, wag: 0.5, judder: 0.02 }
+};
 // Baz crouches into the skid and Naz jumps up on to his back and rides him round (src/game/dogs/duo.js)
 const STACK_SKID = { ...CROUCH_SKID, stack: true };
 
@@ -223,6 +229,58 @@ export const DOGS = {
       Trot: 1.54,
       Run: 2.7,
       Sprint: 4.2
+    }
+  },
+  casper: {
+    name: 'Casper (Patterdale Terrier)',
+    displayName: DOG_NAMES.casper,
+    breed: 'Patterdale Terrier',
+    portrait: '/portraits/casper.png',
+    accent: '#c9d4ff',
+    model: '/models/casper.glb',
+    stats: DOG_STATS.casper,
+    skid: CROUCH_SKID,
+    // (casper_patterdale/create_casper.py: the Labrador's frame on slightly shorter legs.  A small terrier: about
+    //  1.5 m at the top of his head here, between the pugs and Pablo)
+    scale: 2.15,
+    size: 0.7,
+    strideBands: DOG_STRIDE_BANDS.casper,
+    maxStrideRate: 1.7,
+    cameraOffset: [0, 3.0, -6.2],
+    cameraLookHeight: 1.2,
+    // casper_patterdale/clip_info.json (Poppy's captured strides, a little shorter, quick and bouncy)
+    gaitSpeed: {
+      Walk: 1.121,
+      Trot: 1.907,
+      Run: 3.345,
+      Sprint: 5.206
+    }
+  },
+  jimmy: {
+    name: 'Jimmy (Chinese Crested)',
+    displayName: DOG_NAMES.jimmy,
+    breed: 'Chinese Crested',
+    portrait: '/portraits/jimmy.png',
+    accent: '#e0263c',
+    model: '/models/jimmy.glb',
+    stats: DOG_STATS.jimmy,
+    // what his card says under his ratings (src/ui/DogSelectScreen.jsx)
+    perk: 'Downhill his wheels run away with him: Meela’s speed wherever the road drops',
+    skid: CART_SKID,
+    // (jimmy_crested/create_jimmy.py: the Labrador's frame made fine, his back legs slung in a two-wheeled cart whose
+    //  wheels turn in his clips.  A small dog: about 1.2 m at the back here, the top of his crest at 1.6)
+    scale: 1.9,
+    size: 0.6,
+    strideBands: DOG_STRIDE_BANDS.jimmy,
+    maxStrideRate: 1.9,
+    cameraOffset: [0, 2.9, -6.0],
+    cameraLookHeight: 1.05,
+    // jimmy_crested/clip_info.json (Poppy's captured strides in front; the wheels turn as far as each stride goes)
+    gaitSpeed: {
+      Walk: 1.205,
+      Trot: 2.051,
+      Run: 3.597,
+      Sprint: 5.598
     }
   },
   ralph: {

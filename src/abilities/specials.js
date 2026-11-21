@@ -4,7 +4,7 @@
 // the dog using it.  It serves every dog in the race, your own and the others, the same way.
 //
 //   const specials = createSpecials({ scene, resolve });      // resolve(playerId) -> that dog's Object3D (for Pippa's birds)
-//   specials.register(playerId, { dogId, group, model, mixer, animations, getAction, setAction });   // once its model has loaded
+//   specials.register(playerId, { dogId, group, model, mixer, animations, getAction, setAction, own });   // once its model has loaded (own: this player's own dog)
 //   specials.start(playerId, { kind, durationMs, targets });  // 'specialStarted' from the server
 //   specials.hit(playerId);                                   // 'specialHit': it has just knocked a dog over
 //   specials.pheasantLanded(ownerId, victimId, hit);          // 'pheasantLanded'
@@ -26,6 +26,8 @@ import { createJetPaws } from './jetpack.js';
 import { createZoomiesWhirl } from './zoomies.js';
 import { createPheasantFlock } from './pheasants.js';
 import { createSurfWave } from './wave.js';
+import { createRugbyKit } from './rugby.js';
+import { createDragon } from './dragon.js';
 
 const FILES = {
   second_dog: { clips: '/models/specials/meela_zoomies_clips.glb' },
@@ -36,6 +38,7 @@ const FILES = {
 const SLED = { summon: 1.6, ram: 0.8, dismiss: 1.2 };      // special_abilities/pablo_sled_clip_info.json
 const ZOOMIES = { windup: 0.6, whirlFrom: 0.42, hit: 2 / 3, end: 1.5, endRate: 1.5 };
 const WAVE = { flop: 0.8, waveFrom: 0.4, hit: 0.8, end: 1.6, endRate: 1.6 };
+const RUGBY = { runRate: 2.2, dive: 0.5, diveRate: 1.6, spin: 1.2 };     // ...and spin: seconds of the slow turn he starts with, to show off the shirt and ball     // how fast his upright run is played; the dive back to all fours is the leap of his Jump clip
 const FLUSH = { birdsAt: 0.3 };                             // of the cue clip: the first bark
 
 export function createSpecials({ scene, resolve }) {
@@ -68,6 +71,8 @@ export function createSpecials({ scene, resolve }) {
 
   function release(e) {
     if (e.state?.kind === 'bounce' && e.model) e.model.rotation.x = 0;      // (level again)
+    if (e.state?.kind === 'rugby') { e.rugby?.off(); if (e.model) e.model.rotation.y = 0; }      // Casper's shirt comes off (the ball has gone)
+    if (e.state?.kind === 'dragon') { e.dragon?.hide(); if (e.model) e.model.visible = true; }      // Jimmy is himself again
     e.override = false;
     e.state = null;
   }
@@ -105,30 +110,32 @@ export function createSpecials({ scene, resolve }) {
   }
 
   return {
-    register(id, { dogId, group, model, mixer, animations = [], getAction, setAction }) {
+    register(id, { dogId, group, model, mixer, animations = [], getAction, setAction, own = false }) {
       const spec = SPECIALS[dogId];
       if (!spec) return;
-      const e = { id, dogId, spec, group, model, mixer, getAction, setAction, clips: Object.fromEntries(animations.map(c => [c.name, c])),
+      const e = { id, dogId, spec, group, model, mixer, getAction, setAction, own, dragon: null, rugby: null, clips: Object.fromEntries(animations.map(c => [c.name, c])),
         state: null, override: false, jets: null, whirl: null, wave: null, flock: null, team: null, teamGltf: null, birdGltf: null };
       entries.set(id, e);
       const files = FILES[dogId] ?? {};
       if (files.clips) load(files.clips).then(g => { if (g && entries.get(id) === e) for (const c of g.animations) e.clips[c.name] = c; });
       if (files.bird) load(files.bird).then(g => { if (g && entries.get(id) === e) e.birdGltf = g; });
       if (files.team) load(files.team).then(g => { if (g && entries.get(id) === e) e.teamGltf = g; });
+      if (spec.kind === 'rugby' && model) e.rugby = createRugbyKit({ scene, model });     // (straight away: it hides the back of his shirt until he needs it)
     },
 
     unregister(id) {
       const e = entries.get(id);
       if (!e) return;
       hideTeam(e);
-      e.jets?.dispose(); e.whirl?.dispose(); e.wave?.dispose(); e.flock?.dispose();
+      if (e.state) release(e);
+      e.jets?.dispose(); e.whirl?.dispose(); e.wave?.dispose(); e.flock?.dispose(); e.dragon?.dispose(); e.rugby?.dispose();
       entries.delete(id);
     },
 
     start(id, { kind, durationMs, targets = [] } = {}) {
       const e = entries.get(id);
       if (!e || e.spec.kind !== kind) return;
-      if (e.state) { stopEffects(e); hideTeam(e); }
+      if (e.state) { stopEffects(e); hideTeam(e); release(e); }
       e.state = { kind, t: 0, phase: 'start', active: true, duration: durationMs / 1000, hitLeft: 0, targets, birdsOut: false };
       if (kind === 'jet') {
         e.jets ??= createJetPaws({ dog: e.model, size: 1 });
@@ -146,6 +153,16 @@ export function createSpecials({ scene, resolve }) {
       } else if (kind === 'bounce') {
         // Enzo: flat out with all four legs spread, for as long as he bounces (the clip is in his own model)
         playClip(e, 'BellyFlop', { loop: true, fade: 0.15 });
+      } else if (kind === 'rugby') {
+        // Casper: shirt on, ball in his paws, up on his back legs and away
+        e.rugby ??= createRugbyKit({ scene, model: e.model });
+        e.rugby.on();
+        playClip(e, 'RugbyRun', { loop: true, fade: 0.15, rate: RUGBY.runRate });
+      } else if (kind === 'dragon') {
+        // Jimmy: the dragon in his place (his strides carry on underneath, unseen)
+        e.dragon ??= createDragon({ scene });
+        e.dragon.show(e.group);
+        if (e.model) e.model.visible = false;
       } else if (kind === 'flush') {
         // her bark, over whichever stride she is in
         const stride = e.getAction()?.getClip().name === 'Run' ? 'PheasantFlushRun' : 'PheasantFlushSprint';
@@ -176,6 +193,7 @@ export function createSpecials({ scene, resolve }) {
       if (s.kind === 'jet') release(e);                        // he drops out of the air in his flying pose and lands in stride
       else if (s.kind === 'sled') { teamClip(e, 'SledDismiss', false); s.endFor = SLED.dismiss; }
       else if (s.kind === 'zoomies') { s.endFor = playClip(e, 'ZoomiesEnd', { fade: 0.06, rate: ZOOMIES.endRate }) ? ZOOMIES.end / ZOOMIES.endRate : 0; }
+      else if (s.kind === 'rugby') { e.rugby?.pass(); s.endFor = playClip(e, 'Jump', { fade: 0.1, rate: RUGBY.diveRate }) ? RUGBY.dive : 0; }      // the ball is away (the server flies it), and he dives back on to all fours
       else if (s.kind === 'wave') { s.endFor = playClip(e, 'WaveEnd', { fade: 0.06, rate: WAVE.endRate }) ? WAVE.end / WAVE.endRate : 0; }
     },
 
@@ -201,6 +219,15 @@ export function createSpecials({ scene, resolve }) {
           } else if (s.kind === 'bounce') {
             // Enzo: nose up on the way up, belly first on the way down (for everyone watching, not only his own player)
             if (e.model) e.model.rotation.x = -0.5 * Math.cos(bellyBounce(e.spec, s.t).phase * Math.PI);
+          } else if (s.kind === 'rugby') {
+            // one slow turn as he sets off, so everyone sees the shirt, the 7 on his back and the ball
+            if (e.model && !s.spun) {
+              const k = Math.min(1, s.t / RUGBY.spin);
+              e.model.rotation.y = k < 1 ? Math.PI * 2 * (k * k * (3 - 2 * k)) : 0;
+              s.spun = k >= 1;
+            }
+          } else if (s.kind === 'dragon') {
+            if (e.model) e.model.visible = false;
           } else if (s.kind === 'flush') {
             if (!s.birdsOut && s.t >= s.cue * FLUSH.birdsAt && e.birdGltf) {
               s.birdsOut = true;
@@ -220,6 +247,8 @@ export function createSpecials({ scene, resolve }) {
         e.wave?.update(delta);
         e.flock?.update(delta);
         e.teamMixer?.update(delta);
+        e.dragon?.update(delta, e.group);
+        e.rugby?.update(e.group);
       }
     },
 

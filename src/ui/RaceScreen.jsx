@@ -8,7 +8,8 @@ import { ResultsPanel } from './race/ResultsPanel.jsx';
 
 // The race: the 3D view with the course map, race order, HUD, countdown and results over it.
 // The race itself is game/Race.js; this gives it somewhere to draw and shows what the session says.
-// split: 'left' or 'right' when this is one half of a split screen (two players at one computer)
+// split: { index, count } when this is one player's share of a split screen (index 0 is player 1; count players
+// at one computer: two have half the screen each, three or four a quarter each)
 export function RaceScreen({ session, state, split = null }) {
   const containerRef = useRef(null);
   const minimapRef = useRef(null);
@@ -35,10 +36,10 @@ export function RaceScreen({ session, state, split = null }) {
 
   return (
     <div
-      className={split ? `race-screen race-half race-half--${split}` : 'race-screen'}
+      className={split ? `race-screen race-half race-half--${split.index}${split.count > 2 ? ' race-quarter' : ''}` : 'race-screen'}
       style={{
         width: split ? '50vw' : '100vw',
-        height: '100vh',
+        height: split && split.count > 2 ? '50vh' : '100vh',
         position: 'relative',
         overflow: 'hidden',
         background: '#87ceeb'
@@ -68,11 +69,11 @@ export function RaceScreen({ session, state, split = null }) {
         ? <div className="race-incoming" role="alert">FIREWORK INCOMING!</div>
         : state.frisbeesIncoming.length > 0 && <div className="race-incoming" role="alert">FRISBEE INCOMING!</div>}
 
-      {split && <div className="race-half__player">PLAYER {split === 'left' ? 1 : 2}</div>}
+      {split && <div className="race-half__player">PLAYER {split.index + 1}</div>}
       <HudPanel state={state} speedRef={speedRef} surfaceRef={surfaceRef} device={session.device} />
       <CountdownOverlay racePhase={state.racePhase} />
       <ResultsPanel session={session} finishTime={state.finishTime} lobbyReturnAt={state.lobbyReturnAt}
-        raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} buttons={split !== 'right'} />
+        raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} buttons={!split || split.index === 0} />
     </div>
   );
 }

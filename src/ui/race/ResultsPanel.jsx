@@ -47,7 +47,7 @@ function GrandPrixTable({ grandPrix, socketId }) {
 
 // Your time once you are home; how long the others have left; the Grand Prix points; and the way
 // back to the lobby once it is all over
-// buttons: false for player 2's half of a split screen (player 1's half has them)
+// buttons: false for the other players' shares of a split screen (player 1's has them)
 export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = null, grandPrix = null, socketId = null, buttons = true }) {
   const over = lobbyReturnAt !== null;
   const clockNow = useClock(over || raceEndsAt !== null);

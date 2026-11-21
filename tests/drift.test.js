@@ -65,7 +65,7 @@ test('drift: in the slide the tail wags and the head moves, and neither winds up
 });
 
 test('drift: Enzo, Ralph and the pug twins get more from a skid: a little faster, tighter and wider steering, sparks sooner', async () => {
-  assert.deepEqual(Object.keys(DRIFT_PERKS).sort(), ['baz_naz', 'enzo', 'ralph']);
+  assert.deepEqual(Object.keys(DRIFT_PERKS).sort(), ['baz_naz', 'enzo', 'jimmy', 'ralph']);
   assert.deepEqual(driftPerks('gsp'), { speed: 1, control: 1, charge: 1, boost: null });
   for (const dog of Object.keys(DRIFT_PERKS)) {
     const perk = driftPerks(dog);
@@ -80,7 +80,8 @@ test('drift: Enzo, Ralph and the pug twins get more from a skid: a little faster
   assert.ok(DOGS.enzo.skid.drop && !DOGS.enzo.skid.bend, 'Enzo on his belly');
   assert.ok(DOGS.ralph.skid.board, 'Ralph on a skateboard');
   assert.ok(DOGS.baz_naz.skid.stack, 'one twin on the other');
-  for (const id of ['gsp', 'second_dog', 'black_lab', 'pablo', 'rocky', 'kombu', 'jazz']) assert.ok(DOGS[id].skid.bend && !DOGS[id].skid.board && !DOGS[id].skid.stack && !DOGS[id].skid.drop, `${id}: the crouch`);
+  assert.ok(DOGS.jimmy.skid.bend.forearm && !DOGS.jimmy.skid.bend.thigh && !DOGS.jimmy.skid.board, 'Jimmy braces his front legs: his back ones are in the cart');
+  for (const id of ['gsp', 'second_dog', 'black_lab', 'pablo', 'rocky', 'kombu', 'jazz', 'casper']) assert.ok(DOGS[id].skid.bend && !DOGS[id].skid.board && !DOGS[id].skid.stack && !DOGS[id].skid.drop, `${id}: the crouch`);
 });
 
 test('drift: for Enzo, Ralph and the twins, letting go on blue sparks is a Golden Bone\'s boost; the other dogs get the short one', () => {

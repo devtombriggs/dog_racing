@@ -3,6 +3,7 @@
 // speed a player could not have.  The server drives them (server/bots.js); the lobby shows the names.
 
 export const RACE_DOGS = 6;      // how many dogs are in a race (players and computer dogs together)
+export const LOCAL_PLAYERS = 4;  // the most players at one split screen (each has a share of the screen)
 export const MAX_BOTS = RACE_DOGS - 1;       // the computer dogs take the places the players leave
 
 
