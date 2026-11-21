@@ -231,3 +231,9 @@ html, body, #root {
 .pause-volume__row small { margin-top: 0; font-size: 11px; font-weight: normal; }
 .pause-volume__row input { width: 100%; margin: 0; accent-color: #ffd22e; }
 .pause-volume__row b { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* the frame rate (src/tv.js: on the TV app, or ?fps=1) */
+.zr-fps {
+  position: fixed; top: 6px; left: 50%; z-index: 1000; transform: translateX(-50%); pointer-events: none;
+  padding: 2px 10px; border-radius: 999px; background: #000a; color: #7dff9a; font: bold 14px/1.4 monospace;
+}

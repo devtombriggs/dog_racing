@@ -86,6 +86,18 @@ function act(within, pressed, direction) {
   }
 }
 
+/**
+ * The TV remote's arrows (src/tv.js): move the highlight as the D-pad does.  Returns false in the race itself,
+ * where the arrows are for driving.
+ */
+export function menuMove(direction) {
+  const within = scope();
+  if (!within) return false;
+  root().dataset.pad = '';
+  act(within, () => false, direction);
+  return true;
+}
+
 export function startMenuPad() {
   if (typeof navigator === 'undefined' || !navigator.getGamepads) return () => {};
   const held = new Map();          // controller -> { buttons: Set, direction, nextAt }

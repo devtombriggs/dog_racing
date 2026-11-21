@@ -12,13 +12,14 @@
 // Esc: a browser takes Esc for itself to leave full screen.  Where the browser lets a page keep the key
 // (Chrome and Edge: the Keyboard Lock API) the game does, so Esc opens the game's menu and the screen
 // stays full; elsewhere Esc leaves full screen, and the menu opens then (see ui/race/PauseMenu.jsx).
+import { onTv } from './tv.js';
 const KEY = 'dogRacing.fullscreen';
 const root = () => document.documentElement;
 const wanted = () => { try { return localStorage.getItem(KEY) !== '0'; } catch { return true; } };
 const remember = (on) => { try { localStorage.setItem(KEY, on ? '1' : '0'); } catch { /* storage blocked */ } };
 
 export const fullscreen = {
-  available: typeof document !== 'undefined' && Boolean(document.fullscreenEnabled && root().requestFullscreen),
+  available: typeof document !== 'undefined' && !onTv && Boolean(document.fullscreenEnabled && root().requestFullscreen),     // (the TV app is full screen already)
   isOn: () => Boolean(document.fullscreenElement),
   // true if Esc reaches the game while the screen is full (the key is locked to the page)
   keepsEscape: false,
