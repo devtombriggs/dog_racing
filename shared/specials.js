@@ -108,11 +108,20 @@ export const SHEEP = {
 // or out of reach: Ralph flying, one under a golden collar's shield, one down a burrow or under the kelp.  Jazz
 // herself runs on as she was.
 export const QUAKE = {
-  seconds: 5,
+  seconds: 5,            // the longest any dog is slowed (the leader)
+  // how long each place is slowed, from 1st (Tom, 2026-11-21: a dog well back and trying to catch up is not held as long);
+  // 7th and further back get the last of them
+  secondsByPlace: [5, 4, 3, 2.5, 2, 1],
   speed: 0.25,           // the share of its speed a shaken dog keeps
   stompAt: 0.45,         // seconds into her stomp that her paws come down (when the ring goes out and the screen shakes)
   stompSeconds: 0.9,
 };
+
+/** How long Jazz's Earthquake slows the dog in `place` (1 = leading), whatever place Jazz is in */
+export function quakeSeconds(place) {
+  const byPlace = QUAKE.secondsByPlace;
+  return byPlace[Math.min(Math.max(1, place ?? 1), byPlace.length) - 1];
+}
 
 /** Enzo's Belly Bounce at `seconds` since it began: { height (m off the ground), speed (multiplier) } */
 export function bellyBounce(spec, seconds) {

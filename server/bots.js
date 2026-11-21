@@ -21,7 +21,7 @@ import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSp
 import { HANDLING, JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../shared/handling.js';
 import { BONE_BOOST, PAD_KICK, TOY } from '../shared/items.js';
 import { SPECIALS, SPECIAL_ITEM, bellyBounce } from '../shared/specials.js';
-import { DRIFT, driftPerks, driftTurn, driftChargeRate, driftTier, driftBoost, driftBoostNow } from '../shared/drift.js';
+import { DRIFT, driftPerks, driftArc, driftCurvature, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow } from '../shared/drift.js';
 import { WENDOVER, woodlandWaterAt, woodlandDogY, woodlandSwimMultiplier } from '../shared/wendoverData.js';
 import { BURROWS } from '../shared/burrows.js';
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
@@ -260,6 +260,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   //   inBend     it is in a bend it has already made its mind up about
   //   wideUntil  it has run wide into the wall, and is against it until then: { until, side }
   const perks = driftPerks(dog), drifting = L.drift ?? { chance: 0, seconds: 0, wall: 0 };
+  const arc = driftArc({ agility: stats.agility, control: perks.control });
   let skid = null, skidBoost = null, inBend = false, wide = null;
   let time = 0, startAt = between(L.reaction), stunUntil = 0, boneUntil = -1, effect = null, kick = null;       // kick: { speed, until, quick } from a held boost pad
   let progressAt = 0, progressS = 0, travelled = 0, finishing = false;
@@ -306,8 +307,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       * (world.special?.speed ?? 1)
       * (world.slowed ?? 1)                                      // (Jazz's Earthquake)
       * downhillSpeed(stats, slope)                              // (Jimmy's wheels, where the road drops)
-      // (a slow dog is a little faster than flat out in a skid; out of one, its boost.  The better of the two, and neither on top of a Golden Bone)
-      * (boneLeft > 0 ? 1 : Math.max(skid ? perks.speed : 1, skidBoost ? driftBoostNow(skidBoost.until - time, skidBoost.speed, skidBoost.easeOut) : 1))
+      // (a little faster than flat out in a skid, building the longer it is held, and more for a slow dog; out of one, its boost.  The better of the two, and neither on top of a Golden Bone)
+      * (boneLeft > 0 ? 1 : Math.max(skid ? driftSpeedNow(time - skid.from, perks) : 1, skidBoost ? driftBoostNow(skidBoost.until - time, skidBoost.speed, skidBoost.easeOut) : 1))
       * (time < stunUntil ? 0.15 : 1);
   }
 
@@ -317,7 +318,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     if (bend < 1e-4) return top;
     // (on wet ground a dog slides wide, so it can hold less of a bend)
     // (in a skid it turns tighter, and the turn costs it no speed: that is what a skid is for)
-    const hold = cornering * (1 - 0.45 * route.slipAt(at)) * (skid ? driftTurn(0.6, perks.control) : 1);
+    // (a skid holds a bend by its own curve, the arrows most of the way in: shared/drift.js)
+    const hold = skid ? driftCurvature(arc, 0.6) * top : cornering * (1 - 0.45 * route.slipAt(at));
     const demand = bend * top / hold;                       // how much of its steering the bend needs flat out
     if (demand <= 1) return top * (1 - (skid ? 0 : turnLoss) * demand);
     return Math.max(4, Math.min(top * (1 - (skid ? 0 : turnLoss)), lerp(turnSlow, hold, 0.5) / bend));
@@ -357,7 +359,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     if (!able || effort < DRIFT.startEffort || random() >= drifting.chance) return;
     const hold = lerp(0.6, 1, random()) * drifting.seconds;
     // (a bend that curves to + is a turn to the right: its rotation falls)
-    skid = { side: -Math.sign(bend), charge: 0, until: time + hold, wallAt: random() < drifting.wall ? time + lerp(0.3, 0.8, random()) * hold : null };
+    skid = { side: -Math.sign(bend), charge: 0, from: time, until: time + hold, wallAt: random() < drifting.wall ? time + lerp(0.3, 0.8, random()) * hold : null };
   }
 
   // ----- where across the road to run

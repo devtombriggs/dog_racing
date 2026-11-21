@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DRIFT, AUTO_DRIFT, autoDriftHeld, autoDriftTurn, DRIFT_PERKS, driftPerks, driftCanStart, driftTurn, driftChargeRate, driftTier, driftBoostSeconds, driftBoost, driftBoostNow } from '../shared/drift.js';
+import { DRIFT, DRIFT_ARC, AUTO_DRIFT, autoDriftHeld, autoDriftCurvature, DRIFT_PERKS, driftPerks, driftCanStart, driftArc, driftCurvature, driftSteering, driftStep, driftChargeRate, driftTier, driftBoostSeconds, driftBoost, driftBoostNow, driftSpeedNow } from '../shared/drift.js';
 import { DOG_STATS } from '../shared/dogStats.js';
 import { BONE_BOOST } from '../shared/items.js';
 
@@ -14,9 +14,119 @@ test('drift: starts only with the button held, the steering over, at a run and o
   assert.equal(driftCanStart({ ...ok, grounded: false }), false, 'in the air');
 });
 
-test('drift: steering into the skid tightens it and charges it faster; steering out opens it and charges slowly', () => {
-  assert.ok(driftTurn(1) > driftTurn(0) && driftTurn(0) > driftTurn(-1) && driftTurn(-1) > 0, 'a skid always turns its own way');
-  assert.ok(driftTurn(1) > 1, 'tighter than an ordinary hard turn');
+// ----- the drift's own curve (Tom, 2026-11-21: "like Mario Kart"): a simulated dog, driven by shared/drift.js alone
+const SPRINT = 17;           // m/s, about a dog of Speed 7 flat out
+// Drive a drift for `seconds`: input(t) gives the arrows.  Travel follows the nose at the drift's grip, as LocalDog's
+// does.  Returns where it got to, its heading, and the turn at every step
+function drive({ arc = driftArc(), side = -1, seconds = 3, dt = 1 / 60, input = () => 0, speed = SPRINT, start = 0 }) {
+  const state = driftSteering(side, start, arc, speed);
+  let x = 0, z = 0, heading = 0, travel = 0, t = 0;
+  const turns = [];
+  while (t < seconds - 1e-9) {
+    const step = Math.min(dt, seconds - t);
+    driftStep(state, arc, { input: input(t, { x, z, heading, travel, state }), speed, dt: step });
+    heading += state.turned;
+    travel += Math.atan2(Math.sin(heading - travel), Math.cos(heading - travel)) * (1 - Math.exp(-DRIFT_ARC.grip * step));
+    x += Math.sin(travel) * speed * step; z += Math.cos(travel) * speed * step;
+    turns.push({ t, yawRate: state.yawRate, dt: step });
+    t += step;
+  }
+  return { x, z, heading, travel, turns, state };
+}
+const radiusOf = run => SPRINT / Math.abs(run.state.yawRate);
+
+test('drift: with no arrow, a right-hand drift carries on round a steady medium curve (1)', () => {
+  const run = drive({ side: -1, seconds: 4 });
+  assert.ok(Math.abs(radiusOf(run) - DRIFT_ARC.radius.base) < 0.5, `about ${DRIFT_ARC.radius.base} m round: ${radiusOf(run).toFixed(1)}`);
+  assert.ok(run.turns.every(s => s.yawRate <= 1e-9), 'always to the right');
+  // ...and it settles: the turn in the last second barely changes
+  const last = run.turns.filter(s => s.t > 3).map(s => s.yawRate);
+  assert.ok(Math.max(...last) - Math.min(...last) < 1e-6);
+  // much wider than the old drift, which went round 12 m with no arrow: nearly every bend in the game is wider than that
+  assert.ok(DRIFT_ARC.radius.base >= 30 && DRIFT_ARC.radius.tight >= 12 && DRIFT_ARC.radius.wide >= 80);
+});
+
+test('drift: the arrow into the corner tightens it, the other widens it and never turns it back (2, 3, 7)', () => {
+  for (const side of [-1, 1]) {
+    const into = drive({ side, input: () => side, seconds: 4 }), out = drive({ side, input: () => -side, seconds: 4 }), none = drive({ side, seconds: 4 });
+    assert.ok(Math.abs(radiusOf(into) - DRIFT_ARC.radius.tight) < 0.5, `tight: ${radiusOf(into).toFixed(1)} m`);
+    assert.ok(Math.abs(radiusOf(out) - DRIFT_ARC.radius.wide) < 1, `wide: ${radiusOf(out).toFixed(1)} m`);
+    assert.ok(out.turns.every(s => Math.sign(s.yawRate) !== -side), 'held out of the corner it still turns its own way');
+    // left and right are mirror images
+    const mirror = drive({ side: -side, input: () => -side, seconds: 4 });
+    assert.ok(Math.abs(into.x + mirror.x) < 1e-9 && Math.abs(into.z - mirror.z) < 1e-9);
+    assert.ok(Math.abs(none.state.yawRate) > Math.abs(out.state.yawRate) && Math.abs(none.state.yawRate) < Math.abs(into.state.yawRate));
+  }
+  // and the arrows ease it there: a third of a second or so, not at once
+  const run = drive({ side: -1, input: () => -1, seconds: 0.1 });
+  assert.ok(run.state.guide < 0.5, 'still on its way in after a tenth of a second');
+});
+
+test('drift: hammering the arrows left and right makes no sudden change of heading (4)', () => {
+  const arc = driftArc();
+  for (const every of [1 / 60, 0.1, 0.25]) {
+    const run = drive({ side: -1, seconds: 4, input: t => (Math.floor(t / every) % 2 ? 1 : -1) });
+    for (let i = 1; i < run.turns.length; i++) {
+      assert.ok(Math.abs(run.turns[i].yawRate - run.turns[i - 1].yawRate) <= arc.yawAccel * run.turns[i].dt + 1e-9, 'the turn changes steadily');
+    }
+    // it stays a right-hand drift between its widest and tightest
+    const late = run.turns.filter(s => s.t > 1);
+    assert.ok(late.every(s => s.yawRate < 0 && -s.yawRate <= SPRINT / DRIFT_ARC.radius.tight + 1e-9 && -s.yawRate >= SPRINT / DRIFT_ARC.radius.wide - 1e-9));
+  }
+});
+
+test('drift: the same drift goes to the same place at 30, 60 and 144 frames a second (8)', () => {
+  const input = t => (t < 1 ? 0 : t < 2 ? -1 : 1);
+  const runs = [1 / 30, 1 / 60, 1 / 144].map(dt => drive({ side: -1, seconds: 3, dt, input }));
+  for (const run of runs.slice(1)) {
+    assert.ok(Math.hypot(run.x - runs[0].x, run.z - runs[0].z) < 0.5, `within half a metre: ${Math.hypot(run.x - runs[0].x, run.z - runs[0].z).toFixed(2)} m`);
+    assert.ok(Math.abs(run.heading - runs[0].heading) < 0.05, 'within 3 degrees (a key is seen a frame later at 30 frames a second)');
+  }
+});
+
+test('drift: a player can follow long sweeping bends with the arrows without being thrown off the road (9)', () => {
+  // A right-hand bend of radius R and a road 14 m wide; the dog starts in the middle of it, heading along it.  The
+  // player watches where the curve they are on will take the dog in a moment: if that is wide of the middle they press
+  // into the corner, if inside it they press out of it, otherwise they leave the arrows alone.  Tried for players who
+  // look 0.6 or 0.8 s ahead, put up with half a metre or a metre off line, and react a tenth or a fifth of a second late
+  const ahead = (x, z, travel, yawRate, look) => {
+    for (let i = 0; i < 10; i++) { travel += yawRate * look / 10; x += Math.sin(travel) * SPRINT * look / 10; z += Math.cos(travel) * SPRINT * look / 10; }
+    return [x, z];
+  };
+  for (const R of [25, 40, 60, 80, 100]) {             // (on gentler bends than that there is no need to drift)
+    for (const look of [0.6, 0.8]) for (const slack of [0.5, 1]) for (const late of [6, 12]) {
+      const half = 7, centre = { x: -R, z: 0 };        // (heading +z, right is -x: the bend's centre is out to the right)
+      let worst = 0;
+      const seen = [];
+      drive({
+        side: -1, seconds: Math.PI * R / 2 / SPRINT,   // a quarter of a circle
+        start: -SPRINT / R,                            // (the ordinary steering already had it turning with the bend)
+        input: (t, { x, z, travel, state }) => {
+          worst = Math.max(worst, Math.abs(Math.hypot(x - centre.x, z - centre.z) - R));
+          const [ax, az] = ahead(x, z, travel, state.yawRate, look);
+          seen.push(Math.hypot(ax - centre.x, az - centre.z) - R);       // + wide of the middle
+          const was = seen[Math.max(0, seen.length - 1 - late)];
+          return was > slack ? -1 : was < -slack ? 1 : 0;                // (right is -1: into this corner)
+        },
+      });
+      assert.ok(worst < half - 2, `a ${R} m bend (looking ${look} s ahead, ${late / 60} s late): never more than ${worst.toFixed(1)} m off the middle of a ${2 * half} m road`);
+    }
+  }
+});
+
+test('drift: each dog\'s drift comes from its stats: agility tightens it, size slows its answer, the slow dogs\' perk widens its range', () => {
+  const pippa = driftArc({ agility: 7 }), meela = driftArc({ agility: 5 }), ralph = driftArc({ agility: 9, size: 0.45, control: driftPerks('ralph').control });
+  const jazz = driftArc({ agility: 10, size: 1.15 }), rocky = driftArc({ agility: 10, size: 1 });
+  assert.ok(meela.base < pippa.base && meela.tight < pippa.tight, 'the greyhound drifts wider');
+  assert.ok(ralph.tight > pippa.tight && ralph.steerRate > pippa.steerRate, 'the dachshund tighter and quicker');
+  assert.ok(jazz.steerRate < rocky.steerRate && jazz.yawAccel < rocky.yawAccel, 'the Great Dane slower to answer than a collie of the same agility');
+  assert.ok(rocky.tight > pippa.tight, 'the collie tight and precise');
+  assert.ok(ralph.wide < driftArc({ agility: 9, size: 0.45 }).wide, 'a perk dog can open it wider too');
+  assert.equal(driftCurvature(pippa, 0), pippa.base);
+  assert.equal(driftCurvature(pippa, 5), pippa.tight);
+});
+
+test('drift: steering into the drift charges the sparks faster; steering out charges slowly', () => {
   assert.ok(driftChargeRate(7, 1) > driftChargeRate(7, 0) && driftChargeRate(7, 0) > driftChargeRate(7, -1));
   assert.equal(driftChargeRate(7, 1), 1);
 });
@@ -66,12 +176,13 @@ test('drift: in the slide the tail wags and the head moves, and neither winds up
 
 test('drift: Enzo, Ralph and the pug twins get more from a skid: a little faster, tighter and wider steering, sparks sooner', async () => {
   assert.deepEqual(Object.keys(DRIFT_PERKS).sort(), ['baz_naz', 'enzo', 'jimmy', 'ralph']);
-  assert.deepEqual(driftPerks('gsp'), { speed: 1, control: 1, charge: 1, boost: null });
+  assert.deepEqual(driftPerks('gsp'), { speed: DRIFT.speed, control: 1, charge: 1, boost: null });
   for (const dog of Object.keys(DRIFT_PERKS)) {
     const perk = driftPerks(dog);
-    assert.ok(perk.speed > 1 && perk.speed <= 1.1, `${dog}: slightly faster, no more`);
-    assert.ok(driftTurn(1, perk.control) > driftTurn(1) && driftTurn(-1, perk.control) < driftTurn(-1) && driftTurn(-1, perk.control) > 0, `${dog}: more control both ways`);
-    assert.equal(driftTurn(0, perk.control), driftTurn(0));
+    assert.ok(perk.speed > DRIFT.speed && perk.speed <= 1.15, `${dog}: slightly faster than any dog in a skid, no more`);
+    const own = driftArc({ control: perk.control }), plain = driftArc();
+    assert.ok(own.tight > plain.tight && own.wide < plain.wide && own.wide > 0, `${dog}: tighter and wider both ways, still its own way round`);
+    assert.equal(own.base, plain.base, 'the same curve with no arrow');
     assert.ok(driftChargeRate(7, 1, perk.charge) > driftChargeRate(7, 1), `${dog}: sparks sooner`);
   }
   // every dog has a skid of its own kind, and the three slow dogs each have a different one
@@ -123,18 +234,29 @@ test('accessibility mode drifts by itself: an arrow held into a bend starts the 
   assert.equal(autoDriftHeld({ turn: 1, heldFor: 2, bend: straight, side: 1 }), true);
   assert.equal(autoDriftHeld({ turn: 0, heldFor: 0, bend: left, side: 1 }), false);
   assert.equal(autoDriftHeld({ turn: -1, heldFor: 0, bend: left, side: 1 }), false);
-  // it is steered for the player.  On its line and heading along the road: exactly as hard as the road bends
-  const rate = 1.5, speed = 18, half = 10, on = { bend: left, speed, turnRate: rate, halfWidth: half, inside: AUTO_DRIFT.line * half, off: 0 };
-  assert.ok(Math.abs(autoDriftTurn(on) * rate - left * speed) < 1e-9, 'round with the road');
-  assert.equal(autoDriftTurn({ ...on, bend: -left }), autoDriftTurn(on), 'either way');
-  assert.ok(autoDriftTurn(on) < driftTurn(-1), 'gentler than a button skid can be, on an easy bend');
+  // it is steered for the player.  On its line and heading along the road: exactly as tight as the road bends
+  const speed = 18, half = 10, on = { bend: left, speed, halfWidth: half, inside: AUTO_DRIFT.line * half, off: 0 };
+  assert.ok(Math.abs(autoDriftCurvature(on) - left) < 1e-9, 'round with the road');
+  assert.equal(autoDriftCurvature({ ...on, bend: -left }), autoDriftCurvature(on), 'either way');
   // out by the outside wall it turns in harder; right in by the inside wall, or already heading in too far, it eases off
-  assert.ok(autoDriftTurn({ ...on, inside: -9 }) > autoDriftTurn(on));
-  assert.ok(autoDriftTurn({ ...on, inside: 9 }) < autoDriftTurn(on));
-  assert.ok(autoDriftTurn({ ...on, off: 0.3 }) < autoDriftTurn(on));
-  assert.ok(autoDriftTurn({ ...on, off: -0.3 }) > autoDriftTurn(on));
-  // never tighter than a skid can be, and never turned the other way
-  assert.equal(autoDriftTurn({ ...on, bend: 0.5 }), driftTurn(1));
-  assert.equal(autoDriftTurn({ ...on, bend: 0, off: 1 }), 0.05);
+  assert.ok(autoDriftCurvature({ ...on, inside: -9 }) > autoDriftCurvature(on));
+  assert.ok(autoDriftCurvature({ ...on, inside: 9 }) < autoDriftCurvature(on));
+  assert.ok(autoDriftCurvature({ ...on, off: 0.3 }) < autoDriftCurvature(on));
+  assert.ok(autoDriftCurvature({ ...on, off: -0.3 }) > autoDriftCurvature(on));
+  // the drift keeps it between the dog's own tightest and widest curves, and never turns it the other way
+  const arc = driftArc(), state = driftSteering(1);
+  for (let i = 0; i < 300; i++) driftStep(state, arc, { speed, dt: 1 / 60, curvature: autoDriftCurvature({ ...on, bend: 0.5 }) });
+  assert.ok(Math.abs(state.yawRate - arc.tight * speed) < 1e-9, 'no tighter than its tightest');
+  for (let i = 0; i < 300; i++) driftStep(state, arc, { speed, dt: 1 / 60, curvature: autoDriftCurvature({ ...on, bend: 0, off: 1 }) });
+  assert.ok(Math.abs(state.yawRate - arc.wide * speed) < 1e-9 && state.yawRate > 0, 'no wider than its widest');
   assert.ok(AUTO_DRIFT.wall > 0 && AUTO_DRIFT.wall < 1, 'a wall costs less');
+});
+
+test('drift: a skid is a little faster than flat out from the start, and builds the longer it is held, then holds', () => {
+  const plain = driftPerks('gsp'), slow = driftPerks('ralph');
+  assert.equal(driftSpeedNow(0), DRIFT.speed);
+  assert.ok(driftSpeedNow(1.5) > driftSpeedNow(0.5) && driftSpeedNow(0.5) > driftSpeedNow(0), 'builds');
+  assert.equal(driftSpeedNow(DRIFT.speedSeconds), driftSpeedNow(10), 'then holds');
+  assert.ok(driftSpeedNow(10) < DRIFT.boostSpeed, 'never as fast as the boost out of it');
+  assert.ok(driftSpeedNow(1, slow) > driftSpeedNow(1, plain), 'a slow dog stays ahead of the rest');
 });

@@ -6,7 +6,7 @@ import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampl
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, quakeSeconds, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
@@ -466,17 +466,20 @@ function dragonFire(room, player, spec, count) {
   player.dragonBroken = false;
 }
 
-// Jazz's Earthquake (shared/specials.js QUAKE): every other dog still racing and on the ground is slowed, wherever it is,
+// Jazz's Earthquake (shared/specials.js QUAKE): every other dog still racing and on the ground is slowed, for longer
+// the nearer the front it is (quakeSeconds),
 // its own special or not (only Ralph, flying, is out of it).  Each dog's own game
 // slows it (the server says who); the computer's dogs are slowed here (slowUntil, read in tickBots).
 function earthquake(room, player) {
-  const now = Date.now(), slowed = [];
+  const now = Date.now(), slowed = [], secondsFor = {};
+  const places = new Map(raceStandings(room).map(entry => [entry.playerId, entry.place]));
   for (const victim of room.players.values()) {
     if (victim === player || victim.finished || activeSpecials.get(victim)?.spec.flyHeight || now < victim.shieldUntil || burrowRides.has(victim)) continue;
-    victim.slowUntil = now + QUAKE.seconds * 1000;
+    const seconds = secondsFor[victim.id] = quakeSeconds(places.get(victim.id));      // (by its own place: the leader longest)
+    victim.slowUntil = now + seconds * 1000;
     slowed.push(victim.id);
   }
-  io.to(room.code).emit('earthquake', { playerId: player.id, position: player.position, slowed, seconds: QUAKE.seconds, speed: QUAKE.speed });
+  io.to(room.code).emit('earthquake', { playerId: player.id, position: player.position, slowed, secondsFor, seconds: QUAKE.seconds, speed: QUAKE.speed });
 }
 
 // Rocky's Sheep Stampede (shared/specials.js SHEEP): the server runs five sheep up the road, telling

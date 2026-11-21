@@ -4,10 +4,15 @@ const SMOOTHNESS = 6;
 
 // The camera behind the player's dog
 export class ChaseCamera {
-  // target: the dog's group.  A small dog gets a closer, lower camera so it is not lost on screen
-  constructor(camera, target, config) {
+  // target: the dog's group.  A small dog gets a closer, lower camera so it is not lost on screen.
+  // heading(): the way the dog is travelling (radians), which the camera sits behind; by default the way the group
+  // faces.  (In a drift the dog's nose and its travel part company: the camera follows the travel, so it does not
+  // swing out sideways)
+  constructor(camera, target, config, heading = null) {
     this.camera = camera;
     this.target = target;
+    this.heading = heading ?? (() => target.rotation.y);
+    this.turn = new THREE.Quaternion();
     this.offset = new THREE.Vector3(...(config.cameraOffset || [0, 4, -8]));
     this.lookHeight = config.cameraLookHeight ?? 1.5;
 
@@ -16,7 +21,8 @@ export class ChaseCamera {
   }
 
   #place() {
-    return this.target.position.clone().add(this.offset.clone().applyQuaternion(this.target.quaternion));
+    this.turn.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, this.heading());
+    return this.target.position.clone().add(this.offset.clone().applyQuaternion(this.turn));
   }
 
   // Straight to its place behind the dog (a respawn can be far away)

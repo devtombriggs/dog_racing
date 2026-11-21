@@ -48,15 +48,16 @@ test('the levels: easy is slower, sees less far ahead and fluffs more jumps than
   assert.ok(distance('easy') < distance('medium') && distance('medium') < distance('hard'));
 });
 
-test('a computer dog runs at its own dog\'s speed, never faster but for the boost out of a skid, and stays on the road', () => {
+test('a computer dog runs at its own dog\'s speed, never faster but in a skid and the boost out of one, and stays on the road', () => {
   for (const mapId of ['farmyard', 'modbury_heights', 'wendover']) {
     for (const dog of ['second_dog', 'pablo']) {       // (not Ralph: on Wendover he leaves the road for his burrows)
       const bot = run({
         mapId, dog, level: 'hard', seconds: 60,
         watch: (move, state, route) => {
           assert.ok(Math.abs(state.lateral) <= route.pointAt(state.s).halfWidth, `${mapId}: ${dog} is off the road at ${state.s}`);
-          // (1.08: the most a downhill gives; out of a skid, the skid's boost on top of it: shared/drift.js)
-          assert.ok(state.speed <= bot_top(dog) * 1.09 * (state.boosting ? DRIFT.boostSpeed : 1), `${mapId}: ${dog} at ${state.speed} m/s`);
+          // (1.08: the most a downhill gives; in a skid, the most a skid gives, and out of one, the skid's boost on top of it: shared/drift.js)
+          const skid = state.skid ? DRIFT.speed + DRIFT.speedGain : 1;
+          assert.ok(state.speed <= bot_top(dog) * 1.09 * (state.boosting ? DRIFT.boostSpeed : skid), `${mapId}: ${dog} at ${state.speed} m/s`);
           assert.ok(move.position.every(Number.isFinite) && Number.isFinite(move.rotation));
         },
       });

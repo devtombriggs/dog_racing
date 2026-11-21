@@ -3,7 +3,7 @@
 // ground there is left cracked, the camera shakes, and every dog that is shaken shudders until it is over.
 //
 //   const quake = createQuake({ scene });
-//   quake.stomp({ position: [x, y, z], avatar, slowed: [avatar, ...], seconds });     // avatar: Jazz (may be missing)
+//   quake.stomp({ position: [x, y, z], avatar, slowed: [avatar, ...], slowedFor: [seconds, ...], seconds });     // avatar: Jazz (may be missing)
 //   each frame: quake.update(delta);   then, once the camera has been placed:  quake.shake(camera);
 //   quake.dispose();
 import * as THREE from 'three';
@@ -33,7 +33,7 @@ export function createQuake({ scene }) {
   }
 
   return {
-    stomp({ position, avatar = null, slowed = [], seconds = QUAKE.seconds }) {
+    stomp({ position, avatar = null, slowed = [], slowedFor = [], seconds = QUAKE.seconds }) {
       const at = new THREE.Group(); at.position.fromArray(position); at.position.y += 0.12; root.add(at);
       const rings = Array.from({ length: RING.count }, () => {
         const material = new THREE.MeshBasicMaterial({ color: 0xd9c9a3, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
@@ -41,7 +41,7 @@ export function createQuake({ scene }) {
       });
       const cracks = new THREE.LineSegments(cracksGeometry, new THREE.LineBasicMaterial({ color: 0x1c1712, transparent: true, opacity: 0 }));
       cracks.rotation.y = Math.random() * 6.28; at.add(cracks);
-      quakes.push({ at, rings, cracks, avatar, slowed, seconds, t: 0, landed: false });
+      quakes.push({ at, rings, cracks, avatar, slowed, slowedFor, seconds, t: 0, landed: false });
     },
 
     update(delta) {
@@ -68,12 +68,13 @@ export function createQuake({ scene }) {
         q.cracks.material.opacity = since > 0 ? 0.9 * Math.min(1, since * 8) * Math.max(0, 1 - since / q.seconds) : 0;
         q.cracks.scale.setScalar(1 + Math.min(1, Math.max(0, since) * 5) * 1.6);
         // every shaken dog shudders where it stands until it is over
-        const shaking = since > 0 && since < q.seconds;
-        for (const dog of q.slowed) {
-          if (!dog?.model) continue;
-          if (shaking) dog.model.position.x = 0.07 * dog.model.scale.x * Math.sin(clock * 46 + dog.model.id);
-          else if (since >= q.seconds) settle(dog);
-        }
+        // (each for as long as it is slowed: shorter the further back it is)
+        q.slowed.forEach((dog, n) => {
+          if (!dog?.model) return;
+          const lasts = q.slowedFor[n] ?? q.seconds;
+          if (since > 0 && since < lasts) dog.model.position.x = 0.07 * dog.model.scale.x * Math.sin(clock * 46 + dog.model.id);
+          else if (since >= lasts && since - delta < lasts) settle(dog);
+        });
         if (since > Math.max(q.seconds, RING.seconds + RING.count * RING.gap)) {
           for (const ring of q.rings) ring.material.dispose();
           q.cracks.material.dispose();

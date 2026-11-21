@@ -150,7 +150,7 @@ export class Race {
       onUseItem: () => { if (this.myItem) socket.emit('useItem'); }
     });
 
-    this.chaseCamera = new ChaseCamera(this.stage.camera, this.local.group, this.local.config);
+    this.chaseCamera = new ChaseCamera(this.stage.camera, this.local.group, this.local.config, () => this.local.travelYaw);
 
     // ---------------------------------
     // GAME LOOP
@@ -397,10 +397,11 @@ export class Race {
       // Rocky's Sheep Stampede: the server runs the flock; we draw it
       sheepReleased: ({ sheep }) => this.sheep.release(sheep),
       // Jazz has stomped: the ground shakes for everyone, and the dogs the server names can barely move
-      earthquake: ({ playerId, position, slowed, seconds, speed }) => {
+      earthquake: ({ playerId, position, slowed, secondsFor = {}, seconds, speed }) => {
         const avatarOf = id => (mine(id) ? local : remotes.get(id));
-        this.quake.stomp({ position, avatar: avatarOf(playerId), slowed: slowed.map(avatarOf).filter(Boolean), seconds });
-        if (slowed.includes(this.myId)) local.shaken(seconds, speed);
+        const shaken = slowed.filter(avatarOf);
+        this.quake.stomp({ position, avatar: avatarOf(playerId), slowed: shaken.map(avatarOf), slowedFor: shaken.map(id => secondsFor[id] ?? seconds), seconds });
+        if (slowed.includes(this.myId)) local.shaken(secondsFor[this.myId] ?? seconds, speed);
       },
       sheepMoved: ({ sheep }) => this.sheep.move(sheep),
       sheepGone: ({ id, position }) => this.sheep.gone(id, position),

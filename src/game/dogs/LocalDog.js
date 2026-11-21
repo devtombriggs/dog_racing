@@ -5,7 +5,7 @@ import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } fro
 import { BASE_SPEED, downhillSpeed } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
 import { PAD_KICK } from '../../../shared/items.js';
-import { DRIFT, AUTO_DRIFT, driftPerks, driftCanStart, driftTurn, driftChargeRate, driftTier, driftBoost, driftBoostNow, autoDriftHeld, autoDriftTurn } from '../../../shared/drift.js';
+import { DRIFT, AUTO_DRIFT, DRIFT_ARC, driftPerks, driftCanStart, driftArc, driftSteering, driftStep, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow, autoDriftHeld, autoDriftCurvature } from '../../../shared/drift.js';
 import { DRIFT_HUD_COLOURS } from './driftEffects.js';
 import { DOGS, STAT_EFFECT, WATER_SPEED, WATER_ACCELERATION, statScale, swimShare, turnSpeedLoss, pickupShare } from '../../config/dogs.js';
 import { HANDLING, RUNNING_JUMP_SPEED } from '../../config/handling.js';
@@ -86,7 +86,10 @@ export class LocalDog extends DogAvatar {
     // DRIFTING (shared/drift.js)
     // ---------------------------------
 
-    this.drift = null;              // skidding round a corner: { side: 1 left / -1 right, charge }
+    this.drift = null;              // skidding round a corner: { side: 1 left / -1 right, charge, steering } (shared/drift.js driftStep)
+    this.driftExitUntil = 0;        // just out of one: the ordinary steering comes back in gently until then
+    this.kick = null;               // a boost's first burst of speed, being fed in: { left (m/s still to give), rate (m/s a second) }
+    this.yawRate = 0;               // how fast the dog is turning (radians a second, + left)
     this.driftBoostUntil = 0;       // the boost for letting go of a skid with sparks, until then
     this.driftBoostTier = 0;
     this.driftBoost = null;         // that boost: { speed, quick, easeOut } (shared/drift.js driftBoost)
@@ -102,6 +105,7 @@ export class LocalDog extends DogAvatar {
     // Real dog speeds at the dogs' scale of 3: an easy canter and a gallop
     // ...then each dog's own stats on top (STAT_EFFECT)
     const stats = this.stats = this.config.stats ?? {};
+    this.driftArc = driftArc({ agility: stats.agility, size: this.config.size ?? 1, control: this.driftPerks.control });   // its drift's curves (shared/drift.js)
     const speedScale = statScale(stats.speed, STAT_EFFECT.speed);
     this.runSpeed = BASE_SPEED.run * speedScale;
     this.sprintSpeed = BASE_SPEED.sprint * speedScale;
@@ -237,6 +241,7 @@ export class LocalDog extends DogAvatar {
     this.position.fromArray(data.position);
     this.group.rotation.set(0, data.rotation, 0);
     this.travelYaw = data.rotation;
+    this.yawRate = 0;
     this.groundY = data.position[1];
     this.currentSpeed = this.slope = this.steer = 0;
     this.#groundJump();
@@ -268,6 +273,7 @@ export class LocalDog extends DogAvatar {
     this.position.fromArray(data.position);
     this.group.rotation.set(0, data.rotation, 0);
     this.travelYaw = data.rotation;
+    this.yawRate = 0;
     this.groundY = data.position[1];
     this.currentSpeed = this.sprintSpeed * data.speedMultiplier;
     this.slope = this.steer = 0;
@@ -337,7 +343,8 @@ export class LocalDog extends DogAvatar {
   #endDrift(boost, wipe = false) {
     const { drift } = this;
     this.drift = null;
-    if (wipe) this.driftBoostUntil = 0;
+    if (drift) this.driftExitUntil = performance.now() + DRIFT_ARC.exitSeconds * 1000;      // EXITING: the steering comes back gently
+    if (wipe) { this.driftBoostUntil = 0; this.kick = null; }
     if (!drift || !boost) return;
     const tier = driftTier(drift.charge), earned = driftBoost(this.stats.drift, tier, this.driftPerks);
     if (!earned) return;
@@ -346,7 +353,11 @@ export class LocalDog extends DogAvatar {
     this.driftBoost = earned;
     // (a Golden Bone's boost and a skid's do not add up: no kick on top of a bone)
     const boosted = this.sprintSpeed * earned.speed;
-    if (this.currentSpeed > 0 && this.currentSpeed < boosted && !this.race.goldenBones.isBoosting()) this.currentSpeed = Math.min(boosted, this.currentSpeed + this.sprintSpeed * (earned.speed - 1) * earned.kick);
+    // (its first burst of speed is fed in over a quarter of a second: the dog surges, it does not jump forward)
+    if (this.currentSpeed > 0 && this.currentSpeed < boosted && !this.race.goldenBones.isBoosting()) {
+      const give = Math.min(boosted - this.currentSpeed, this.sprintSpeed * (earned.speed - 1) * earned.kick);
+      this.kick = { left: give, rate: give / DRIFT_ARC.kickSeconds, upTo: boosted };
+    }
     this.skid.burst(tier);
   }
 
@@ -368,8 +379,8 @@ export class LocalDog extends DogAvatar {
     this.wallAt = now;
   }
 
-  // Start, hold or end a skid, from the drift button.  Returns how hard the skid is turning the dog
-  // (a share of its turning speed, signed like the steering), or null when it is not skidding
+  // Start, hold or end a skid, from the drift button.  Returns the drift's steering ({ yawRate: how fast it is turning
+  // the dog, radians a second, + left; turned: how far this step }), or null when it is not drifting.  The drift has its own curve; the arrows only tighten or widen it
   #driftSteer(frame, turnInput) {
     const { delta, special, effort } = frame;
     const { input, session } = this.race;
@@ -384,23 +395,28 @@ export class LocalDog extends DogAvatar {
       ? autoDriftHeld({ turn: turnInput, heldFor: this.arrowHeld.seconds, bend: road?.bend ?? 0, side: this.drift?.side ?? 0 })
       : input.drift;
 
+    // NORMAL -> HOP: the way it will drift is the way the arrow is held now, and stays so until it ends
     if (!this.drift && driftCanStart({ held, turn: turnInput, effort, grounded })) {
-      this.drift = { side: Math.sign(turnInput), charge: 0, startedAt: performance.now() };
+      const side = Math.sign(turnInput);
+      this.drift = { side, charge: 0, startedAt: performance.now(), steering: driftSteering(side, this.yawRate, this.driftArc, this.currentSpeed) };
     }
     if (!this.drift) return null;
     if (!held || this.isJumping) { this.#endDrift(true); return null; }       // let go: off it goes
     if (!grounded || effort < DRIFT.endEffort) { this.#endDrift(false); return null; }  // lost it
 
-    const { drift } = this, into = auto ? AUTO_DRIFT.into : turnInput * drift.side;
-    drift.charge += driftChargeRate(this.stats.drift, into, this.driftPerks.charge) * delta;
-    // (by itself, the skid is steered round with the road; with the button, the steering tightens and opens it)
-    if (!auto || !road) return drift.side * driftTurn(into, this.driftPerks.control);
-    return drift.side * autoDriftTurn({
-      bend: road.bend, speed: this.currentSpeed, control: this.driftPerks.control,
-      turnRate: THREE.MathUtils.lerp(this.turnRateSlow, this.turnRateSprint, effort),
+    const { drift } = this, steering = drift.steering;
+    // (by itself, the drift is steered round with the road; with the button, the arrows tighten and widen it)
+    const curvature = auto && road ? autoDriftCurvature({
+      bend: road.bend, speed: this.currentSpeed,
       off: drift.side * Math.atan2(Math.sin(this.travelYaw - road.yaw), Math.cos(this.travelYaw - road.yaw)),
       inside: drift.side * road.left, halfWidth: road.halfWidth,
-    });
+    }) : null;
+    driftStep(steering, this.driftArc, { input: turnInput, speed: this.currentSpeed, dt: delta, curvature });
+    // HOP -> DRIFTING: the sparks build once it is down, faster the further into the corner it is steered
+    if (steering.seconds >= DRIFT_ARC.hopSeconds) {
+      drift.charge += driftChargeRate(this.stats.drift, auto ? AUTO_DRIFT.into : steering.guide, this.driftPerks.charge) * delta;
+    }
+    return steering;
   }
 
   // The road at the dog: { bend: how it bends just ahead (1 / its radius in metres, + to the left), yaw: the way it
@@ -560,7 +576,7 @@ export class LocalDog extends DogAvatar {
       terrainMultiplier *
       hillMultiplier *
       (performance.now() < this.burrowBoostUntil ? this.burrowBoost : 1) *
-      Math.max(kickNow, driftNow, this.drift && !goldenBones.isBoosting() ? this.driftPerks.speed : 1, performance.now() < this.launchBoostUntil ? this.launchBoost ?? world.launchTrack.launch.exitSpeedMultiplier : 1) *      // (a landing boost, a boost pad's and a skid's do not add up)
+      Math.max(kickNow, driftNow, this.drift && !goldenBones.isBoosting() ? driftSpeedNow((performance.now() - this.drift.startedAt) / 1000, this.driftPerks) : 1, performance.now() < this.launchBoostUntil ? this.launchBoost ?? world.launchTrack.launch.exitSpeedMultiplier : 1) *      // (a landing boost, a boost pad's and a skid's do not add up)
       (world.proceduralTrack && performance.now() < this.recoveryUntil ? world.proceduralTrack.rules.respawnSpeedMultiplier : 1) *
       goldenBones.speedMultiplier() *
       (special?.speed ?? 1) *
@@ -574,7 +590,7 @@ export class LocalDog extends DogAvatar {
       (special?.speed ? 2.5 : 1) *
       goldenBones.accelerationMultiplier() *
       (kickLeft > 0 ? this.padKick.quick : 1) *
-      (driftNow > 1 ? this.driftBoost.quick : 1) *
+      (driftNow > 1 ? this.driftBoost.quick : this.drift ? DRIFT.speedQuick : 1) *
       (steepRun && slope < 0 ? 1 - 4 * slope : 1) *      // gravity does the work going down the black run
       (inWater
         ? this.waterAcceleration
@@ -586,6 +602,13 @@ export class LocalDog extends DogAvatar {
     const running = autoRun
       ? session.raceGo && !session.raceFinished
       : input.accelerate || Boolean(special?.speed);   // a special carries the dog along by itself
+    // (a drift boost's first burst, fed in a little each frame: shared/drift.js DRIFT_ARC.kickSeconds)
+    if (this.kick) {
+      const give = Math.min(this.kick.left, this.kick.rate * delta);
+      if (this.currentSpeed > 0 && this.currentSpeed < this.kick.upTo) this.currentSpeed = Math.min(this.kick.upTo, this.currentSpeed + give);
+      this.kick.left -= give;
+      if (this.kick.left <= 1e-6) this.kick = null;
+    }
     if (running) {
       this.currentSpeed = Math.min(this.currentSpeed + effectiveAcceleration * delta, maxSpeed);
     } else if (!autoRun && input.brake) {
@@ -618,17 +641,25 @@ export class LocalDog extends DogAvatar {
 
     const turnInput = special?.steerLocked ? 0 : input.turn;
 
-    // A skid (the drift button held through a corner) turns the dog by itself; the steering only tightens or opens it
-    const skid = this.#driftSteer(frame, turnInput);
-
-    // The turn builds and fades: a running dog cannot change line instantly
-    this.steer += ((skid ?? turnInput) - this.steer) * (1 - Math.exp(-HANDLING.steerResponse * delta));
-
     // Fast means wide: the turn rate falls away as the dog stretches out
-    const turnRate = THREE.MathUtils.lerp(this.turnRateSlow, this.turnRateSprint, effort);
-
     // (standing still or stuck against something, left and right still turn the dog on the spot)
-    group.rotation.y += turnRate * this.steer * Math.max(steeringFactor, HANDLING.pivotSteer) * delta;
+    const turnRate = THREE.MathUtils.lerp(this.turnRateSlow, this.turnRateSprint, effort) * Math.max(steeringFactor, HANDLING.pivotSteer);
+
+    // A drift (the drift button held through a corner) turns the dog round its own curve; the arrows only tighten or
+    // widen it.  The ordinary steering is not added on top: it is kept in step with the drift's turn instead, so that
+    // when the drift ends the dog carries on from the turn it had (EXITING), easing back to what the arrows say
+    const drifting = this.#driftSteer(frame, turnInput);
+    if (drifting) {
+      this.yawRate = drifting.yawRate;
+      this.steer = THREE.MathUtils.clamp(drifting.yawRate / Math.max(turnRate, 1e-3), -1.6, 1.6);
+      group.rotation.y += drifting.turned;
+    } else {
+      // The turn builds and fades: a running dog cannot change line instantly (and just out of a drift, more gently still)
+      const response = HANDLING.steerResponse * (performance.now() < this.driftExitUntil ? DRIFT_ARC.exitResponse : 1);
+      this.steer += (turnInput - this.steer) * (1 - Math.exp(-response * delta));
+      this.yawRate = turnRate * this.steer;
+      group.rotation.y += this.yawRate * delta;
+    }
 
     // Poppy's wave steers itself: it follows the road, wandering from side to side, so it only
     // hits the dogs that happen to be in its way
@@ -670,7 +701,7 @@ export class LocalDog extends DogAvatar {
     // The dog travels where its momentum takes it, which trails the way
     // its nose points: at a sprint it drifts a little through a turn
     const wet = world.coastalTrack?.rules.slip;
-    const grip = (this.drift ? Math.min(DRIFT.grip, this.gripSprint) : THREE.MathUtils.lerp(HANDLING.gripSlow, this.gripSprint, effort))
+    const grip = (this.drift ? DRIFT_ARC.grip : THREE.MathUtils.lerp(HANDLING.gripSlow, this.gripSprint, effort))
       * (wet && frame.slip ? 1 - (1 - wet.grip) * frame.slip : 1);
 
     this.travelYaw +=

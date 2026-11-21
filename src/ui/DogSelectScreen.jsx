@@ -8,7 +8,8 @@ import { Paw } from './Paw.jsx';
 import { arrowKeys, tileHandlers } from './tileGrid.js';
 import { restrictMenuPad } from './menuPad.js';
 
-const DOG_IDS = Object.keys(DOGS);
+// (in alphabetical order of their names)
+const DOG_IDS = Object.keys(DOGS).sort((a, b) => DOGS[a].displayName.localeCompare(DOGS[b].displayName));
 const COLUMNS = 4;
 const ROWS = Math.ceil((DOG_IDS.length + 2) / COLUMNS);       // (the Random tile at the end is two wide)
 // (small copies of the portraits, made beside the full-size ones: public/portraits/*.webp)

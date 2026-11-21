@@ -2081,7 +2081,7 @@ test('Jimmy\'s Dragon Dance: from last place seven seconds and five fireworks at
   for (const p of [j2, other]) p.call('leaveGame');
 });
 
-test('Jazz\'s Earthquake: every other dog still racing is slowed for five seconds wherever it is, its own special or not, but not Ralph flying, and not Jazz', async context => {
+test('Jazz\'s Earthquake: every other dog still racing is slowed (five seconds for the leader, less further back), its own special or not, but not Ralph flying, and not Jazz', async context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const { QUAKE, SPECIALS } = await import('../shared/specials.js');
   assert.equal(SPECIALS.jazz.kind, 'quake');
@@ -2116,6 +2116,9 @@ test('Jazz\'s Earthquake: every other dog still racing is slowed for five second
   const quake = events('earthquake').at(-1);
   assert.equal(quake.playerId, jazz.id);
   assert.deepEqual([quake.seconds, quake.speed], [QUAKE.seconds, QUAKE.speed]);
+  // by each dog's own place, not Jazz's: Pippa leads (5 s); the rest are further back and slowed for less
+  assert.equal(quake.secondsFor[pippa.id], 5);
+  for (const id of [poppy.id, twins.id]) assert.ok(quake.secondsFor[id] < 5 && quake.secondsFor[id] >= 1);
   assert.deepEqual([...quake.slowed].sort(), [pippa.id, poppy.id, twins.id].sort(), 'Pippa, Poppy and the twins (Trip Wire or not, their paws are on the ground); not Ralph in the air, not Jazz');
   assert.equal(events('specialStarted').filter(e => e.playerId === jazz.id).length, 0, 'nothing of her own to keep track of');
   assert.equal(events('itemUsed').at(-1)?.playerId ?? jazz.id, jazz.id);
