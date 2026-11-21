@@ -12,10 +12,10 @@ import { GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { FROSTPEAK_CANNON, FROSTPEAK_SLALOM, FROSTPEAK_SKI_SLOPE } from '../shared/frostpeakCannon.js';
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
 
-test('Treat Road has half as much road, supported spawns, and open edges', () => {
+test('Treat Road (bigger since Tom, 2026-11-21) has its catapult gap, supported spawns, and open edges', () => {
   assert.equal(MAPS.treat_road.startPositions.length, 6);
   assert.equal(MAPS.treat_road.checkpoints.length, TREAT_ROAD.checkpoints.length - 1);
-  assert.ok(Math.abs(TREAT_ROAD.roadLength - 1450) < 5);
+  assert.ok(Math.abs(TREAT_ROAD.roadLength - 2150) < 5);
   const samples = TREAT_ROAD.samples;
   for (let i = 0; i < TREAT_ROAD.sampleCount; i++) {
     const j = (i + 1) % TREAT_ROAD.sampleCount;
@@ -282,14 +282,16 @@ test('Muddy Paws Farm: a fenced lap with a barn to run through, things standing 
   const T = FARM, s = T.samples;
   assert.equal(MAPS.farmyard.procedural, true);
   assert.equal(MAPS.farmyard.startPositions.length, 6);
-  assert.ok(Math.abs(T.length - 1670) < 10, `lap of ${T.length.toFixed(0)} m`);
+  assert.ok(Math.abs(T.length - 1648) < 10, `lap of ${T.length.toFixed(0)} m`);        // (the maze since Tom, 2026-11-21)
   assert.deepEqual(T.sections.map(sec => sec.id).join(''), 'ABCDEFGHIJA', 'all ten parts of the farm, in order');
   const bridge = T.chasms[0];
   for (let i = 0; i < T.sampleCount; i++) {
     const q = T.query(s.x[i], s.z[i]);
     assert.ok(q.onTrack && !q.fall, 'nowhere to fall off: the farm is fenced');
     const onObstacle = T.obstacles.some(o => Math.hypot(o.x - s.x[i], o.z - s.z[i]) < o.radius + 0.7);
-    assert.equal(q.blocked, onObstacle, `centreline at ${s.s[i].toFixed(0)} m`);
+    // (in the maze the rows of corn cross the middle of the field: Tom, 2026-11-21)
+    const inMaze = T.along(s.s[i], T.maze.sStart - 3) >= 0 && T.along(s.s[i], T.maze.sEnd + 3) <= 0;
+    if (!inMaze) assert.equal(q.blocked, onObstacle, `centreline at ${s.s[i].toFixed(0)} m`);
     const overPond = i > bridge.firstIndex && i < bridge.lastIndex;
     if (!overPond) assert.ok(Math.abs(T.terrainHeight(s.x[i], s.z[i]) - s.y[i]) < 0.5, 'the ground is at the road');
     assert.ok(Math.abs(s.grade[i]) < 0.08, 'gentle hills only');
@@ -381,4 +383,23 @@ test('Muddy Paws Farm hazards: the same for everyone at the same moment, they cr
     assert.equal(T.hazardHit([outside.x, outside.y, outside.z], t), null, 'the outside of the bend is always safe');
   }
   assert.ok(swept > 30 && swept < 70, `the inside is swept ${swept} tenths of a second in twelve`);
+});
+
+test('Muddy Paws Farm\'s maize maze (Tom, 2026-11-21): rows of corn with gaps in different places, dead ends, and a way through', () => {
+  const T = FARM, m = T.maze, laneMid = j => (j - m.lanes / 2 + 0.5) * m.lane;
+  const at = (s, lateral) => { const p = T.pointAt(s, lateral); return T.query(p.x, p.z); };
+  // each row of corn across the field is a wall but for its gaps
+  for (let b = 1; b < m.cells; b++) {
+    const s = m.sStart + b * m.cell;
+    for (let j = 0; j < m.lanes; j++) assert.equal(at(s, laneMid(j)).blocked, !m.open[b].includes(j), `row ${b}, lane ${j}`);
+  }
+  // the quickest way through never touches the corn, and goes through a gap in every row
+  for (let s = m.sStart - m.from; s < m.sEnd + 24; s += 2) assert.equal(at(s, m.line(s)).blocked, false, `the way through at ${s.toFixed(0)} m`);
+  for (let b = 1; b < m.cells; b++) assert.ok(m.open[b].includes(m.route[b]));
+  // and there is more than one way in: a gap in the first row that leads nowhere (the scarecrow stands in it)
+  const deadEnd = m.open[1].find(j => j !== m.route[1]);
+  assert.ok(deadEnd !== undefined);
+  const scarecrow = T.obstacles.find(o => o.kind === 'scarecrow');
+  assert.ok(Math.abs(scarecrow.lateral - laneMid(deadEnd)) < 0.01 && scarecrow.s > m.sStart + m.cell && scarecrow.s < m.sStart + 2 * m.cell);
+  assert.ok(m.sEnd - m.sStart >= 200 && T.pointAt((m.sStart + m.sEnd) / 2).halfWidth > 22, 'a big field');
 });

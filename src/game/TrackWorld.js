@@ -21,7 +21,8 @@ const GENERATED_WORLDS = {
   monkey_jungle: () => import('../tracks/jungle/JungleTrack.js').then(module => module.createJungle),
   pet_mall: () => import('../tracks/petMall/PetMallTrack.js').then(module => module.createPetMall),
   water_park: () => import('../tracks/waterPark/WaterParkTrack.js').then(module => module.createWaterPark),
-  treat_road: () => import('../tracks/treatRoad/TreatRoadTrack.js').then(module => module.createTreatRoad)
+  treat_road: () => import('../tracks/treatRoad/TreatRoadTrack.js').then(module => module.createTreatRoad),
+  wendover: () => import('../tracks/wendover/WendoverWoodsTrack.js').then(module => module.createWendoverWoods)
 };
 
 // The map being raced on: its scenery, and the questions the dogs ask of it (is this the road?
@@ -43,7 +44,7 @@ export class TrackWorld {
       : mapId === 'frostpeak' ? FROSTPEAK_CANNON : null;
     // Frostpeak's black run: steep enough that gravity, not legs, sets the pace
     this.steepRun = mapId === 'frostpeak';
-    this.woodland = mapId === 'wendover';
+    this.woodland = mapId === 'wendover' && !this.proceduralTrack;       // (the old model's own water and bog: retired, since it is generated)
     // The supplied coastal map has its own surfaces (mud, verges, water) and speeds for them
     this.coastalTrack = this.proceduralTrack?.speedFactor ? this.proceduralTrack : null;
     // Dogs cast shadows on the maps lit for them
@@ -53,6 +54,7 @@ export class TrackWorld {
 
     this.proceduralWorld = null;
     this.woodlandWorld = null;
+    this.slalomWorld = null;        // (Frostpeak's gates and snowmen)
     this.heightmap = null;
 
     // Frostpeak supplies simplified hidden colliders; Wendover uses visual meshes.
@@ -105,10 +107,11 @@ export class TrackWorld {
         })
       : Promise.resolve(null);
 
-    const [gltf, heights, woodlandModule] = await Promise.all([
+    const [gltf, heights, woodlandModule, slalomModule] = await Promise.all([
       loader.loadAsync(map.model),
       heightmapRequest,
-      this.woodland ? import('../tracks/wendover/WendoverWorld.js') : Promise.resolve(null)
+      this.woodland ? import('../tracks/wendover/WendoverWorld.js') : Promise.resolve(null),
+      this.mapId === 'frostpeak' ? import('../tracks/frostpeak/slalom.js') : Promise.resolve(null)
     ]);
     if (this.#disposed) return new Promise(() => {});
 
@@ -118,6 +121,13 @@ export class TrackWorld {
     gltf.scene.updateMatrixWorld(true);
     this.#sortMeshes(gltf.scene);
     if (woodlandModule) this.woodlandWorld = woodlandModule.createWendoverWorld(scene, renderer, gltf.scene);
+    // Frostpeak's slalom gates and snowmen: drawn one by one, so that each can be knocked down (the model's own, all in one
+    // piece, are hidden, and their collision boxes left out: they slow a dog now, they do not stop it)
+    if (slalomModule) {
+      const merged = gltf.scene.getObjectByName('Scenery_Slalom');
+      if (merged) merged.visible = false;
+      this.slalomWorld = slalomModule.createSlalom(scene);
+    }
 
     console.log('Track collision geometry:', {
       trackMeshes: this.trackMeshes.map((mesh) => mesh.name),
@@ -154,7 +164,7 @@ export class TrackWorld {
       if (collisionRoot && /^Water_Frozen_/.test(object.name)) this.groundMeshes.push(object);
       if (!collisionRoot && /water/.test(name)) this.waterMeshes.push(object);
       const obstacle = collisionRoot
-        ? isCollision && !['Collision_Track_Surface', 'Collision_Terrain'].includes(object.name)
+        ? isCollision && !['Collision_Track_Surface', 'Collision_Terrain', 'Collision_Slalom'].includes(object.name)
         : /(scenery[_\s-]*(trees|rocks|fences)|obstacle[_\s-]*log)/.test(name);
       if (obstacle) {
         this.obstacleMeshes.push(object);
@@ -181,6 +191,7 @@ export class TrackWorld {
   update(seconds, playerPosition, sinceGo, dogPositions) {
     this.proceduralWorld?.update(seconds, playerPosition, sinceGo);
     this.woodlandWorld?.update(seconds, playerPosition, dogPositions());
+    this.slalomWorld?.update(seconds);
   }
 
   // Frostpeak balls skim the ground: the height of the snow at (x, z), or null on other maps
@@ -202,13 +213,13 @@ export class TrackWorld {
   swimmingAt(position) {
     if (this.woodland) return Boolean(this.poolAt(position)?.swimming);
     if (!this.coastalTrack) return false;
-    const ground = this.coastalTrack.query(position.x, position.z);
+    const ground = this.coastalTrack.query(position.x, position.z, -1, position.y);
     return ground.movement === 'swim' && position.y < ground.dogY + 0.4;       // (not one bouncing over the water)
   }
 
   isTrackSurface(position) {
     if (this.poolAt(position)) return true;
-    if (this.proceduralTrack) return this.proceduralTrack.query(position.x, position.z).onTrack;
+    if (this.proceduralTrack) return this.proceduralTrack.query(position.x, position.z, -1, position.y).onTrack;
     // Fail open if the GLB has no identifiable track surface.
     if (this.trackMeshes.length === 0) return true;
     const raycaster = this.#surfaceRaycaster;
@@ -225,7 +236,7 @@ export class TrackWorld {
     const pool = this.poolAt(position);
     if (pool) return woodlandDogY(pool, this.dogId);
     if (this.proceduralTrack) {
-      const ground = this.proceduralTrack.query(position.x, position.z);
+      const ground = this.proceduralTrack.query(position.x, position.z, -1, position.y);
       return ground.onTrack ? (ground.dogY ?? ground.y) : fallback;
     }
     const raycaster = this.#groundRaycaster;
@@ -322,5 +333,6 @@ export class TrackWorld {
     this.#restoreEnvironment?.();
     this.proceduralWorld?.dispose();
     this.woodlandWorld?.dispose();
+    this.slalomWorld?.dispose();
   }
 }

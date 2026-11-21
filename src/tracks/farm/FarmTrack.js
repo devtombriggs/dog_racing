@@ -402,6 +402,16 @@ function buildMaize(group, D, animated) {
       const p = beside(s + (r() - 0.5) * 0.9, side * (hw + off + r() * 0.5)); list.push([p.x, p.y, p.z, r() * 3.14, 0.82 + r() * 0.36]);
     }
   }
+  // the maze (Tom, 2026-11-21): its rows and walls of corn, two staggered rows of stalks along each
+  for (const wall of T.maze.boxes) {
+    const acrossS = wall.s1 - wall.s0 < wall.l1 - wall.l0;          // (a row across the field, rather than a wall down it)
+    const along = acrossS ? [wall.l0, wall.l1] : [wall.s0, wall.s1], mid = acrossS ? (wall.s0 + wall.s1) / 2 : (wall.l0 + wall.l1) / 2;
+    for (let v = along[0] + 0.4; v < along[1] - 0.2; v += 1.1) for (const off of [-0.45, 0.45]) {
+      const sAt = acrossS ? mid + off + (r() - 0.5) * 0.3 : v + (r() - 0.5) * 0.4, lat = acrossS ? v + (r() - 0.5) * 0.4 : mid + off + (r() - 0.5) * 0.3;
+      if (Math.abs(lat) > T.pointAt(sAt).halfWidth + 1.2) continue;
+      const p = T.pointAt(sAt, lat); list.push([p.x, p.y, p.z, r() * 3.14, 0.85 + r() * 0.3]);
+    }
+  }
   const m = new THREE.InstancedMesh(stalk, mat, list.length);
   list.forEach((p, k) => { o.position.set(p[0], p[1] - 0.1, p[2]); o.rotation.set(0, p[3], 0); o.scale.set(p[4], p[4], p[4]); o.updateMatrix(); m.setMatrixAt(k, o.matrix); });
   m.name = 'Farm_Maize'; m.receiveShadow = true; group.add(m); D.push(tex, stalk, mat, m);

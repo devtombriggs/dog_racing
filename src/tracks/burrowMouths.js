@@ -16,7 +16,7 @@ function signTexture() {
 
 export function createBurrowMouths({ scene, mapId }) {
   const group = new THREE.Group(); group.name = 'BurrowMouths';
-  const tunnels = mapId === 'wendover' ? [] : BURROWS[mapId] ?? [];
+  const tunnels = BURROWS[mapId] ?? [];
   const disposables = [];
   if (tunnels.length) {
     const earth = new THREE.MeshStandardMaterial({ color: 0x7a5232, roughness: 1, flatShading: true });

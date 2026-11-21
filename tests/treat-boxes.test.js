@@ -22,10 +22,10 @@ test('all twelve treat boxes have distinct IDs and supported pickup positions', 
   }
 });
 
-test('Treat Road keeps the box and bone spots it already had', () => {
+test('Treat Road keeps its box IDs, and the same share of the lap for its boxes and bones on the bigger road', () => {
   assert.deepEqual(TREAT_BOXES.map(b => b.id).slice(0, 3), ['treat-0-0', 'treat-0-1', 'treat-0-2']);
-  assert.deepEqual(BOX_ROW_S.treat_road.map(Math.round), [240, 528, 928, 1312]);
-  assert.deepEqual(BONE_S.treat_road.map(Math.round), [128, 408, 832, 1136]);
+  assert.deepEqual(BOX_ROW_S.treat_road.map(Math.round), [345, 759, 1334, 1886]);
+  assert.deepEqual(BONE_S.treat_road.map(Math.round), [184, 587, 1196, 1633]);
 });
 
 test('every map has box rows of three and single bones, with IDs unique across all maps', () => {

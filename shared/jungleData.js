@@ -37,6 +37,11 @@ const BRIDGE = { length: 60, half: 2.7, reach: 0.9, period: 6 };
 const OLD_BRIDGE = { length: 60, half: 2.2, reach: 1.5, period: 5 };
 const SWING = { gap: 5, pad: 13, pads: 4, half: 3.0, reach: 3.4, period: 7.5, step: 0.1 };
 const LOG = { length: 60, half: 2.1, reach: 0, period: 6 };
+// Off a bridge, the swings or the log (Tom, 2026-11-21: "if you fall from the moving bridges you land on another level not
+// die"): into the river at the bottom of the gorge.  Wade along the river bed under the bridge (slow, unless you swim well),
+// and a vine lift at the far bank hauls you back up to the trail.  `wade`: how deep the water is over the bed
+const RIVER_BED = { y: RIVER_Y - 0.4, wade: 0.45, run: 10, after: 4 };          // (after: the lift starts just under the far end of the crossing)
+const VINE_LIFT = { duration: 2.4, landing: 16, exitSpeedMultiplier: 1.1, boostSeconds: 0.8 };
 
 const at = (x, z, width, section, lift = 0) => [x * K, z * K, junglePlateau(x * K, z * K) + lift, width, section];
 const level = (x, z, width, section) => [x * K, z * K, PLATEAU, width, section];        // (a bridge is level from end to end)
@@ -117,8 +122,15 @@ export const JUNGLE = makeTrack({
     });
     return out;
   }
+  // the river under each crossing, and its vine lift up the far bank
+  const undercity = platforms.map(zone => ({ id: `river-${zone.id}`, under: zone.id, sStart: zone.sStart - 2, sEnd: zone.sEnd + RIVER_BED.after, depth: PLATEAU - RIVER_BED.y, wade: RIVER_BED.wade, surface: 'water' }));
+  const launches = undercity.map(u => {
+    const takeoffS = u.sEnd - 8;
+    return { id: `vine-lift-${u.under}`, lift: true, under: u.id, padStart: takeoffS - RIVER_BED.run, takeoffS, gapStart: takeoffS, gapEnd: takeoffS + 4, landingS: takeoffS + VINE_LIFT.landing,
+      gapStartIndex: -1, gapEndIndex: -1, duration: VINE_LIFT.duration, arcHeight: 0, exitSpeedMultiplier: VINE_LIFT.exitSpeedMultiplier, boostSeconds: VINE_LIFT.boostSeconds };
+  });
   return {
-    platforms, obstacles, water: [pond], hazardsAt, autoPickups: { rowEvery: 250, boneEvery: 105 },
+    platforms, undercity, launches, obstacles, water: [pond], hazardsAt, autoPickups: { rowEvery: 250, boneEvery: 105 },
     keepClear: [[monkeys[0] - 12, monkeys[2] + 12], [temple.sStart - 8, temple.sEnd + 8], [grove.sStart - 4, grove.sEnd + 4], ...snakes.map(s => [s - 12, s + 12]), [stair.turnS - 6, stair.sEnd]],
     extras: { monkeys, temple, ballRun: BALL, grove, targets, coconut: COCONUT, pond, swing: SWING, snakes, snake: SNAKE, stair, stairRise: STAIR.rise,
       hazardZones: { snakes, monkeys, stones: [temple.sStart, (temple.sStart + temple.sEnd) / 2, temple.sEnd], coconuts: targets.map(target => target.s) } },

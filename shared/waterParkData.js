@@ -27,17 +27,25 @@ const SAMPLE_STEP = 2, CHECKPOINT_SPACING = 100;
 const START_U = 0.5;                    // where on the spline the start line is (between the first two control points)
 const DECK = 2;                         // height of the pool deck
 
-// [x, z, height, width, section]
-const CONTROL_POINTS = [
+// [x, z, height, width, section, name?]: a name marks a point the features below are placed by.  Tom, 2026-11-21: "more turns
+// yet again, the rings you jump on should move and be like a lazy river, if you fall off them you shouldn't be able to bounce
+// back on, you need to swim".  So bends all the way round, and the rings drift down the lagoon (RING below)
+const ROUTE = [
   [-110, 160, DECK, 16, 'A'], [-30, 160, DECK, 16, 'A'], [50, 160, DECK, 16, 'A'],
-  [130, 160, DECK, 18, 'B'], [210, 150, DECK, 18, 'B'], [275, 110, DECK, 18, 'B'],
-  [305, 45, DECK, 15, 'C'], [300, -30, DECK, 15, 'C'],
-  [290, -100, DECK, 16, 'D'], [255, -165, DECK, 16, 'D'],
-  [190, -210, DECK, 13, 'E'], [110, -225, DECK, 13, 'E'], [30, -215, DECK, 13, 'E'],
-  [-50, -225, 5, 11, 'F'], [-130, -235, 14, 11, 'F'], [-210, -215, 24, 11, 'F'], [-265, -160, 32, 11, 'F'],
-  [-280, -90, 34, 9, 'G'], [-245, -30, 27, 9, 'G'], [-285, 30, 19, 9, 'G'], [-250, 90, 12, 9, 'G'],
+  // the lagoon: a lazy S of water
+  [124, 172, DECK, 18, 'B', 'lagoon'], [184, 146, DECK, 18, 'B'], [244, 164, DECK, 18, 'B'], [292, 124, DECK, 18, 'B'],
+  // the boulevard: a chicane for the beach balls
+  [304, 62, DECK, 15, 'C', 'balls'], [282, 6, DECK, 15, 'C'], [306, -46, DECK, 15, 'C'],
+  // the fountain square: one long sweep
+  [284, -104, DECK, 16, 'D', 'jets'], [244, -160, DECK, 16, 'D'],
+  // the lazy river: S-bends with the flow
+  [184, -204, DECK, 13, 'E', 'river'], [124, -184, DECK, 13, 'E'], [64, -222, DECK, 13, 'E'], [2, -202, DECK, 13, 'E', 'riverEnd'],
+  [-56, -230, 5, 11, 'F'], [-130, -202, 14, 11, 'F'], [-204, -236, 24, 11, 'F'], [-264, -168, 32, 11, 'F'],
+  [-282, -98, 34, 9, 'G', 'slide'], [-240, -40, 27, 9, 'G'], [-286, 20, 19, 9, 'G'], [-246, 80, 12, 9, 'G', 'slideEnd'],
   [-190, 158, DECK, 14, 'H'],
 ];
+const AT = Object.fromEntries(ROUTE.map((p, k) => [p[5], k]).filter(([name]) => name));
+const CONTROL_POINTS = ROUTE.map(([x, z, height, width, section]) => [x, z, height, width, section]);
 
 export const SECTIONS = {
   A: { name: 'Poolside Plaza', surface: 'tiles' },
@@ -60,11 +68,14 @@ const SWIM_DRAFT = 0.42;                // a swimming dog rides this far below t
 const swimShare = swimming => swimSpeed(swimming * 10);      // (stats here are 0 to 1: shared/dogStats.js swimSpeed)
 const RIVER_FLOW = 0.15;                // the Lazy River carries every dog along by this much of its top speed
 const SLIDE_SPEED = 1.45;               // share of top speed on the slide
-const RING = { spacing: 13.5, radius: 2.4, zigzag: 1.1 };
+// The rings drift down the lagoon like a lazy river, `flow` m/s, swaying `sway` metres from side to side as they go; at the far end
+// each sinks and comes up again at the start.  A dog can get on one only from the deck or the shallows near the start (within
+// `mount` metres of it): one that falls off further out has to swim the rest
+const RING = { spacing: 13.5, radius: 2.4, zigzag: 1.1, flow: 2.2, sway: 1.5, swayPeriod: 6, mount: 14 };
 // A ring throws a dog up at `force` (falling back at `gravity`: 0.8 s in the air, nearly 2 m up) and on at
-// `pace` whatever dog it is, which is exactly the speed that comes down on the next ring
+// `pace` whatever dog it is: exactly the speed that comes down on the next ring, which has drifted on meanwhile
 const BOUNCE = { force: 9.5, gravity: 24 };
-BOUNCE.pace = RING.spacing / (2 * BOUNCE.force / BOUNCE.gravity);
+BOUNCE.pace = RING.spacing / (2 * BOUNCE.force / BOUNCE.gravity) + RING.flow;
 
 const clamp01 = t => Math.min(1, Math.max(0, t));
 const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -136,24 +147,39 @@ function buildTrack() {
 
   // ---------- the water: Ring Lagoon and the Lazy River
   const pools = [
-    { id: 'lagoon', name: 'Ring Lagoon', sStart: sAtU(3.05), sEnd: sAtU(5.45), flow: 0 },
-    { id: 'river', name: 'The Lazy River', sStart: sAtU(10.25), sEnd: sAtU(11.7), flow: RIVER_FLOW },
+    // (the lagoon flows too now, like a lazy river, at the rings' pace: a swimmer is carried along as the rings are)
+    { id: 'lagoon', name: 'Ring Lagoon', sStart: sAtU(AT.lagoon + 0.05), sEnd: sAtU(AT.balls - 0.55), flow: RING.flow / 17 },
+    { id: 'river', name: 'The Lazy River', sStart: sAtU(AT.river + 0.25), sEnd: sAtU(AT.riverEnd - 0.3), flow: RIVER_FLOW },
   ];
   const poolAt = s => pools.find(pool => along(s, pool.sStart) >= 0 && along(s, pool.sEnd) <= 0) ?? null;
   /** how deep the water is at s (0 out of the pools; it shelves in and out at each end) */
   const depthAt = s => { const pool = poolAt(s); return pool ? POOL_DEPTH * sstep(0, POOL_RAMP, along(s, pool.sStart)) * sstep(0, POOL_RAMP, -along(s, pool.sEnd)) : 0; };
 
-  // the rubber rings floating down the lagoon: land on one (or swim into it) and it bounces the dog on to the next
-  const rings = [];
-  for (let s = pools[0].sStart + 9, k = 0; s < pools[0].sEnd - 6; s += RING.spacing, k++) {
-    const lateral = (k % 2 ? 1 : -1) * RING.zigzag, p = pointAt(s, lateral);
-    rings.push({ id: `ring-${k}`, s, lateral, x: p.x, y: p.y - WATER_BELOW_DECK, z: p.z, radius: RING.radius });
+  // the rubber rings drifting down the lagoon: land on one and it bounces the dog on to the next.  Where each is depends on the
+  // race clock (setClock: the server for each room, the game each frame), so everyone has them in the same places
+  let clock = 0;
+  const setClock = t => { clock = t; };
+  const ringRun = { sStart: pools[0].sStart + 4, count: Math.floor((pools[0].sEnd - 6 - pools[0].sStart - 4) / RING.spacing) };
+  ringRun.span = ringRun.count * RING.spacing;
+  /** every ring at t seconds: { id, s, lateral, x, y, z, radius, rise } (rise: 0 under the water, 1 floating) */
+  function ringsAt(t = clock) {
+    const out = [];
+    for (let k = 0; k < ringRun.count; k++) {
+      const along = ((k * RING.spacing + RING.flow * t) % ringRun.span + ringRun.span) % ringRun.span, s = ringRun.sStart + along;
+      const lateral = (k % 2 ? 1 : -1) * RING.zigzag + RING.sway * Math.sin(2 * Math.PI * (t / RING.swayPeriod + k * 0.37)), p = pointAt(s, lateral);
+      // (it sinks over the last few metres and comes up again over the first)
+      const rise = Math.min(1, along / 3, (ringRun.span - along) / 3);
+      out.push({ id: `ring-${k}`, s, lateral, x: p.x, y: p.y - WATER_BELOW_DECK, z: p.z, radius: RING.radius, rise });
+    }
+    return out;
   }
-  /** The ring a dog at (x, z) is on, or null. */
-  const ringAt = (x, z) => rings.find(ring => (x - ring.x) ** 2 + (z - ring.z) ** 2 <= ring.radius ** 2) ?? null;
+  const rings = ringsAt(0);
+  /** The ring a dog at (x, z) is on at t seconds, or null.  swimming: a dog in the water gets on only near the start of the lagoon */
+  const ringAt = (x, z, swimming = false, t = clock) => ringsAt(t).find(ring => ring.rise > 0.6 && (x - ring.x) ** 2 + (z - ring.z) ** 2 <= ring.radius ** 2
+    && (!swimming || ring.s - pools[0].sStart < RING.mount)) ?? null;
 
   // ---------- the slide, and the jump off the end of it over the splash pool
-  const gapStartIndex = indexAtS(sAtU(20.12)), gapEndIndex = indexAtS(sAtU(20.8));
+  const gapStartIndex = indexAtS(sAtU(AT.slideEnd + 0.12)), gapEndIndex = indexAtS(sAtU(AT.slideEnd + 0.8));
   const launch = {
     gapStart: S[gapStartIndex], gapEnd: S[gapEndIndex],
     padStart: S[gapStartIndex] - 16, takeoffS: S[gapStartIndex] - 4,
@@ -162,7 +188,7 @@ function buildTrack() {
   };
   const isGap = s => s > launch.gapStart && s < launch.gapEnd;
   const isGapSegment = i => i >= gapStartIndex && i < gapEndIndex;
-  const slide = { sStart: sAtU(17.0) + 8, sEnd: launch.gapStart };
+  const slide = { sStart: sAtU(AT.slide) + 8, sEnd: launch.gapStart };
   const onSlide = s => along(s, slide.sStart) >= 0 && along(s, slide.sEnd) <= 0;
 
   /** The flight off the end of the slide: the same curve for the server and every game. */
@@ -242,9 +268,9 @@ function buildTrack() {
   // ---------- everything that moves, as a function of the seconds since GO
   // Each hazard: { id, kind, x, y, z, rotationY, radius, height, active }.  A dog whose middle comes
   // within radius (plus its own) of an active one is knocked over.
-  const ballsS = [0, 23, 46].map(d => sAtU(6.25) + d);
+  const ballsS = [0, 23, 46].map(d => sAtU(AT.balls + 0.25) + d);
   const BALLS = { period: 6.5, pause: 0.08, radius: 1.7 };
-  const jetRows = [0, 1, 2, 3, 4].map(k => sAtU(8.15) + k * 14);
+  const jetRows = [0, 1, 2, 3, 4].map(k => sAtU(AT.jets + 0.15) + k * 14);
   const JETS = { period: 3.6, on: 0.4, radius: 1.3, lanes: [-0.62, 0, 0.62] };
   const pingPong = (t, period, pause) => {            // 0 -> 1 -> 0 with a rest at each end
     const ph = ((t % period) + period) % period / period, move = 0.5 - pause;
@@ -306,7 +332,7 @@ function buildTrack() {
     samples: { x: X, y: Y, z: Z, width: W, s: S, u: U, tangentX: TX, tangentZ: TZ, normalX: NX, normalZ: NZ, grade: GRADE, curvature: KAPPA, section: SEC },
     sections, checkpoints, startPositions,
     startFinish: { position: [X[0], Y[0], Z[0]], rotationY: yawAt(0), halfWidth: W[0] / 2 },
-    pools, rings, slide, launch, jets,
+    pools, rings, ringRun, ring: RING, slide, launch, jets,
     water: { belowDeck: WATER_BELOW_DECK, depth: POOL_DEPTH },
     // where each moving hazard lives, for keeping pickups clear of them and for the computer dogs
     hazardZones: { balls: ballsS, jets: [jetRows[0], jetRows.at(-1)] },
@@ -316,7 +342,7 @@ function buildTrack() {
       hazardStunMs: 1100,
       bounce: BOUNCE,
     },
-    query, pointAt, indexAtS, sAtU, isGap, isGapSegment, launchPoint, speedFactor, depthAt, poolAt, ringAt, hazardsAt, hazardHit,
+    query, pointAt, indexAtS, sAtU, isGap, isGapSegment, launchPoint, speedFactor, depthAt, poolAt, ringAt, ringsAt, setClock, hazardsAt, hazardHit,
   };
 }
 

@@ -15,6 +15,7 @@ export const BOT_LEVELS = {
     wander: 0.4,           // how much it drifts from side to side, as a share of the road
     foresight: 0.3,        // seconds ahead it sees something coming (the tractor, a sheep, a dog)
     jumpMiss: 0.12,        // chance it misjudges a jump it has to make (a broken bridge)
+    platformMiss: 0.12,    // ...and a jump from one moving platform to the next (Neon Nexus: it falls into the Undercity)
     reaction: [0.5, 1.1],  // seconds after GO before it moves
     itemDelay: [2, 7],     // seconds it holds an item before thinking of using it
     itemSense: 0,          // 0: uses items at random; 1: when they will do some good; 2: aims and saves them
@@ -30,13 +31,13 @@ export const BOT_LEVELS = {
   },
   medium: {
     name: 'Medium',
-    pace: 0.93, line: 0.3, wander: 0.18, foresight: 0.7, jumpMiss: 0.04, reaction: [0.25, 0.6],
+    pace: 0.93, line: 0.3, wander: 0.18, foresight: 0.7, jumpMiss: 0.04, platformMiss: 0.07, reaction: [0.25, 0.6],
     itemDelay: [1, 4], itemSense: 1, pickups: 0.8, dodges: true,
     drift: { chance: 0.5, seconds: 1.3, wall: 0.14 },
   },
   hard: {
     name: 'Hard',
-    pace: 1, line: 0.7, wander: 0.05, foresight: 1.2, jumpMiss: 0.005, reaction: [0.05, 0.25],
+    pace: 1, line: 0.7, wander: 0.05, foresight: 1.2, jumpMiss: 0.005, platformMiss: 0.035, reaction: [0.05, 0.25],
     itemDelay: [0.3, 1.2], itemSense: 2, pickups: 1, dodges: true,
     drift: { chance: 0.75, seconds: 1.6, wall: 0.07 },
   },

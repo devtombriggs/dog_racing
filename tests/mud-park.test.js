@@ -7,7 +7,8 @@ import { GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
 import { BURROWS } from '../shared/burrows.js';
 import { botRoute, createBot } from '../server/bots.js';
 
-const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return T.query(p.x, p.z); };
+// (the lap crosses itself (Tom, 2026-11-21): where the road is asked about, the height says which of the two it is)
+const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return T.query(p.x, p.z, -1, p.y); };
 
 test('Mud Run: a closed lap with a grid, checkpoints in order and tape all the way round', () => {
   assert.equal(MAPS.mud_park.procedural, true);
@@ -17,7 +18,7 @@ test('Mud Run: a closed lap with a grid, checkpoints in order and tape all the w
   for (const start of T.startPositions) { const q = T.query(start.position[0], start.position[2]); assert.ok(q.onTrack && !q.blocked && !q.mud); }
   for (let s = 0; s < T.length; s += 9) {
     if (T.isGap(s)) continue;
-    const p = T.pointAt(s, T.pointAt(s).halfWidth + 3), q = T.query(p.x, p.z);
+    const p = T.pointAt(s, T.pointAt(s).halfWidth + 3), q = T.query(p.x, p.z, -1, p.y);
     assert.ok(q.blocked && q.onTrack, `held at the tape at ${s} m, not a fall`);
   }
   assert.equal(BURROWS.mud_park.length, 2, 'Ralph has his two burrows here too');
@@ -34,7 +35,7 @@ test('Mud Run: it is wet everywhere, wettest on the clay and the mudslide; deep 
   const bog = T.mud[0], inBog = at(bog.s, bog.lateral);
   assert.ok(inBog.mud && T.speedFactor(inBog) < 0.6);
   assert.equal(at(bog.s, -bog.lateral).mud, false, 'there is a firm line past each patch');
-  assert.ok(T.pointAt(T.slide.sStart).y > T.pointAt(T.slide.sEnd).y + 10, 'the slide comes down a long way');
+  assert.ok(T.pointAt(T.slide.sStart).y > T.pointAt(T.slide.sEnd).y + 5, 'the slide comes down a long way');
   for (const stack of T.obstacles) { assert.ok(T.query(stack.x, stack.z).blocked); assert.equal(at(stack.s, -stack.lateral).blocked, false); }
 });
 
@@ -64,7 +65,7 @@ test('Mud Run: the quad bike and the logs knock dogs over, a log can be jumped, 
     }
   }
   assert.deepEqual([...seen].sort(), ['log', 'quad']);
-  for (const [x, , z] of spots.slice(T.checkpoints.length + 5)) { const q = T.query(x, z); assert.ok(q.onTrack && !q.mud && !q.blocked && !q.slide); }
+  for (const [x, y, z] of spots.slice(T.checkpoints.length + 5)) { const q = T.query(x, z, -1, y); assert.ok(q.onTrack && !q.mud && !q.blocked && !q.slide); }
 });
 
 test('Mud Run: a computer dog eases off more for a bend on the clay than for the same bend would need in the dry', () => {

@@ -3,6 +3,7 @@ import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
 import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
+import { SLALOM, slalomHits } from '../shared/slalom.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
@@ -74,6 +75,8 @@ const rooms = new Map();
 const playerRooms = new Map();
 const proceduralRaceStates = new WeakMap();
 const woodlandRaceStates = new WeakMap();
+// (the old Wendover Woods model's own race rules: retired, since it was remade as a generated track: Tom, 2026-11-21)
+const oldWendover = mapId => mapId === 'wendover' && !MAPS.wendover.procedural;
 // The special a dog is using right now: { spec, until, timer }.  Kept off the player object, which is
 // sent to the clients as it is (a timer cannot be sent).
 const activeSpecials = new WeakMap();
@@ -236,7 +239,17 @@ function updateProceduralRace(room, player, data) {
     if (elapsed >= track.rules.respawnDelaySeconds) {
       const cp = track.checkpoints[player.checkpoint];
       const spread = Math.min(1.6, (cp.halfWidth - 1.2) / 2);
-      const point = track.pointAt(cp.s, (2 - state.slot) * spread * 0.5);
+      let point = track.pointAt(cp.s, (2 - state.slot) * spread * 0.5);
+      // Treat Road (Tom, 2026-11-21): back on the road where it fell, a little short of the edge it went over, not at the last
+      // checkpoint, so that a dog that keeps falling still gets on (but not anywhere in the air on the catapult's flight)
+      if (track.rules.respawnWhereFell) {
+        const [fx, , fz] = state.fall.position, q = track.query(fx, fz);
+        const flight = track.launch && q.s > track.launch.padStart - 5 && q.s < track.launch.landingS + 5;
+        if (!flight && !track.isGap(q.s) && q.distance < q.halfWidth + 12) {
+          const s = q.s - 3, hw = track.pointAt(s).halfWidth;
+          point = track.pointAt(s, Math.max(-hw * 0.35, Math.min(hw * 0.35, q.lateral * 0.4)));
+        }
+      }
       const grid = !state.passedStart && player.lap === 1 && player.checkpoint === 0
         ? track.startPositions[state.slot] : null;
       player.position = grid ? [...grid.position] : [point.x, point.y, point.z];
@@ -259,9 +272,11 @@ function updateProceduralRace(room, player, data) {
   if (rideBurrow(room, player, data)) return false;
   const [x, y, z] = data.position;
   track.setClock?.((now - room.startedAt) / 1000);       // (moving platforms: where they are is a matter of the race clock)
-  const ground = track.query(x, z);
-  const previous = track.launch ? track.query(player.position[0], player.position[2]) : null;
+  const ground = track.query(x, z, -1, y);         // (how high it is says which level it is on, where there is a level below)
+  const previous = track.launch ? track.query(player.position[0], player.position[2], -1, player.position[1]) : null;
   for (const pad of track.launches ?? (track.launch ? [track.launch] : [])) {
+    // (a lift up from the level below takes only a dog that is down there; a catapult only one up on the road)
+    if ((pad.under ? ground.level !== pad.under : Boolean(ground.level))) continue;
     if (previous.onTrack && previous.s >= pad.padStart && previous.s < pad.takeoffS
       && ground.s >= pad.takeoffS && ground.s <= pad.gapStart + 8
       && Math.abs(ground.lateral) <= ground.halfWidth
@@ -324,6 +339,7 @@ function collectTreatBoxes(room, player, previousPosition) {
 // Golden Bones on the road: first dog through gets the boost, and the bone is gone for everyone
 // until it comes back.  (The dog's own game boosts it straight away; this keeps the others in step.)
 function collectGoldenBones(room, player, previousPosition) {
+  if (flying(player)) return;            // (Ralph in his Rocket Paws flies through them: Tom, 2026-11-21)
   (GOLDEN_BONE_SPOTS[room.mapId] ?? []).forEach((spot, index) => {
     if (room.boneTimers.has(index) || !touchesGoldenBone(previousPosition, player.position, spot)) return;
     io.to(room.code).emit('goldenBoneTaken', { index, playerId: player.id });
@@ -391,9 +407,18 @@ function useItem(room, player) {
       id: `toy-${room.nextItemId++}`, owner: player.id, placedAt: Date.now(),
       position: [x - forward[0] * TOY.dropBehind, y, z - forward[2] * TOY.dropBehind], rotationY: player.rotation
     };
+    // dropped on a moving platform (Neon Nexus) it rides along on it; dropped over nothing there it falls to the level below
+    const track = PROCEDURAL_TRACKS[room.mapId];
+    if (track?.platforms?.length) {
+      track.setClock((Date.now() - room.startedAt) / 1000);
+      const ground = track.query(hazard.position[0], hazard.position[2], -1, hazard.position[1]);
+      const ride = !ground.level && track.isHole(ground.s) ? track.rideAt(hazard.position[0], hazard.position[2]) : null;
+      if (ride) hazard.ride = ride;
+      else hazard.position[1] = ground.y;
+    }
     room.hazards.set(hazard.id, hazard);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
-    io.to(room.code).emit('hazardPlaced', { id: hazard.id, owner: hazard.owner, position: hazard.position, rotationY: hazard.rotationY });
+    io.to(room.code).emit('hazardPlaced', { id: hazard.id, owner: hazard.owner, position: hazard.position, rotationY: hazard.rotationY, ride: hazard.ride ?? null });
   } else if (item === 'ball') {
     const ball = {
       id: `ball-${room.nextItemId++}`, owner: player.id, firedAt: Date.now(),
@@ -748,7 +773,7 @@ function launchFirework(room, player, { orBehind = false, look = null } = {}) {
   const [x, y, z] = player.position;
   const firework = {
     id: `firework-${room.nextItemId++}`, owner: player.id, target: fireworkTarget(room, player.id, orBehind), firedAt: Date.now(), orBehind,
-    s: route.sAt(player.position) + FIREWORK.launchAhead, homing: false, passed: new Set(),
+    s: route.sAt(player.position) + FIREWORK.launchAhead, homing: false, passed: new Set(), look,
     position: [x + forward[0] * FIREWORK.launchAhead, y + FIREWORK.height, z + forward[2] * FIREWORK.launchAhead], yaw: player.rotation
   };
   firework.homing = fireworkTurnsBack(room, firework);
@@ -780,14 +805,19 @@ function tickFireworks(room) {
     const step = stepFirework(f, route, target ? target.position : null, dt);
     f.s = step.s; f.position = step.position; f.yaw = step.yaw; f.homing = step.homing;
     if (step.arrived) {
-      const caught = [...room.players.values()].filter(dog => dog.id !== f.owner && canBeHit(dog) && inFireworkBlast(f.position, dog.position));
+      // (only the dog it was after: Tom, 2026-11-21, "only hit the first person and no one else")
+      // (Casper's rugby ball still bowls over everyone round the leader, and anyone it passes)
+      const caught = f.look === 'rugby'
+        ? [...room.players.values()].filter(dog => dog.id !== f.owner && canBeHit(dog) && inFireworkBlast(f.position, dog.position))
+        : target && target.id !== f.owner && canBeHit(target) && inFireworkBlast(f.position, target.position) ? [target] : [];
       room.fireworks.delete(f.id);
       io.to(room.code).emit('fireworkExploded', { id: f.id, position: f.position, target: targetId, playerIds: caught.map(dog => dog.id) });
       for (const dog of caught) hitPlayer(room, dog, f.owner, 'firework');
       continue;
     }
-    // any dog it passes on the way (it is not looking for them, and goes on to the leader)
-    for (const dog of room.players.values()) {
+    // a firework flies straight past every other dog on the way: it hits only the one it is after.  Casper's rugby ball
+    // knocks over any dog it passes
+    for (const dog of f.look === 'rugby' ? room.players.values() : []) {
       if (dog.id === f.owner || dog.id === targetId || f.passed.has(dog.id) || !fireworkPasses(from, f.position, dog.position)) continue;   // (the leader gets the burst)
       f.passed.add(dog.id);
       if (!canBeHit(dog)) continue;
@@ -856,7 +886,9 @@ function checkItemHits(room, player, previousPosition) {
   // knocked over again, but the toy goes all the same.  A dog in the middle of its special sends the
   // toy flying and carries on: the sled, the spin and the wave sweep up any toy they touch.
   const special = activeSpecials.get(player)?.spec;
+  const track = PROCEDURAL_TRACKS[room.mapId];
   for (const hazard of room.hazards.values()) {
+    if (hazard.ride && track) hazard.position = track.ridePosition(hazard.ride, (now - room.startedAt) / 1000) ?? hazard.position;      // (on a platform: where it has been carried to)
     if (hazard.owner === player.id && now - hazard.placedAt < TOY.ownerGraceMs) continue;
     const above = player.position[1] - hazard.position[1];
     if (above > TOY.jumpClear || above < -2) continue;              // jumped clean over it
@@ -866,6 +898,22 @@ function checkItemHits(room, player, previousPosition) {
       io.to(room.code).emit('hazardRemoved', { id: hazard.id, hitBy: player.id });
       if (!special && Date.now() >= player.hitImmuneUntil) hitPlayer(room, player, hazard.owner, 'toy');
     }
+  }
+}
+
+// Frostpeak's slalom gates and snowmen (shared/slalom.js): a dog that runs into one is slowed, and knocks it down (a gate
+// springs back up a moment later, a snowman is built again in a while).  Everyone is told, so that every game draws it.
+function checkSlalom(room, player, previousPosition) {
+  const now = Date.now();
+  const moved = Math.hypot(player.position[0] - previousPosition[0], player.position[2] - previousPosition[2]);
+  if (moved > 12) return;                                   // (a respawn or a landing: not a run through the gates)
+  room.slalomDown ??= new Map();
+  for (const o of slalomHits(previousPosition, player.position, index => !(room.slalomDown.get(index) > now))) {
+    const downMs = o.kind === 'gate' ? SLALOM.gate.flatMs : SLALOM.snowman.respawnMs;
+    room.slalomDown.set(o.index, now + downMs);
+    io.to(room.code).emit('slalomHit', { index: o.index, kind: o.kind, playerId: player.id, downMs });
+    // (a computer dog is slowed here; a player's own game slows its dog when it hears)
+    if (botDrivers.has(player)) player.slowUntil = Math.max(player.slowUntil ?? 0, now + (o.kind === 'gate' ? 500 : 1100));
   }
 }
 
@@ -1028,7 +1076,7 @@ function startRaceIn(room) {
     player.bestLap = null;          // the quickest whole lap this race, in seconds
     burrowRides.delete(player);
     burrowsUsed.set(player, new Set());
-    if (room.mapId === 'wendover') woodlandRaceStates.set(player, { revision: 0 });
+    if (oldWendover(room.mapId)) woodlandRaceStates.set(player, { revision: 0 });
     if (room.mapId === 'frostpeak') frostpeakRaceStates.set(player, { revision: 0, launch: null });
     if (MAPS[room.mapId].procedural) {
       proceduralRaceStates.set(player, { slot: index, revision: 0, fall: null, passedStart: false });
@@ -1082,12 +1130,12 @@ function rescuePoint(room, player) {
 }
 
 function rescuePlayer(room, player) {
-  const state = room.mapId === 'wendover' ? woodlandRaceStates.get(player)
+  const state = oldWendover(room.mapId) ? woodlandRaceStates.get(player)
     : room.mapId === 'frostpeak' ? frostpeakRaceStates.get(player)
     : MAPS[room.mapId].procedural ? proceduralRaceStates.get(player) : null;
   if ((state && (state.launch || state.fall)) || burrowRides.has(player)) return false;      // already being handled
   const { position, rotation } = rescuePoint(room, player);
-  if (room.mapId === 'wendover') {
+  if (oldWendover(room.mapId)) {
     const water = woodlandWaterAt(position[0], position[2]);
     if (water) position[1] = woodlandDogY(water, player.dog);
   }
@@ -1323,6 +1371,7 @@ function beginCountdown(room) {
     if (number === 0) {
       room.status = 'racing';
       room.startedAt = Date.now();
+      room.slalomDown = new Map();          // (every gate up and every snowman built, for the new race)
       room.countdownTimer = null;
 
       io.to(room.code).emit('raceGo', {
@@ -1555,7 +1604,7 @@ function applyMove(room, player, data) {
   let onRoad = true;
   if (MAPS[room.mapId].procedural) {
     onRoad = updateProceduralRace(room, player, data);
-  } else if (room.mapId === 'wendover') {
+  } else if (oldWendover(room.mapId)) {
     onRoad = updateWoodlandRace(room, player, data);
   } else if (room.mapId === 'frostpeak') {
     onRoad = updateFrostpeakRace(room, player, data);
@@ -1571,6 +1620,7 @@ function applyMove(room, player, data) {
   dogSpeeds.set(player, { at: now, speed: seconds > 0.01 && seconds < 0.5 && moved < 12 ? moved / seconds : last?.speed ?? 0 });
 
   if (room.mapId !== 'wendover' || onRoad) { checkItemHits(room, player, previousPosition); checkSpecialContacts(room, player); }
+  if (room.mapId === 'frostpeak' && onRoad) checkSlalom(room, player, previousPosition);
 
   if (onRoad) {
     collectTreatBoxes(room, player, previousPosition);
@@ -1653,7 +1703,7 @@ function carriedBy(room, player) {
 }
 
 function raceStateOf(room, player) {
-  return room.mapId === 'wendover' ? woodlandRaceStates.get(player)
+  return oldWendover(room.mapId) ? woodlandRaceStates.get(player)
     : room.mapId === 'frostpeak' ? frostpeakRaceStates.get(player)
     : MAPS[room.mapId].procedural ? proceduralRaceStates.get(player) : null;
 }
@@ -1707,6 +1757,7 @@ function tickBots(room) {
     }
     const carried = carriedBy(room, player), burrow = burrowRides.get(player)?.tunnel;
     let out = null;
+    PROCEDURAL_TRACKS[room.mapId]?.setClock?.((now - room.startedAt) / 1000);       // (this room's time: where its moving platforms are)
     if (!carried) {
       out = driver.step(dt, {
         item: player.item,

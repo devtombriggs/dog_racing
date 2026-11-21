@@ -1,5 +1,6 @@
 import frostpeak from './frostpeak.json' with { type: 'json' };
 import { TREAT_ROAD } from './treatRoadData.js';
+import { WENDOVER_WOODS } from './wendoverWoodsData.js';
 import { MODBURY_HEIGHTS } from './modburyData.js';
 import { FARMYARD } from './farmData.js';
 import { WATER_PARK } from './waterParkData.js';
@@ -14,65 +15,32 @@ import { BONEYARD } from './boneyardData.js';
 import { VETS } from './vetsData.js';
 import { JUNGLE } from './jungleData.js';
 
-export const PROCEDURAL_TRACKS = { treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD, water_park: WATER_PARK, pet_mall: PET_MALL, mud_park: MUD_PARK,
+export const PROCEDURAL_TRACKS = { wendover: WENDOVER_WOODS, treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD, water_park: WATER_PARK, pet_mall: PET_MALL, mud_park: MUD_PARK,
   desert_dunes: DESERT, speed_bowl: SPEED_BOWL, kombu_house: KOMBU_HOUSE, neon_nexus: NEON,
   yorkshire_dales: DALES, boneyard: BONEYARD, the_vets: VETS, monkey_jungle: JUNGLE };
 const PROCEDURAL_DESCRIPTIONS = {
-  yorkshire_dales: `${(DALES.length / 1000).toFixed(2)} km over the fells · boost pads up every climb, flat out down the other side · cheeses rolling down the hill · sheep · into the cave in the scar and out through the waterfall`,
+  wendover: `${(WENDOVER_WOODS.length / 1000).toFixed(2)} km through the woods · bluebells and deer · through the hollow log · swim the beck · round the old oak · the Treetop Walk · the long drift off the ridge · jump the fallen log`,
+  yorkshire_dales: `${(DALES.length / 1000).toFixed(2)} km over the fells · zig-zags up Cheese Fell, and the goat path across a hairpin · flat out down the other side · sheep · through the cave, out of the waterfall and down the stream, rock to rock`,
   boneyard: `${(BONEYARD.length / 1000).toFixed(2)} km in the rain · a lap the shape of a bone · Golden Bones all the way round · muddy water to wade and swim · rolling bones and mud spouts`,
   the_vets: `${(VETS.length / 1000).toFixed(2)} km inside the vets · in on the treadmill · three storeys of syringes, giant pills, cones of shame and vets in masks · out of the top-floor window`,
   monkey_jungle: `${(JUNGLE.length / 1000).toFixed(2)} km of rainforest · rope bridges and a log with no sides · vine swings to jump along · up the tree stair and off the end · snakes, monkeys, coconuts and stone balls`,
-  desert_dunes: `${(DESERT.length / 1000).toFixed(2)} km of desert · rolling dunes and soft sand · whirlwinds and tumbleweed · the leap off the great dune`,
+  desert_dunes: `${(DESERT.length / 1000).toFixed(2)} km of desert · S-bends over the dunes and soft sand · whirlwinds and tumbleweed · the canyon hairpin · flat out down the great dune · skirt the sinkhole`,
   speed_bowl: `${Math.round(SPEED_BOWL.length)} m kart oval · five laps · six rows of Treat Boxes and Golden Bones all the way round · nothing in the way`,
   kombu_house: `${(KOMBU_HOUSE.length / 1000).toFixed(2)} km through Kombu’s house · in at the glass doors · the toy car, the pool room, flying cutlery · up in the lift · swinging doors · the dog pen and the chickens · down the back drive`,
-  neon_nexus: `${(NEON.length / 1000).toFixed(2)} km above a neon city · three two-minute laps · mega boost pads · three catapults · choose your road: the longer has the mega pads and the Golden Bones · moving platforms to jump`,
-  treat_road: '1.45 km of sky road · catapult gap · landing boost',
+  neon_nexus: `${(NEON.length / 1000).toFixed(2)} km above a neon city · three two-minute laps · mega boost pads · three catapults · choose your road: the longer has the mega pads and the Golden Bones · boost across the moving platforms, or fall into the Undercity with the robots`,
+  treat_road: '2.3 km of sky road · faster than anywhere · boost pads all the way · no barriers · catapult gap',
   modbury_heights: '3.12 km coastal circuit · clifftops · broken bridges to jump · water crossing',
-  farmyard: '1.67 km round the farm · through the barn · dodge the tractor, the sheep and the sails',
-  mud_park: '1.45 km mud run in the rain · slippery clay bends · deep bog and rolling logs · the mudslide and the mud pit',
+  farmyard: '1.65 km round the farm · through the barn · dodge the tractor, the sheep and the sails · find your way through the maize maze',
+  mud_park: '1.41 km dirt-bike course in the rain · a figure of eight: the big jump flies over the middle · kickers and boost pads · slippery clay · deep bog and rolling logs · the mudslide and the mud pit',
   pet_mall: '1.33 km round a pet shopping mall · escaped cats, trolleys and hamster balls · the escalator and the big leap',
   water_park: '1.72 km of pools and slides · bounce across the rubber rings · the big slide and its jump',
 };
 
-const STARTING_GRID = [
-  [-4, 0, 4.2],
-  [-4, 0, 2.1],
-  [-4, 0, 0],
-  [-4, 0, -2.1],
-  [-4, 0, -4.2],
-  [-7, 0, 0]          // (the sixth dog: behind the middle of the row)
-];
-
-const START_ROTATION = Math.PI / 2;
-
-// Ordered checkpoints following the Wendover Woods circuit (the long
-// version: 1466 m a lap).  Copied from wendover_woods/track_info.json, which
-// the map build writes.  Coordinates are X/Z, with a radius in game units.
-const CHECKPOINTS = [
-  { x: 96.5, z: -52.8, radius: 18 },
-  { x: 174.2, z: -133.4, radius: 18 },
-  { x: 289.2, z: -138.9, radius: 18 },
-  { x: 278.3, z: -258.3, radius: 18 },
-  { x: 190.4, z: -289.6, radius: 18 },
-  { x: 86.6, z: -325.1, radius: 18 },
-  { x: -9.3, z: -371.9, radius: 18 },
-  { x: -43.6, z: -255.2, radius: 18 },
-  { x: -150.3, z: -224.6, radius: 18 },
-  { x: -156.0, z: -103.9, radius: 18 },
-  { x: -122.0, z: -0.1, radius: 18 }
-];
-
 export const DEFAULT_MAP = 'wendover';
 
 export const MAPS = {
-  wendover: {
-    name: 'Wendover Woods',
-    description: '1.47 km woodland adventure · Ralph’s burrows · Poppy’s swimming sections',
-    model: '/models/wendover_woods.glb',
-    startPositions: STARTING_GRID.map(position => ({ position, rotationY: START_ROTATION })),
-    checkpoints: CHECKPOINTS,
-    startFinish: { position: [0, 0, 0], forward: [1, 0, 0], halfWidth: 6.5 }
-  },
+  // (Wendover Woods is a generated track since Tom, 2026-11-21, but stays first in the list)
+  wendover: null,
   frostpeak: {
     name: frostpeak.name,
     description: '2.5 km alpine circuit · summit cannon · black run slalom',

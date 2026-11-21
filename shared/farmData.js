@@ -16,7 +16,10 @@
 //   E  Windmill Corner   the sails sweep low over the inside of the bend: cut the corner at your peril
 //   F  Tractor Lane      a tractor and trailer drive across the road and back
 //   G  The Pig Pen       mud wallows (slow) with pigs trotting round them
-//   H  The Maize Maze    a narrow path between walls of corn, a scarecrow standing in the middle of it
+//   H  The Maize Maze    a big field of corn with a maze cut through it (Tom, 2026-11-21: "where the corn field bit is, it
+//                        would be good to do a big maze here instead"): rows of corn across it, each with its gaps in
+//                        different places, and walls of corn between some of them that make dead ends.  Some ways through
+//                        are quicker than others; the scarecrow stands in one of the dead ends
 //   I  Bale Hill         round bales come rolling down the hill and across the road
 //   J  The Duck Pond     a plank bridge with its middle missing: jump it or go for a swim
 //
@@ -37,7 +40,7 @@ const CONTROL_POINTS = [
   [230, -195, 2, 14, 'E'],
   [160, -240, 2, 13, 'F'], [80, -232, 1.5, 13, 'F'],
   [0, -250, 1, 16, 'G'], [-80, -238, 1, 16, 'G'],
-  [-150, -225, 1.5, 8.5, 'H'], [-200, -170, 2, 8.5, 'H'], [-170, -110, 2.5, 12, 'H'], [-215, -55, 3, 8.5, 'H'], [-250, 0, 4, 9, 'H'],
+  [-150, -226, 1.5, 30, 'H'], [-206, -186, 2, 48, 'H'], [-232, -116, 2.5, 48, 'H'], [-242, -40, 3, 48, 'H'], [-258, 8, 4, 26, 'H'],
   [-282, 65, 6, 13, 'I'], [-262, 125, 3, 13, 'I'],
   [-225, 160, 0.5, 9, 'J'], [-160, 162, 0, 10, 'J'],
 ];
@@ -54,6 +57,12 @@ export const SECTIONS = {
   I: { name: 'Bale Hill', surface: 'grass' },
   J: { name: 'The Duck Pond', surface: 'planks' },
 };
+// The maze: `cells` stretches of `cell` metres down the field, `lanes` lanes of `lane` metres across it.  Between one stretch and
+// the next a row of corn with gaps (open: the lanes the gaps are in); inside a stretch, walls of corn between two lanes (walls:
+// [stretch, the lane the wall is on the right of]).  A row is `thick` metres of corn
+const MAZE = { from: 26, cell: 30, cells: 7, lane: 11, lanes: 4, thick: 1.6,
+  open: [null, [0, 3], [1], [2, 0], [3], [1, 2], [0, 3]],
+  walls: [[1, 2], [3, 1], [5, 0]] };
 // how far a dog may stray past the edge of the road before the fence (or the corn) stops it
 const VERGE = { A: 3.5, B: 2.5, C: 2.5, D: 2.5, E: 2.5, F: 2.5, G: 2, H: 0.3, I: 3, J: 2 };
 const DOG = 0.7;                        // a dog is kept this far from the middle of anything solid, plus its radius
@@ -148,7 +157,60 @@ function buildTrack() {
     const p = pointAt(baleS + k * 12.5), lateral = (k % 2 ? 1 : -1) * p.halfWidth * 0.42, q = pointAt(baleS + k * 12.5, lateral);
     obstacles.push({ id: `bale-${k}`, kind: 'bale', s: baleS + k * 12.5, lateral, x: q.x, y: q.y, z: q.z, radius: 1.3, rotationY: p.rotationY + k * 0.7 });
   }
-  { const s = sAtU(16.0), p = pointAt(s); obstacles.push({ id: 'scarecrow', kind: 'scarecrow', s, lateral: 0, x: p.x, y: p.y, z: p.z, radius: 0.8, rotationY: p.rotationY + Math.PI }); }
+  // ---------- the maze: its rows and walls of corn, as boxes in (distance round the lap, metres across) that a dog is pushed out of
+  const hSection = (() => { let a = -1, b = -1; for (let i = 0; i < N; i++) if (SEC[i] === 'H') { if (a < 0) a = i; b = i; } return { sStart: S[a], sEnd: S[b] }; })();
+  const maze = { sStart: hSection.sStart + MAZE.from, ...MAZE };
+  maze.sEnd = maze.sStart + MAZE.cell * MAZE.cells;
+  const laneLo = j => (j - MAZE.lanes / 2) * MAZE.lane;              // (the edge of lane j nearest the dogs' right)
+  const boxes = [];
+  for (let b = 1; b < MAZE.cells; b++) {
+    const sb = maze.sStart + b * MAZE.cell;
+    for (let j = 0; j < MAZE.lanes; j++) {
+      if (MAZE.open[b].includes(j)) continue;
+      // (the outermost reach right out to the corn at the edge)
+      const lo = j === 0 ? laneLo(0) - 6 : laneLo(j), hi = j === MAZE.lanes - 1 ? laneLo(MAZE.lanes) + 6 : laneLo(j + 1);
+      boxes.push({ s0: sb - MAZE.thick / 2, s1: sb + MAZE.thick / 2, l0: lo, l1: hi });
+    }
+  }
+  for (const [c, k] of MAZE.walls) { const s0 = maze.sStart + c * MAZE.cell, lat = laneLo(k + 1); boxes.push({ s0, s1: s0 + MAZE.cell, l0: lat - MAZE.thick / 2, l1: lat + MAZE.thick / 2 }); }
+  maze.boxes = boxes;
+  /** the quickest way through, worked out from the rows and walls: the lane to be in at each row (and its line, metres across) */
+  {
+    const reach = (c, a, b) => { const lo = Math.min(a, b), hi = Math.max(a, b); return !MAZE.walls.some(([wc, k]) => wc === c && k >= lo && k < hi); };
+    let best = [...Array(MAZE.lanes).keys()].map(j => ({ cost: 0, path: [j] }));
+    for (let b = 1; b < MAZE.cells; b++) {
+      best = MAZE.open[b].map(j => best.filter(from => reach(b - 1, from.path.at(-1), j)).map(from => ({ cost: from.cost + Math.abs(from.path.at(-1) - j), path: [...from.path, j] })).sort((x, y) => x.cost - y.cost)[0]).filter(Boolean);
+    }
+    const route = best.sort((x, y) => x.cost - y.cost)[0];
+    const way = [...route.path, route.path.at(-1)];
+    const centre = j => laneLo(j) + MAZE.lane / 2;
+    // (straight through each gap, and across from one to the next in the stretch between)
+    maze.route = way;
+    const ease = t => { const k = Math.min(1, Math.max(0, t)); return k * k * (3 - 2 * k); };
+    maze.line = s => {
+      const f = (s - maze.sStart) / MAZE.cell;
+      // (in from the middle of the lane as the field opens out, and back to it as it closes in again)
+      if (f <= 0) return centre(way[1]) * ease(1 + (s - maze.sStart) / MAZE.from);
+      if (f >= MAZE.cells) return centre(way.at(-1)) * (1 - ease((s - maze.sEnd) / 24));
+      const b = Math.floor(f), t = f - b, from = centre(way[b] ?? way[1]), to = centre(way[b + 1] ?? way.at(-1));
+      const k = Math.min(1, Math.max(0, (t - 0.12) / 0.76)), e = k * k * (3 - 2 * k);
+      return from + (to - from) * e;
+    };
+  }
+  const mazeHold = (s, lateral) => {
+    let ds = 0, dl = 0, hit = false;
+    for (const box of boxes) {
+      const R = DOG * 0.5 + 0.35, s0 = box.s0 - R, s1 = box.s1 + R, l0 = box.l0 - R, l1 = box.l1 + R, a = along(s, maze.sStart) + maze.sStart;
+      if (a <= s0 || a >= s1 || lateral <= l0 || lateral >= l1) continue;
+      hit = true;
+      const outS = a - s0 < s1 - a ? s0 - a : s1 - a, outL = lateral - l0 < l1 - lateral ? l0 - lateral : l1 - lateral;
+      if (Math.abs(outS) < Math.abs(outL)) ds = outS; else dl = outL;
+    }
+    return hit ? { s: s + ds, lateral: lateral + dl } : null;
+  };
+  // the scarecrow stands in one of the dead ends
+  { const deadEnd = MAZE.open[1].find(j => j !== maze.route[1]) ?? 0, s = maze.sStart + MAZE.cell * 1.5, lateral = laneLo(deadEnd) + MAZE.lane / 2, p = pointAt(s, lateral), c = pointAt(s);
+    obstacles.push({ id: 'scarecrow', kind: 'scarecrow', s, lateral, x: p.x, y: p.y, z: p.z, radius: 0.8, rotationY: c.rotationY + Math.PI }); }
 
   // the pig pen's mud wallows: oval patches alternating sides of the road, with a dry line between them
   const mud = [];
@@ -233,6 +295,11 @@ function buildTrack() {
         const ux = d > 1e-6 ? dx / d : p.nx, uz = d > 1e-6 ? dz / d : p.nz;
         px = o.x + ux * keep; pz = o.z + uz * keep;
       }
+    }
+    // the maze's corn: pushed back out of it
+    if (along(p.s, maze.sStart - 3) >= 0 && along(p.s, maze.sEnd + 3) <= 0) {
+      const held = mazeHold(p.s, q.blocked ? (p.lateral >= 0 ? 1 : -1) * Math.min(Math.abs(p.lateral), limit) : p.lateral);
+      if (held) { q.blocked = true; const h = pointAt(held.s, held.lateral); px = h.x; pz = h.z; q.surface = 'corn'; }
     }
     q.clampX = px; q.clampZ = pz;
     if (!q.blocked && !q.onBridge && mudAt(p.s, p.lateral)) { q.mud = true; q.surface = 'mud'; }
@@ -330,7 +397,13 @@ function buildTrack() {
   }
 
   const cpCount = Math.round(LENGTH / CHECKPOINT_SPACING), checkpoints = [];
-  for (let c = 0; c < cpCount; c++) { const i = wrapIndex(Math.round(c * N / cpCount)); checkpoints.push({ index: c, sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] }); }
+  // (none among the pigs: a dog put back at one is not put in with a pig.  One that would be is moved back to just before them)
+  const amongPigs = s => along(s, pigsS[0] - 18) >= 0 && along(s, pigsS.at(-1) + 18) <= 0;
+  for (let c = 0; c < cpCount; c++) {
+    let i = wrapIndex(Math.round(c * N / cpCount));
+    if (amongPigs(S[i])) i = indexAtS(pigsS[0] - 20);
+    checkpoints.push({ index: c, sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] });
+  }
   const gi = wrapIndex(N - 4), spacing = Math.min(2.6, (W[gi] - 3) / 4), startPositions = [];
   for (let k = 0; k < 5; k++) { const lat = (2 - k) * spacing; startPositions.push({ slot: k, position: [X[gi] + NX[gi] * lat, Y[gi], Z[gi] + NZ[gi] * lat], rotationY: yawAt(gi), s: S[gi] - LENGTH, lateral: lat }); }
   // (the sixth dog: a row back, in the middle)
@@ -343,14 +416,14 @@ function buildTrack() {
     samples: { x: X, y: Y, z: Z, width: W, s: S, u: U, tangentX: TX, tangentZ: TZ, normalX: NX, normalZ: NZ, grade: GRADE, curvature: KAPPA, section: SEC },
     sections, checkpoints, startPositions,
     startFinish: { position: [X[0], Y[0], Z[0]], rotationY: yawAt(0), halfWidth: W[0] / 2 },
-    barn, pond, chasms, obstacles, mud, mill,
+    barn, pond, chasms, obstacles, mud, mill, maze,
     // where each moving hazard lives, for keeping pickups clear of them and for the scenery
     hazardZones: { tractor: tractorS, sheep: sheepS, mill: millS, bales: balesS, pigs: [pigsS[0], pigsS.at(-1)] },
     tractorLane: { s: tractorS, reach: TRACTOR.reach }, sheepLane: { s: sheepS, reach: SHEEP.reach }, baleRun: { s: balesS, from: BALES.from, to: BALES.to, spacing: BALES.spacing },
     verge: VERGE,
     rules: { hasBarriers: true, fallStartsBelow: 1.5, respawnDelaySeconds: 1.0, respawnPenaltySeconds: 1.5, respawnSpeedMultiplier: 0.55, gravity: 24, killPlaneY: -60,
       gapClearance: 0.2, hazardStunMs: 1100 },
-    query, pointAt, indexAtS, sAtU, terrainHeight, naturalHeight: natural, speedFactor, hazardsAt, hazardHit,
+    query, pointAt, indexAtS, sAtU, along, terrainHeight, naturalHeight: natural, speedFactor, hazardsAt, hazardHit,
   };
 }
 

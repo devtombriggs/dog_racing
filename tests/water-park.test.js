@@ -37,7 +37,9 @@ test('Water Park: two pools to swim, and Poppy is the best in the water', () => 
     assert.equal(at(pool.sEnd + 3).movement, 'run');
   }
   const lagoon = at(mid(T.pools[0])), river = at(mid(T.pools[1]));
-  const share = dog => T.speedFactor(lagoon, stats(dog));
+  // (the lagoon flows like a lazy river now, as its rings drift: Tom, 2026-11-21.  `share` is the swimming without it)
+  const lagoonFlow = T.pools[0].flow, share = dog => T.speedFactor(lagoon, stats(dog)) - lagoonFlow;
+  assert.ok(lagoonFlow > 0.1, 'the lagoon carries a swimmer along');
   assert.ok(Math.abs(share('black_lab') - 0.9) < 1e-9, 'Poppy keeps 90 % of her speed');
   for (const dog of ['gsp', 'pablo', 'second_dog', 'ralph']) assert.ok(share(dog) >= 0.6 && share(dog) < share('black_lab'), dog);
   assert.ok(share('rocky') > share('pablo') && share('pablo') > share('ralph'));
@@ -47,22 +49,27 @@ test('Water Park: two pools to swim, and Poppy is the best in the water', () => 
   assert.equal(T.speedFactor(lagoon, stats('ralph'), true), 1);
 });
 
-test('Water Park: the rubber rings carry every dog from one to the next', () => {
-  assert.ok(T.rings.length >= 10);
-  const { force, gravity, pace } = T.rules.bounce, airtime = 2 * force / gravity;
+test('Water Park: the rubber rings drift down the lagoon (Tom, 2026-11-21), and each bounce carries a dog on to the next ring', () => {
+  assert.ok(T.rings.length >= 8);
+  const { force, gravity, pace } = T.rules.bounce, airtime = 2 * force / gravity, R = T.ring;
   assert.ok(force * force / (2 * gravity) > 1.5, 'a good bounce');
-  // (the pace is one the dogs run at anyway: between the slowest and the fastest of them)
+  // (on still water the pace would be one the dogs run at anyway: between the slowest and the fastest of them)
   const tops = Object.values(DOG_STATS).map(d => BASE_SPEED.sprint * statScale(d.speed, STAT_EFFECT.speed));
-  assert.ok(pace > Math.min(...tops) && pace < Math.max(...tops));
-  for (const [k, ring] of T.rings.entries()) {
-    assert.equal(at(ring.s, ring.lateral).movement, 'swim', 'floating on deep water');
-    assert.equal(T.ringAt(ring.x, ring.z), ring);
-    assert.equal(T.ringAt(...(p => [p.x, p.z])(T.pointAt(ring.s + 6))), null, 'not between rings');
-    if (k === 0) continue;
-    // a bounce carries any dog exactly from one ring to the next, and a dog going straight down the
-    // middle of the pool comes down on every one of them
-    assert.ok(Math.abs(pace * airtime - (ring.s - T.rings[k - 1].s)) < 0.01);
-    assert.ok(Math.abs(ring.lateral) < ring.radius - 1);
+  assert.ok(pace - R.flow > Math.min(...tops) && pace - R.flow < Math.max(...tops));
+  // a bounce carries a dog the gap between two rings and as far again as they drift while it is in the air
+  assert.ok(Math.abs(pace * airtime - (R.spacing + R.flow * airtime)) < 0.01);
+  for (const t of [0, 2.5, 7, 13.3]) {
+    const now = T.ringsAt(t), later = T.ringsAt(t + 1);
+    for (const [k, ring] of now.entries()) {
+      if (ring.rise < 1) continue;                                // (sinking at the far end, or coming up at the start)
+      assert.equal(at(ring.s, ring.lateral).movement, 'swim', 'floating on deep water');
+      assert.equal(T.ringAt(ring.x, ring.z, false, t)?.id, ring.id);
+      // drifting on, down the lagoon, a little from side to side
+      if (later[k].rise === 1) assert.ok(Math.abs(later[k].s - ring.s - R.flow) < 0.01);
+      // a dog that has fallen in and is swimming cannot get back on one, but near the start of the lagoon
+      const nearStart = ring.s - T.pools[0].sStart < R.mount;
+      assert.equal(Boolean(T.ringAt(ring.x, ring.z, true, t)), nearStart, `${ring.id} at ${ring.s.toFixed(0)}`);
+    }
   }
 });
 
@@ -113,6 +120,7 @@ test('Water Park: a computer dog bounces down the rings, and Poppy swims the lag
     bot.place([start.x, start.y, start.z], start.heading);
     let ticks = 0, bounced = 0, wasJumping = false;
     for (let t = 0; t < 40 && bot.state.s < pool.sEnd + 5; t += 0.05) {
+      T.setClock(t);                       // (as the server does for each room: the rings drift by the race clock)
       bot.step(0.05, {});
       if (bot.state.s > pool.sStart && bot.state.s < pool.sEnd) { ticks += 1; if (bot.state.jumping && !wasJumping) bounced += 1; }
       wasJumping = bot.state.jumping;

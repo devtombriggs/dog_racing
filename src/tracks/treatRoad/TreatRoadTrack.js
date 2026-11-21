@@ -161,6 +161,34 @@ function buildRoad(group, disposables) {
   disposables.push(top, topMat, glow.geometry, glowMat, body, bodyMat, knobGeo, knobMat, ck, line.geometry, line.material);
 }
 
+// ---------- boost pads (Tom, 2026-11-21: "way more boosts"): arrows running along the road, pink on the mega pads
+function buildPads(group, disposables, animated) {
+  const arrows = (background, ink) => {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+    g.fillStyle = background; g.fillRect(0, 0, 64, 64); g.strokeStyle = ink; g.lineWidth = 9; g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const x of [8, 40]) { g.beginPath(); g.moveTo(x, 8); g.lineTo(x + 18, 32); g.lineTo(x, 56); g.stroke(); }
+    const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace; disposables.push(tex); return tex;
+  };
+  const kinds = { pad: arrows('rgba(255,160,40,0.92)', '#fff6d8'), mega: arrows('rgba(255,40,170,0.95)', '#ffffff') };
+  for (const [kind, tex] of Object.entries(kinds)) {
+    const list = T.strips.filter(strip => Boolean(strip.mega) === (kind === 'mega'));
+    if (!list.length) continue;
+    const pos = [], uv = [], idx = [];
+    for (const strip of list) {
+      const steps = Math.max(2, Math.round((strip.sEnd - strip.sStart) / 1.5)), base = pos.length / 3;
+      for (let k = 0; k <= steps; k++) {
+        const s = strip.sStart + (strip.sEnd - strip.sStart) * k / steps, u = (s - strip.sStart) / 3.2;
+        for (const [lat, v] of [[strip.latMin, 0], [strip.latMax, 1]]) { const p = T.pointAt(s, lat); pos.push(p.x, p.y + 0.06, p.z); uv.push(u, v * (strip.latMax - strip.latMin) / 3.2); }
+        if (k < steps) { const a = base + k * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+      }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); disposables.push(g);
+    const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }); disposables.push(m);
+    const mesh = new THREE.Mesh(g, m); mesh.name = kind === 'mega' ? 'TreatRoad_MegaPads' : 'TreatRoad_BoostPads'; mesh.renderOrder = 1; group.add(mesh);
+    animated.push(t => { tex.offset.x = -t * (kind === 'mega' ? 3.4 : 1.8); });
+  }
+}
+
 // ---------- decorations
 function boneGeometry(detail = 10) {          // a bone 2 units long, lying along X
   const shaft = new THREE.CylinderGeometry(0.2, 0.2, 1.5, detail, 1).rotateZ(Math.PI / 2), parts = [shaft];
@@ -340,6 +368,7 @@ export function createTreatRoad() {
   buildMountains(group, disposables);
   buildClouds(group, disposables, animated);
   buildRoad(group, disposables);
+  buildPads(group, disposables, animated);
   buildGates(group, disposables);
   buildLauncher(group, disposables, animated);
   buildTreats(group, disposables, animated);

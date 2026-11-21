@@ -155,8 +155,9 @@ export function createItems({ scene, renderer }) {
       if (position) burst(position, 0x9cf0ff);
     },
 
-    placeHazard({ id, position, rotationY }) {
-      hazards.set(id, { position, rotationY, object: null, placedAt: performance.now() });
+    // ride: dropped on a moving platform (Neon Nexus), it is carried along on it (shared/trackKit.js ridePosition)
+    placeHazard({ id, position, rotationY, ride = null }) {
+      hazards.set(id, { position, rotationY, ride, object: null, placedAt: performance.now() });
     },
     removeHazard(id, showBurst = false) {
       const entry = hazards.get(id);
@@ -165,7 +166,8 @@ export function createItems({ scene, renderer }) {
       if (showBurst && entry) burst([entry.position[0], entry.position[1] + 0.6, entry.position[2]], 0xff6a6a);
     },
 
-    update(delta, anchors, groundAt = null) {
+    // track: the generated map, if it is one (a chew toy on a platform moves with it)
+    update(delta, anchors, groundAt = null, track = null) {
       const t = performance.now() / 1000;
       for (const [playerId, entry] of held) {
         if (!entry.object && (templates[entry.item] || entry.item === 'special')) { entry.object = makeHeld(entry.item); root.add(entry.object); }
@@ -203,6 +205,7 @@ export function createItems({ scene, renderer }) {
           root.add(entry.object);
         }
         if (!entry.object) continue;
+        if (entry.ride && track?.ridePosition) { const at = track.ridePosition(entry.ride); if (at) { entry.position = at; entry.object.position.fromArray(at); } }
         const age = (performance.now() - entry.placedAt) / 1000;          // lands with a little bounce
         entry.object.scale.setScalar(age < 0.35 ? 0.4 + 0.6 * Math.sin(age / 0.35 * Math.PI / 2) * 1.08 : 1);
         entry.object.rotation.z = Math.sin(t * 2.5 + entry.position[0]) * 0.05;

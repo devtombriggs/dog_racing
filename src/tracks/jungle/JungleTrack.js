@@ -29,7 +29,16 @@ export const createJungle = () => createKitWorld(T, {
 
   build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, terrain, animated, band }) {
     const r = rng(2024), c = new THREE.Color(), rock = new THREE.Color(0x5a4c3a);
-    const ground = terrain({ size: 1120, cell: 6.5, centre: [0, -25], height: jungleHill, blend: 30, near: 4, aloft: s => s > T.stair.sStart + 6 && s < T.stair.sEnd,
+    // (the gorge, with a channel cut down to the river bed under each crossing, where a dog that falls off wades along)
+    // (and on into the far bank as far as its lift, which stands in a notch cut in the bank, under the trail)
+    const cuts = T.undercity.map(u => { const lift = T.launches.find(l => l.under === u.id); return { u, sStart: u.sStart, sEnd: (lift.takeoffS + lift.landingS) / 2 + 4 }; });
+    const riverCut = (x, z) => {
+      const h = jungleHill(x, z), q = T.query(x, z), u = cuts.find(cut => T.within(q.s, cut))?.u;
+      if (!u || q.distance > q.halfWidth + 9) return h;
+      const bed = T.pointAt(q.s).y - u.depth - 0.5, edge = Math.min(1, Math.max(0, (q.distance - q.halfWidth - 1) / 8));
+      return Math.min(h, bed + edge * edge * (h - bed));
+    };
+    const ground = terrain({ size: 1120, cell: 6.5, centre: [0, -25], height: riverCut, blend: 30, near: 4, aloft: s => (s > T.stair.sStart + 6 && s < T.stair.sEnd) || cuts.some(cut => T.within(s, cut)),
       color(x, z, y) { const n = 0.5 + 0.5 * Math.sin(x * 0.13) * Math.cos(z * 0.11), deep = Math.min(1, Math.max(0, (junglePlateau(x, z) - y - 2.5) / 6)); return c.setRGB(0.06 + 0.04 * n, 0.2 + 0.07 * n, 0.07 + 0.03 * n).lerp(rock, deep * 0.85); } });
     const onTop = (x, z) => junglePlateau(x, z) - jungleHill(x, z) < 1.2;
     // (nothing tall grows where the stair goes round its tree: it is in a clearing, where it can be seen)
@@ -194,6 +203,29 @@ export const createJungle = () => createKitWorld(T, {
       const stone = new THREE.Mesh(stoneG, stoneM); stone.rotation.order = 'YXZ'; stone.castShadow = true; stone.name = 'Stone_Ball'; group.add(stone);
       movers[`stone-${k}`] = h => { stone.visible = h.fade > 0.01; stone.position.set(h.x, h.y + R, h.z); stone.rotation.set(-h.spin, h.rotationY, 0); stone.scale.setScalar(0.4 + 0.6 * h.fade); };
     });
+
+    // ---------- down in the river under each crossing: stones along the bed, and a vine lift up the far bank
+    const bedStones = [];
+    for (const u of T.undercity) for (let s = u.sStart + 2; s < u.sEnd - 10; s += 3.1) for (const side of [-1, 1]) {
+      const c = T.pointAt(s), p = T.pointAt(s, side * (c.halfWidth + 0.6 + r() * 1.5));
+      bedStones.push([p.x, c.y - u.depth - 0.1, p.z, r() * 6, 0.7 + r() * 0.8]);
+    }
+    herd('River_Bed_Stones', ball(1, 0, 0x7a7a6c, 0, 0, 0, 1.2, 0.6, 1), bedStones);
+    const poleG = cyl(0.35, 0.45, 1, 7, 0x6b4a2c, 0, 0.5, 0), beamG = cyl(0.3, 0.3, 1, 7, 0x5a3d22, 0, 0, 0, 0, Math.PI / 2), vineG = cyl(0.06, 0.06, 1, 4, 0x3f7a2c, 0, -0.5, 0);
+    const deckG = merge([box(1, 0.35, 1, 0x8a6a44, 0, 0, 0), box(1.05, 0.12, 0.12, 0x5a3d22, 0, 0.2, 0.45), box(1.05, 0.12, 0.12, 0x5a3d22, 0, 0.2, -0.45)]); D.push(poleG, beamG, vineG, deckG);
+    for (const u of T.undercity) {
+      const lift = T.launches.find(l => l.under === u.id), bottom = T.launchPoint(lift.duration * 0.16, 0, lift), top = T.launchPoint(lift.duration * 0.86, 0, lift);
+      const w = T.pointAt(lift.takeoffS).halfWidth + 1, high = top.y - bottom.y + 6, frame = new THREE.Group();
+      frame.position.set((top.x + bottom.x) / 2, bottom.y - 0.3, (top.z + bottom.z) / 2); frame.rotation.y = bottom.rotationY; frame.name = 'Vine_Lift'; group.add(frame);
+      for (const x of [-w, w]) { const pole = new THREE.Mesh(poleG, prop); pole.scale.set(1, high, 1); pole.position.x = x; pole.castShadow = true; frame.add(pole); }
+      const beam = new THREE.Mesh(beamG, prop); beam.scale.set(w * 2 + 1, 1, 1); beam.position.y = high; frame.add(beam);
+      const car = new THREE.Group(); frame.add(car);
+      const deck = new THREE.Mesh(deckG, prop); deck.scale.set(w * 2 - 0.6, 1, 4.5); car.add(deck);
+      const vines = [-w + 0.8, w - 0.8].map(x => { const vine = new THREE.Mesh(vineG, prop); vine.position.set(x, 0, 0); frame.add(vine); return vine; });
+      // (the deck rides up and down the frame on its vines, all the time: a dog that steps on is carried up)
+      animated.push(t => { const f = 0.5 - 0.5 * Math.cos(t * 1.3), y = 0.25 + f * (high - 6.5); car.position.y = y; for (const vine of vines) { vine.position.y = high; vine.scale.set(1, high - y, 1); } });
+      sign('VINE LIFT ▲', lift.padStart - 22, -1, '#f2c94c', '#3a2a14', { under: u.depth });
+    }
 
     const [rope, swings, log, old] = T.platforms;
     for (const [text, s, side] of [['SNAKE!', T.snakes[0] - 22, -1], ['MONKEYS!', T.monkeys[0] - 14, 1], ['NO SIDES!', rope.sStart - 22, -1], ['STONE BALLS!', T.temple.sStart - 14, 1], ['JUMP THE SWINGS', swings.sStart - 26, -1], ['COCONUTS!', T.grove.sStart - 6, 1],

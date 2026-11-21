@@ -279,11 +279,29 @@ export function createKitWorld(T, look) {
   }
 
   // moving platforms: a slab for each, slid to where the track says it is
+  let arrowsM = null;
+  const platformArrows = () => {
+    if (arrowsM) return arrowsM;
+    const hue = look.strips?.color ?? '#ffd23a', tex = canvasTexture(64, 64, (g) => {
+      g.fillStyle = look.strips?.background ?? 'rgba(20,20,24,0.85)'; g.fillRect(0, 0, 64, 64); g.strokeStyle = hue; g.lineWidth = 9; g.lineCap = 'round'; g.lineJoin = 'round';
+      // (pointing down the canvas: laid flat on the platform, the bottom of the picture is the way the road goes)
+      for (const y of [12, 40]) { g.beginPath(); g.moveTo(10, y); g.lineTo(32, y + 16); g.lineTo(54, y); g.stroke(); }
+    }, true);
+    tex.repeat.set(1, 6); D.push(tex);
+    arrowsM = keep(new THREE.MeshBasicMaterial({ map: tex, transparent: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    animated.push(t => { tex.offset.y = t * 1.6; });         // (running along the platform, the way the road goes)
+    return arrowsM;
+  };
   if (T.platforms.length && look.platform !== false) {        // (platform: false -> the map draws its own)
     const slabM = keep(new THREE.MeshStandardMaterial({ color: look.platform?.color ?? 0x3a3d44, roughness: 0.5, metalness: 0.2 })), rimM = keep(new THREE.MeshBasicMaterial({ color: look.platform?.edge ?? 0xffd23a }));
     for (const zone of T.platforms) for (const pad of zone.pads) {
       const long = pad.s1 - pad.s0, slabG = new THREE.BoxGeometry(pad.half * 2, 0.6, long).translate(0, -0.3, 0), rimG = new THREE.BoxGeometry(pad.half * 2 + 0.3, 0.14, long + 0.3).translate(0, -0.12, 0); D.push(slabG, rimG);
       const holder = new THREE.Group(), slab = new THREE.Mesh(slabG, slabM); slab.receiveShadow = true; holder.add(slab, new THREE.Mesh(rimG, rimM)); holder.name = 'Platform'; group.add(holder);
+      // a platform that is a boost pad (zone.boost) has the arrows on top of it, running the way the road goes
+      if (pad.boost ?? zone.boost) {
+        const topG = new THREE.PlaneGeometry(pad.half * 2 - 0.6, long - 1).rotateX(-Math.PI / 2).translate(0, 0.02, 0); D.push(topG);
+        const arrowsOn = new THREE.Mesh(topG, platformArrows()); arrowsOn.renderOrder = 1; holder.add(arrowsOn);
+      }
       animated.push((t, focus, raceSeconds = 0) => { const p = T.padAt(pad, raceSeconds); holder.position.set(p.x, p.y, p.z); holder.rotation.y = p.rotationY; });
     }
   }
@@ -325,9 +343,15 @@ export function createKitWorld(T, look) {
     });
   };
   const ctx = { THREE, group, D, animated, movers, T, S, N, prop, add, keep, herd, clear, beside, lapGap, band, span, lanes, terrain, rain,
-    /** a sign on a post beside the road at s */
-    sign(text, s, side = 1, background, ink) {
-      const [x, y, z, yaw] = beside(s, side, 1.4), tex = signTexture(text, background, ink), mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }); D.push(tex, mat);
+    /** a sign on a post beside the road at s (under: on the wall of a level that many metres below the road instead) */
+    sign(text, s, side = 1, background, ink, { under = 0 } = {}) {
+      const tex = signTexture(text, background, ink), mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }); D.push(tex, mat);
+      if (under) {
+        const c = T.pointAt(s), p = T.pointAt(s, side * (c.halfWidth + 0.35));
+        const board = new THREE.Mesh(ctx.signBoard, mat); board.position.set(p.x, c.y - under + 2.1, p.z); board.rotation.y = c.rotationY + Math.PI; board.name = 'Sign'; group.add(board);
+        return;
+      }
+      const [x, y, z, yaw] = beside(s, side, 1.4);
       const post = new THREE.Mesh(ctx.signPost, ctx.signPostMaterial); post.position.set(x, y + 1.1, z); group.add(post);
       const board = new THREE.Mesh(ctx.signBoard, mat); board.position.set(x, y + 3.0, z); board.rotation.y = yaw + Math.PI; board.name = 'Sign'; group.add(board);
     },

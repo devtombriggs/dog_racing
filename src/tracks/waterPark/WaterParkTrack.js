@@ -186,15 +186,16 @@ function buildRailings(group, D) {
   pmesh.name = 'Park_RailPosts'; group.add(pmesh); D.push(rg, rm, pg, pmesh);
 }
 
-// ---------- the rubber rings, bobbing on the lagoon
+// ---------- the rubber rings, bobbing and drifting down the lagoon
 function buildRings(group, D, animated) {
   const geo = new THREE.TorusGeometry(1.75, 0.62, 10, 22).rotateX(Math.PI / 2), mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
   const mesh = new THREE.InstancedMesh(geo, mat, T.rings.length), o = new THREE.Object3D(), c = new THREE.Color(), hues = [0xff4f8b, 0xffd23a, 0xff8a3c, 0x8be36b, 0xffffff];
   T.rings.forEach((ring, k) => { mesh.setColorAt(k, c.set(hues[k % hues.length])); });
   mesh.name = 'Park_Rings'; mesh.castShadow = true; group.add(mesh); D.push(geo, mat, mesh);
-  animated.push(t => {
-    T.rings.forEach((ring, k) => {
-      o.position.set(ring.x, ring.y + 0.18 + 0.1 * Math.sin(t * 1.8 + k * 1.3), ring.z);
+  // (drifting down the lagoon by the race clock, as the track has them: sinking at the far end and coming up at the start)
+  animated.push((t, focus, raceSeconds = 0) => {
+    T.ringsAt(raceSeconds).forEach((ring, k) => {
+      o.position.set(ring.x, ring.y + 0.18 + 0.1 * Math.sin(t * 1.8 + k * 1.3) - (1 - ring.rise) * 1.4, ring.z);
       o.rotation.set(0.05 * Math.sin(t * 1.4 + k), t * 0.2 + k, 0.05 * Math.cos(t * 1.1 + k * 2));
       o.updateMatrix(); mesh.setMatrixAt(k, o.matrix);
     });
@@ -339,7 +340,8 @@ export function createWaterPark() {
     group, track: T, sun,
     /** t = seconds (cosmetic).  focus = {x,y,z} of the dog to light.  raceSeconds = time since GO. */
     update(t, focus, raceSeconds = 0) {
-      for (const f of animated) f(t, focus);
+      T.setClock(raceSeconds);              // (the rings drift down the lagoon by the race clock)
+      for (const f of animated) f(t, focus, raceSeconds);
       placeHazards(raceSeconds);
       if (focus) { sun.target.position.set(focus.x, focus.y, focus.z); sun.position.set(focus.x, focus.y, focus.z).addScaledVector(SUN_DIRECTION, 300); }
     },

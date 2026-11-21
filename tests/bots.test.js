@@ -5,7 +5,6 @@ import { DRIFT } from '../shared/drift.js';
 import { BOT_LEVELS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
-import { WENDOVER } from '../shared/wendoverData.js';
 
 const TICK = 0.05;
 
@@ -49,7 +48,7 @@ test('the levels: easy is slower, sees less far ahead and fluffs more jumps than
 });
 
 test('a computer dog runs at its own dog\'s speed, never faster but in a skid and the boost out of one, and stays on the road', () => {
-  for (const mapId of ['farmyard', 'modbury_heights', 'wendover']) {
+  for (const mapId of ['farmyard', 'modbury_heights']) {            // (no boost pads on these: Wendover has them since it was remade)
     for (const dog of ['second_dog', 'pablo']) {       // (not Ralph: on Wendover he leaves the road for his burrows)
       const bot = run({
         mapId, dog, level: 'hard', seconds: 60,
@@ -85,25 +84,6 @@ test('Modbury\'s broken bridges: a computer dog is in the air over every break',
     });
     assert.ok(overBreak > 0, `break ${chasm.index} was crossed`);
   }
-});
-
-test('Wendover\'s pools: Poppy swims through faster than Meela, and both keep to the water, off the bog', () => {
-  const pool = WENDOVER.pools[0];
-  const crossing = dog => {
-    let ticks = 0;
-    run({
-      mapId: 'wendover', dog, level: 'hard', from: pool.sStart - 40, seconds: 25,
-      watch: (move, state) => {
-        if (state.s < pool.sStart + 12 || state.s > pool.sEnd - 12) return;
-        ticks += 1;
-        assert.ok(Math.abs(state.lateral) < pool.halfWidth, `${dog} is in the bog`);
-        assert.equal(move.animation, 'Trot', 'the swimming stroke');
-      },
-    });
-    return ticks;
-  };
-  const poppy = crossing('black_lab'), meela = crossing('second_dog');
-  assert.ok(poppy > 0 && meela > poppy * 1.15, `Poppy ${poppy} ticks, Meela ${meela}`);      // (Poppy keeps 90 %, Meela 60 %: shared/dogStats.js swimSpeed)
 });
 
 test('a knock, a golden bone and a held item', () => {
@@ -214,10 +194,11 @@ test('in a special a dog can still jump (Tom, 2026-11-21: it could not get over 
   assert.ok(jumpsInSpecial(null));
   for (const [dog, spec] of Object.entries(SPECIALS)) assert.equal(jumpsInSpecial(spec), !['ralph', 'enzo'].includes(dog), dog);
   // a computer dog in one jumps what lies across the road, as it does out of one
-  const route = botRoute('wendover'), log = route.jumps.find(jump => jump.must) ?? route.jumps[0];
+  // (Modbury's broken bridges: a jump every dog has to make.  Wendover's fallen logs went with its old model: Tom, 2026-11-21)
+  const route = botRoute('modbury_heights'), log = route.jumps.find(jump => jump.must) ?? route.jumps[0];
   for (const dog of ['casper', 'pablo', 'black_lab', 'baz_naz', 'second_dog', 'jimmy']) {
     let jumped = false;
-    run({ mapId: 'wendover', dog, level: 'hard', from: log.s0 - 40, seconds: 6, world: { special: SPECIALS[dog] },
+    run({ mapId: 'modbury_heights', dog, level: 'hard', from: log.s0 - 40, seconds: 6, world: { special: SPECIALS[dog] },
       watch: (move, state) => { if (state.jumping && Math.abs(route.ahead(state.s, (log.s0 + log.s1) / 2)) < 6) jumped = true; } });
     assert.ok(jumped, `${dog} jumps it in its special`);
   }

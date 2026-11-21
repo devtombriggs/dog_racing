@@ -7,8 +7,17 @@
 // The centreline is a closed uniform Catmull-Rom spline through CONTROL_POINTS (the same curve
 // THREE.CatmullRomCurve3(points, true, 'catmullrom', 0.5) produces), resampled every ~2 m.
 
+import { HANDLING } from './handling.js';
+
 export const TREAT_ROAD_ID = 'treat_road';
-const TARGET_LENGTH = 1600;        // metres along the centreline
+// Tom, 2026-11-21: "this map needs to be bigger but have way more boosts, we want it sped up massively and be chaotic so
+// people fall off, do more turns" — and a dog that falls off is put back where it fell, not at the last checkpoint, so that
+// it always gets on.  So: a longer lap with bends all the way round and no barriers, everyone a good deal faster here
+// (PACE), boost pads all the way round (and mega pads on the straights), and rules.respawnWhereFell.
+const TARGET_LENGTH = 2300;        // metres along the centreline
+const PACE = 1.15;                 // every dog runs this much faster on Treat Road
+const PAD = { speed: 1.5, hold: 1.4 }, MEGA = { speed: 2.0, hold: 2.0, mega: true };      // boost pads: the boost stays with the dog `hold` seconds
+const PAD_EVERY = 48;              // metres between boost pads (more often on the straights)
 const SAMPLE_STEP = 2;             // metres between centreline samples
 const EDGE_TOLERANCE = 0.25;       // how far past the edge a dog may be and still count as "on"
 const CHECKPOINT_SPACING = 100;    // metres
@@ -16,12 +25,16 @@ const CHECKPOINT_SPACING = 100;    // metres
 // [x, z, height, width, section]   (x/z are rescaled so the lap is exactly TARGET_LENGTH)
 const CONTROL_POINTS = [
   [-150, 320, 0, 16, 'A'], [50, 320, 0, 16, 'A'], [250, 320, 0, 16, 'A'],
-  [470, 270, 3, 15, 'B'], [600, 110, 7, 14, 'B'], [540, -70, 11, 13, 'B'], [650, -240, 15, 12, 'B'], [560, -420, 20, 11, 'B'],
+  // the sky curves: S-bends, wide and fast
+  [420, 292, 3, 15, 'B'], [520, 196, 6, 14, 'B'], [460, 92, 9, 14, 'B'], [560, -6, 12, 13, 'B'], [660, -120, 15, 12, 'B'], [590, -240, 18, 12, 'B'], [650, -360, 21, 11, 'B'], [560, -470, 24, 11, 'B'],
+  // the biscuit climb, zig-zagging up (the catapult takes you over part of it)
   [390, -500, 28, 10.5, 'C'], [250, -410, 39, 10, 'C'], [110, -500, 50, 10, 'C'], [-30, -410, 61, 10, 'C'], [-170, -500, 72, 10, 'C'],
   [-320, -440, 82, 10, 'C'], [-440, -330, 77, 9.5, 'C'],
-  [-425, -205, 72, 8, 'D'], [-500, -115, 68, 8, 'D'], [-425, -30, 64, 8, 'D'], [-500, 55, 60, 8, 'D'], [-445, 140, 57, 8, 'D'],
-  [-510, 220, 55, 6, 'E'],
-  [-630, 400, 54, 6, 'F'], [-610, 530, 46, 8, 'F'], [-480, 610, 34, 10, 'F'], [-340, 560, 22, 12, 'F'], [-290, 420, 9, 14, 'F'],
+  // the technical corners: chicane after chicane, narrow
+  [-432, -210, 72, 9, 'D'], [-504, -130, 68, 9, 'D'], [-444, -40, 64, 9, 'D'], [-512, 40, 60, 9, 'D'], [-452, 128, 57, 9, 'D'], [-508, 210, 55, 8, 'D'],
+  [-510, 300, 55, 6, 'E'],
+  // the final descent: spiralling down, faster and faster
+  [-640, 420, 53, 7, 'F'], [-620, 560, 47, 8, 'F'], [-490, 630, 40, 10, 'F'], [-370, 580, 32, 11, 'F'], [-420, 480, 24, 12, 'F'], [-360, 410, 15, 13, 'F'], [-280, 400, 8, 14, 'F'], [-222, 352, 3, 15, 'F'],
 ];
 
 export const SECTIONS = {
@@ -194,6 +207,9 @@ function buildTrack() {
       }
     }
     out.onTrack = !isGap(out.s) && Math.abs(out.lateral) <= out.halfWidth + EDGE_TOLERANCE && out.distance <= out.halfWidth + EDGE_TOLERANCE + 0.5;
+    // a boost pad under it: its boost stays with the dog for `hold` seconds after it (as on Neon Nexus)
+    const strip = out.onTrack ? strips.find(each => out.s >= each.sStart && out.s <= each.sEnd && out.lateral >= each.latMin && out.lateral <= each.latMax) : null;
+    if (strip) { out.kick = strip; out.surface = 'boost'; }
     return out;
   }
 
@@ -221,10 +237,27 @@ function buildTrack() {
   // (the sixth dog: a row back, in the middle)
   { const g6 = wrapIndex(N - 6); startPositions.push({ slot: 5, position: [X[g6], Y[g6], Z[g6]], rotationY: yawAt(g6), s: S[g6] - LENGTH, lateral: 0 }); }
 
+  // boost pads all the way round: about every PAD_EVERY metres, a mega pad on the straights, none on the catapult run-up or in the
+  // air, and across a share of the road only (where across, from side to side: the line to take to them changes)
+  const strips = [];
+  for (let s = 30, k = 0; s < LENGTH - 30; s += PAD_EVERY, k++) {
+    if (s > launch.padStart - 40 && s < launch.landingS + 10) continue;
+    const i = indexAtS(s), straight = Math.abs(KAPPA[i]) < 1 / 160 && Math.abs(KAPPA[indexAtS(s + 15)]) < 1 / 160, hw = W[i] / 2;
+    const across = straight ? hw * 0.9 : hw * 0.55, centre = straight ? 0 : (k % 2 ? 1 : -1) * hw * 0.35;
+    strips.push({ id: `pad-${strips.length}`, sStart: s, sEnd: s + 10, latMin: centre - across, latMax: centre + across, ...(straight ? MEGA : PAD) });
+  }
+
   // decorative bone arches ("treat gates"). boost is off for alpha; flip it on later if wanted.
   const firstOf = sec => SEC.indexOf(sec), lastOf = sec => SEC.lastIndexOf(sec);
   const gateIdx = [0, Math.round((firstOf('B') + lastOf('B')) / 2), firstOf('C') + 20, lastOf('C') - 60, firstOf('D') + 10, firstOf('E') + 6, lastOf('E') - 6, Math.round((firstOf('F') + lastOf('F')) / 2)];
   const gates = gateIdx.filter(i => !isGap(S[i])).map((i, k) => ({ index: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, isStartGate: k === 0, boost: false }));
+
+  /** One speed multiplier for where the dog is: faster than anywhere else, a boost pad's on top (the server and the bots say so too) */
+  function speedFactor(q, stats = {}, airborne = false) {
+    void stats;                                    // (the same call as the other tracks': no stat changes anything here)
+    const hill = Math.min(1.08, Math.max(0.8, 1 - HANDLING.hillEffect * (q.grade ?? 0)));
+    return PACE * hill * (airborne || !q.boost ? 1 : q.boost);
+  }
 
   const sections = [];
   for (let i = 0, st = 0; i <= N; i++) {
@@ -236,7 +269,7 @@ function buildTrack() {
     id: TREAT_ROAD_ID, name: 'Treat Road', laps: 3, maxDogs: 5, difficulty: 'hard',
     length: LENGTH, sampleCount: N, sampleSpacing: LENGTH / N, minY, maxY,
     samples: { x: X, y: Y, z: Z, width: W, s: S, tangentX: TX, tangentZ: TZ, normalX: NX, normalZ: NZ, grade: GRADE, curvature: KAPPA, section: SEC },
-    sections, checkpoints: roadCheckpoints, startPositions, gates, launch,
+    sections, checkpoints: roadCheckpoints, startPositions, gates, launch, strips, mud: [], water: [], obstacles: [], branches: [], platforms: [],
     roadLength: LENGTH - (launch.gapEnd - launch.gapStart),
     startFinish: { position: [X[0], Y[0], Z[0]], rotationY: yawAt(0), halfWidth: W[0] / 2 },
     rules: {
@@ -247,8 +280,9 @@ function buildTrack() {
       respawnSpeedMultiplier: 0.55,
       gravity: 24,
       killPlaneY: minY - 120,
+      respawnWhereFell: true,      // (Tom, 2026-11-21) back on the road where it fell, so a dog that keeps falling still gets on
     },
-    query, pointAt, indexAtS, isGap, isGapSegment, launchPoint,
+    query, pointAt, indexAtS, isGap, isGapSegment, launchPoint, speedFactor,
   };
 }
 

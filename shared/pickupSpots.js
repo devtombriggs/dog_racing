@@ -4,10 +4,9 @@
 // Each map gets a "path": its lap length, pointAt(s, lateral) on the racing line, and the stretches
 // pickups must keep clear of (jumps, tunnels, water, bridges, ice...).  Spots are then picked near
 // target fractions of the lap, on the straightest clear stretch nearby.
-import { WENDOVER } from './wendoverData.js';
 import { polylinePath } from './polylinePath.js';
 import frostpeak from './frostpeak.json' with { type: 'json' };
-import wendover from './wendoverPath.json' with { type: 'json' };
+import { WENDOVER_WOODS } from './wendoverWoodsData.js';
 import { TREAT_ROAD } from './treatRoadData.js';
 import { MODBURY_HEIGHTS } from './modburyData.js';
 import { FARMYARD } from './farmData.js';
@@ -54,25 +53,15 @@ export const PICKUP_PATHS = {
       around(FARMYARD.hazardZones.sheep, 22), around(FARMYARD.hazardZones.mill, 24), around(FARMYARD.hazardZones.tractor, 24),
       [FARMYARD.hazardZones.pigs[0] - 20, FARMYARD.hazardZones.pigs[1] + 14],
       around(FARMYARD.obstacles.find(o => o.kind === 'scarecrow').s, 18),
+      [FARMYARD.maze.sStart - 10, FARMYARD.maze.sEnd + 10],          // (the maze: nothing in among the corn)
       around(FARMYARD.hazardZones.bales, FARMYARD.baleRun.spacing + 20),
       [FARMYARD.chasms[0].ravineStart - 35, FARMYARD.chasms[0].ravineEnd + 20],
     ],
   },
   // (the tracks made by shared/trackKit.js say for themselves where nothing should be put)
   // (lanes: where across the road a row of boxes goes; hold: the nearest place a dog can stand, where the road has a branch)
-  ...Object.fromEntries([DESERT, SPEED_BOWL, KOMBU_HOUSE, NEON, DALES, BONEYARD, VETS, JUNGLE].map(track => [track.id, { length: track.length, pointAt: track.pointAt, hazards: track.pickupHazards,
+  ...Object.fromEntries([DESERT, SPEED_BOWL, KOMBU_HOUSE, NEON, DALES, BONEYARD, VETS, JUNGLE, MUD_PARK, WENDOVER_WOODS].map(track => [track.id, { length: track.length, pointAt: track.pointAt, hazards: track.pickupHazards,
     lanes: track.boxLanes, hold: track.holdLateral, pickups: track.pickups }])),
-  mud_park: {
-    length: MUD_PARK.length, pointAt: MUD_PARK.pointAt,
-    // nothing in the bog, where the quad bike or the logs cross, among the tyres, or on the mudslide, its leap and the landing
-    hazards: [
-      [MUD_PARK.mud[0].s - 14, MUD_PARK.mud.at(-1).s + 12],
-      [MUD_PARK.hazardZones.quad - 20, MUD_PARK.hazardZones.quad + 16],
-      [MUD_PARK.hazardZones.logs[0] - 18, MUD_PARK.hazardZones.logs.at(-1) + 14],
-      [MUD_PARK.obstacles[0].s - 16, MUD_PARK.obstacles.at(-1).s + 12],
-      [MUD_PARK.slide.sStart - 10, MUD_PARK.launch.landingS + 28],
-    ],
-  },
   pet_mall: {
     length: PET_MALL.length, pointAt: PET_MALL.pointAt,
     // nothing among the cats, the puddles, the trolleys, the tins or the hamster balls, or on the leap and its landing
@@ -94,14 +83,6 @@ export const PICKUP_PATHS = {
       [WATER_PARK.hazardZones.balls[0] - 20, WATER_PARK.hazardZones.balls.at(-1) + 16],
       [WATER_PARK.hazardZones.jets[0] - 20, WATER_PARK.hazardZones.jets[1] + 16],
       [WATER_PARK.slide.sStart - 10, WATER_PARK.launch.landingS + 30],
-    ],
-  },
-  wendover: {
-    ...polylinePath(wendover.points, wendover.halfWidth),
-    hazards: [
-      ...wendover.hazards.map(h => h.range),
-      ...WENDOVER.pools.map(p => [p.sStart - 8, p.sEnd + 8]),
-      ...WENDOVER.tunnels.flatMap(t => [around(t.entryS, 12), around(t.exitS, 16)])
     ],
   },
   frostpeak: frostpeakPath(),
@@ -247,13 +228,13 @@ function treatRoadRowS(fraction) {
 const PLAN = {
   //                 box-row targets (3 boxes across)           single-bone targets
   treat_road:      { rows: null,                                bones: [0.08, 0.255, 0.52, 0.71] },
-  wendover:        { rows: [0.19, 0.60, 0.72],                  bones: [0.05, 0.31, 0.45, 0.88] },
+  wendover:        { exact: true },        // (a generated track since Tom, 2026-11-21: it lays its own out)
   // the two long courses get more, so there is always something coming up
   // (even: stay near each target where the road allows, so they are spread along the lap)
   frostpeak:       { custom: true },   // see frostpeakPickups(): 4 rows + 3 bones before the cannon, 12 rows + 30 bones on the black run
-  farmyard:        { rows: [0.07, 0.24, 0.42, 0.66, 0.86],             bones: [0.14, 0.31, 0.50, 0.59, 0.74, 0.95], even: true },
+  farmyard:        { rows: [0.07, 0.24, 0.42, 0.61, 0.80],             bones: [0.13, 0.33, 0.48, 0.955], even: true },      // (none in the maze, 64 to 77 % of the lap: Tom, 2026-11-21)
   // (the boxes and bones are on the dry stretches: the plaza, between the hazards, the climb to the slide, the dock)
-  mud_park:        { rows: [0.08, 0.215, 0.33, 0.72],                  bones: [0.135, 0.275, 0.66, 0.965], even: true },
+  mud_park:        { exact: true },        // (a kit track since Tom, 2026-11-21: it lays its own out)
   desert_dunes:    { rows: [0.07, 0.25, 0.50, 0.70, 0.93],             bones: [0.13, 0.33, 0.58, 0.80], even: true },
   // (these three say for themselves exactly where everything goes: see `pickups` in their track files)
   speed_bowl:      { exact: true },

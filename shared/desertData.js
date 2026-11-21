@@ -1,45 +1,66 @@
-// Dune Dash — a lap of the desert: rolling dunes, soft sand, whirlwinds wandering the flats,
-// tumbleweed, a rocky canyon, and a leap off the top of the great dune.  Built by shared/trackKit.js
-// (see there for what each part means); the scenery is src/tracks/desert/DesertTrack.js.
+// Dune Dash — a lap of the desert: rolling dunes, soft sand, whirlwinds wandering the flats, tumbleweed, a rocky canyon,
+// over the great dune and down the far side, and the sinkhole.  Built by shared/trackKit.js (see there for what each part
+// means); the scenery is src/tracks/desert/DesertTrack.js.
+//
+// Tom, 2026-11-21: "remove that random jump across (too many of these), have a sink hole and put loads more turns in".  So no
+// leap any more: bends all the way round (sweepers a drift can be held through, a hairpin, a chicane, S-bends over the
+// dunes), the long fast way down the great dune, and the sinkhole in the bowl before home: skirt it either side, and the
+// nearer you cut it the more it drags at you; get too near and it swallows you.
 //
 // Round the lap:
 //   A  The Oasis        start/finish under the palms
-//   B  The Dune Sea     up and over dune after dune, with soft sand that drags a dog down to a plod
-//   C  Twister Flats    wide and flat, with three whirlwinds wandering across it: nothing jumps a whirlwind
-//   D  Rattle Canyon    tumbleweed blowing across the mouth of it (jump it), then boulders to weave through
-//   E  The Great Dune   the long climb, and the leap off the crest over the ravine
-//   F  Home             down to the oasis again
+//   B  The Dune Sea     S-bends up and over dune after dune, with soft sand that drags a dog down to a plod
+//   C  Twister Flats    a long, wide sweeping bend, with three whirlwinds wandering across it: nothing jumps a whirlwind
+//   D  Rattle Canyon    tumbleweed blowing across the mouth of it (jump it), a hairpin, then a chicane through the boulders
+//   E  The Great Dune   the long climb, over the crest, and a fast sweeping run down the far side
+//   S  The Sinkhole     a wide bowl of sand with the pit in the middle of it
+//   F  Home             a last bend into the oasis
 import { makeTrack } from './trackKit.js';
 
 const SOFT_SAND = 0.6;                  // share of top speed in soft sand
 const TWISTER = { radius: 2.3, wander: 14 };
 const WEED = { period: 5, roll: 3.4, from: 17, to: -17, radius: 0.8 };
+// the sinkhole: slowed inside `radius` metres of its middle and dragged towards it, swallowed inside `core`
+const SINKHOLE = { radius: 10, core: 2.6, pull: 6, speed: 0.55 };
+
+// [x, z, height, width, section, name?]: a name marks a point the features below are placed by
+const ROUTE = [
+  [-120, 160, 0, 16, 'A'], [-40, 160, 0, 16, 'A'], [28, 158, 0, 16, 'A'],
+  // the dune sea: S-bends over the dunes
+  [86, 138, 3, 15, 'B', 'dunes'], [118, 102, 7, 15, 'B'], [168, 96, 2, 15, 'B'], [204, 64, 7, 15, 'B'], [186, 20, 3, 15, 'B'], [212, -24, 8, 15, 'B'], [196, -70, 2, 15, 'B'],
+  // the flats: one long sweeping bend
+  [160, -118, 1, 20, 'C', 'flats'], [104, -146, 0, 20, 'C'], [44, -150, 0, 20, 'C'], [-4, -170, 0, 20, 'C'],
+  // the canyon: tumbleweed at the mouth, a hairpin, the boulder chicane
+  [-48, -196, 2, 12, 'D', 'canyon'], [-96, -190, 3, 12, 'D'], [-118, -158, 3, 12, 'D', 'hairpin'], [-98, -128, 4, 12, 'D'], [-70, -108, 5, 12, 'D', 'rocks'], [-78, -78, 6, 12, 'D'], [-116, -60, 8, 12, 'D'],
+  // the great dune: up, over and down
+  [-160, -36, 13, 13, 'E'], [-200, -2, 17, 13, 'E', 'crest'], [-236, 40, 11, 14, 'E'], [-246, 82, 5, 14, 'E'],
+  // the sinkhole: a wide bowl
+  [-228, 118, 1, 26, 'S'], [-196, 142, 0, 28, 'S', 'pit'], [-160, 158, 0, 22, 'F'],
+];
+const AT = Object.fromEntries(ROUTE.map((p, k) => [p[5], k]).filter(([name]) => name));
 
 export const DESERT = makeTrack({
   id: 'desert_dunes', name: 'Dune Dash',
-  // [x, z, height, width, section]
-  controlPoints: [
-    [-120, 160, 0, 16, 'A'], [-40, 160, 0, 16, 'A'], [40, 160, 0, 16, 'A'],
-    [120, 150, 2, 15, 'B'], [190, 110, 7, 15, 'B'], [215, 40, 2, 15, 'B'], [185, -25, 8, 15, 'B'], [215, -90, 3, 15, 'B'],
-    [190, -160, 1, 20, 'C'], [110, -195, 0, 20, 'C'], [20, -190, 0, 20, 'C'],
-    [-60, -170, 2, 11, 'D'], [-120, -120, 4, 11, 'D'], [-100, -50, 6, 11, 'D'], [-150, 0, 9, 11, 'D'],
-    [-215, 30, 16, 13, 'E'], [-240, 95, 16, 13, 'E'],
-    [-200, 150, 0, 16, 'F'],
-  ],
+  controlPoints: ROUTE.map(([x, z, height, width, section]) => [x, z, height, width, section]),
   sections: {
     A: { name: 'The Oasis', surface: 'sand' }, B: { name: 'The Dune Sea', surface: 'sand' }, C: { name: 'Twister Flats', surface: 'sand' },
-    D: { name: 'Rattle Canyon', surface: 'rock' }, E: { name: 'The Great Dune', surface: 'sand' }, F: { name: 'Home', surface: 'sand' },
+    D: { name: 'Rattle Canyon', surface: 'rock' }, E: { name: 'The Great Dune', surface: 'sand' }, S: { name: 'The Sinkhole', surface: 'sand' },
+    F: { name: 'Home', surface: 'sand' },
   },
-}, ({ sAtU, pointAt, pingPong, launchBetween }) => {
-  const launch = launchBetween(15.3, 15.85, { duration: 2.0, arcHeight: 9 });
-  const softS = sAtU(3.35), patches = [];
+  hills: { down: 3.0, downMax: 0.4 },              // (flat out down the far side of the great dune)
+}, ({ sAtU, pointAt, pingPong }) => {
+  const softS = sAtU(AT.dunes + 0.35), patches = [];
   for (let k = 0; k < 6; k++) {
-    const s = softS + k * 42, hw = pointAt(s).halfWidth;
+    const s = softS + k * 40, hw = pointAt(s).halfWidth;
     patches.push({ id: `sand-${k}`, kind: 'soft sand', s, lateral: (k % 2 ? -1 : 1) * hw * 0.45, along: 7, across: hw * 0.5, speed: SOFT_SAND, slowName: 'SOFT SAND — SLOW GOING' });
   }
-  const rockS = sAtU(11.7), obstacles = [];
-  for (let k = 0; k < 6; k++) { const s = rockS + k * 15; obstacles.push({ id: `rock-${k}`, kind: 'rock', s, lateral: (k % 2 ? 1 : -1) * pointAt(s).halfWidth * 0.42, radius: 1.2 }); }
-  const twisters = [sAtU(8.35), sAtU(9.0), sAtU(9.65)], weeds = [0, 20, 40].map(d => sAtU(10.3) + d);
+  // the boulders of the chicane: weave left, right, left
+  const rockS = sAtU(AT.rocks - 0.3), obstacles = [];
+  for (let k = 0; k < 5; k++) { const s = rockS + k * 13; obstacles.push({ id: `rock-${k}`, kind: 'rock', s, lateral: (k % 2 ? 1 : -1) * pointAt(s).halfWidth * 0.42, radius: 1.2 }); }
+  const twisters = [sAtU(AT.flats + 0.6), sAtU(AT.flats + 1.4), sAtU(AT.flats + 2.2)], weeds = [0, 18, 36].map(d => sAtU(AT.canyon - 0.1) + d);
+  // the pit, in the middle of the bowl
+  const pit = sAtU(AT.pit);
+  const sinkholes = [{ id: 'sinkhole', kind: 'sinkhole', s: pit, lateral: 0, ...SINKHOLE }];
 
   function hazardsAt(t) {
     const out = [];
@@ -59,9 +80,9 @@ export const DESERT = makeTrack({
     return out;
   }
   return {
-    launch, patches, obstacles, hazardsAt,
+    patches, obstacles, sinkholes, hazardsAt,
     keepClear: [[twisters[0] - TWISTER.wander - 12, twisters[2] + TWISTER.wander + 12], [weeds[0] - 14, weeds[2] + 12]],
-    extras: { twisters, twisterWander: TWISTER.wander, weedLanes: weeds, weedRun: WEED },
+    extras: { twisters, twisterWander: TWISTER.wander, weedLanes: weeds, weedRun: WEED, crest: sAtU(AT.crest) },
   };
 });
 export default DESERT;

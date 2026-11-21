@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DALES } from '../shared/dalesData.js';
+import { JUMP } from '../shared/handling.js';
 import { BONEYARD } from '../shared/boneyardData.js';
 import { VETS } from '../shared/vetsData.js';
-import { JUNGLE, STAIR_TREE } from '../shared/jungleData.js';
+import { JUNGLE, STAIR_TREE, RIVER_Y } from '../shared/jungleData.js';
 import { MAPS, PROCEDURAL_TRACKS, lapsFor } from '../shared/maps.js';
 import { GRAND_PRIX } from '../shared/grandPrix.js';
 import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
@@ -49,10 +50,44 @@ test('Grand Prix 4: no lap passes close beside itself; everything on it is on th
 test('Yorkshire Dales: boost pads up the climbs, faster down than on the flat, cheeses, sheep, the ford, the cave and the waterfall', () => {
   const T = DALES, S = T.samples;
   assert.ok(Math.max(...S.y) - Math.min(...S.y) > 35, 'real hills');
-  assert.ok(T.strips.length >= 8);
-  for (const strip of T.strips) {
+  const pads = T.strips.filter(strip => strip.kind !== 'rock'), rocks = T.strips.filter(strip => strip.kind === 'rock');
+  assert.ok(pads.length >= 8);
+  for (const strip of pads) {
     const mid = (strip.sStart + strip.sEnd) / 2;
     assert.ok(at(T, mid).kick && at(T, mid).grade > 0.02, `a pad at ${mid.toFixed(0)} m is on a climb`);
+  }
+  // the stream (Tom, 2026-11-21): down from the waterfall's pool, ankle deep but not slowing anyone, rocks to hop in a zig-zag, each a boost
+  assert.ok(rocks.length >= 8);
+  rocks.forEach((rock, k) => {
+    const mid = (rock.sStart + rock.sEnd) / 2, q = at(T, mid, (rock.latMin + rock.latMax) / 2);
+    assert.ok(T.within(mid, T.stream) && q.kick && !q.inWater, `rock ${k}`);
+    if (k) assert.ok(Math.sign(rock.latMin + rock.latMax) !== Math.sign(rocks[k - 1].latMin + rocks[k - 1].latMax), 'from side to side');
+  });
+  assert.ok(T.pointAt(T.stream.sStart).y > T.pointAt(T.stream.sEnd).y, 'downhill');
+  assert.ok(T.stream.sStart > T.plunge.sEnd);
+  // more turns, fewer straights: no more than 150 m without a bend anywhere on the lap
+  const N = T.sampleCount, heading = i => Math.atan2(S.tangentX[i % N], S.tangentZ[i % N]), step = T.length / N, w = Math.round(30 / step);
+  let run = 0, longest = 0;
+  for (let i = 0; i < 2 * N; i++) { let d = heading(i + w) - heading(i); d = Math.atan2(Math.sin(d), Math.cos(d)); run = Math.abs(d) < 10 * Math.PI / 180 ? run + 1 : 0; longest = Math.max(longest, run); }
+  assert.ok(Math.min(longest, N) * step < 150, `longest straight ${Math.round(longest * step)} m`);
+  // the goat path: the inside of the first hairpin, shorter than the road round it, and a cheese comes down it
+  const goat = T.goatPath;
+  let path = 0, prev = null;
+  for (let s = goat.sStart; s <= goat.sEnd; s += 0.5) { const br = T.branchAt(s), p = T.pointAt(s, br ? br.side * br.centre : 0); if (prev) path += Math.hypot(p.x - prev.x, p.z - prev.z); prev = p; }
+  assert.ok(path < (goat.sEnd - goat.sStart) - 20, `goat path ${path.toFixed(0)} m against ${(goat.sEnd - goat.sStart).toFixed(0)} m`);
+  let goatCheese = false;
+  for (let t = 0; t < 8 && !goatCheese; t += 0.2) { const h = T.hazardsAt(t).find(each => each.id === 'cheese-goat'); goatCheese = h.active && T.query(h.x, h.z).lane?.id === 'goat-path'; }
+  assert.ok(goatCheese);
+  // the sheep stand on gentle ground (Tom, 2026-11-21: up the hill they could not be jumped), and a dog at the top of an
+  // ordinary jump, right over one, clears it
+  const top = JUMP.force ** 2 / (2 * JUMP.gravity);
+  for (const s of T.flocks) assert.ok(Math.abs(at(T, s).grade) < 0.06, `the ground under the flock at ${s.toFixed(0)} m`);
+  for (let t = 0.5; t < 9; t += 0.5) {
+    for (const sheep of T.hazardsAt(t).filter(h => h.kind === 'sheep')) {
+      const ground = T.query(sheep.x, sheep.z).trackY;
+      assert.equal(T.hazardHit([sheep.x, ground + top - 0.15, sheep.z], t), null, `${sheep.id} jumped at ${t} s`);
+      assert.equal(T.hazardHit([sheep.x, ground, sheep.z], t)?.id, sheep.id);
+    }
   }
   // a descent adds a lot; the same slope on another map adds very little
   let steepest = 0; for (let i = 0; i < T.sampleCount; i++) if (S.grade[i] < S.grade[steepest]) steepest = i;
@@ -94,8 +129,27 @@ test('The Boneyard: a lap the shape of a bone, bones all the way round, muddy wa
   assert.ok(blew);
 });
 
-test('Grand Prix 4 has no leaps: nothing fires a dog through the air', () => {
-  for (const T of [DALES, BONEYARD, VETS, JUNGLE]) assert.equal(T.launch, undefined, T.id);
+test('Grand Prix 4 has no leaps: nothing fires a dog through the air (the jungle\'s vine lifts only carry a dog up out of the river)', () => {
+  for (const T of [DALES, BONEYARD, VETS]) assert.equal(T.launch, undefined, T.id);
+  for (const l of JUNGLE.launches ?? []) assert.ok(l.lift && l.under, l.id);
+});
+
+test('Monkey Jungle (Tom, 2026-11-21): off a bridge, the swings or the log you land in the river, wade it, and a vine lift takes you back up', () => {
+  const T = JUNGLE;
+  T.setClock(2);
+  assert.equal(T.undercity.length, T.platforms.length);
+  for (const zone of T.platforms) {
+    const u = T.undercity.find(each => each.under === zone.id), mid = (zone.sStart + zone.sEnd) / 2, c = T.pointAt(mid);
+    // off the side of it: into the river at the bottom of the gorge, wading
+    const off = T.pointAt(mid, c.halfWidth - 0.8), q = T.query(off.x, off.z, -1, off.y);
+    const pad = T.padUnder(mid, c.halfWidth - 0.8);
+    if (!pad) { assert.equal(q.level, u.id, zone.id); assert.equal(q.movement, 'wade'); assert.ok(Math.abs(q.y - (RIVER_Y - 0.4)) < 0.2, `${zone.id} the river bed`); }
+    // on it, still on it
+    const on = T.padAt(zone.pads[0]); assert.equal(T.query(on.x, on.z, -1, on.y).level, undefined);
+    // its lift: up out of the river to the trail, just past the far end
+    const lift = T.launches.find(l => l.under === u.id), top = T.launchPoint(lift.duration, 0, lift);
+    assert.ok(Math.abs(top.y - T.pointAt(lift.landingS).y) < 0.01 && lift.landingS > zone.sEnd && lift.takeoffS < zone.sEnd + 1);
+  }
 });
 
 test('The Vets: in on the treadmill, three storeys up two flights of stairs, and out of the top window', () => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { JUMP } from '../shared/handling.js';
 import { test } from 'node:test';
 import { DESERT } from '../shared/desertData.js';
 import { SPEED_BOWL } from '../shared/speedBowlData.js';
@@ -53,7 +54,7 @@ test('the Speed Bowl: the shortest lap, five of them, nothing in the way, six ro
   assert.equal(GOLDEN_BONE_SPOTS.speed_bowl.length, 12);
 });
 
-test('Dune Dash: soft sand is slow, whirlwinds cannot be jumped, tumbleweed can, and there is a leap', () => {
+test('Dune Dash: soft sand is slow, whirlwinds cannot be jumped, tumbleweed can; no leap any more, but the sinkhole (Tom, 2026-11-21)', () => {
   const T = DESERT, sand = T.mud[0], inSand = at(T, sand.s, sand.lateral);
   assert.ok(inSand.mud && T.speedFactor(inSand) < 0.65);
   assert.equal(at(T, sand.s, -sand.lateral).mud, false, 'there is firm sand past each patch');
@@ -63,8 +64,17 @@ test('Dune Dash: soft sand is slow, whirlwinds cannot be jumped, tumbleweed can,
   assert.equal(T.hazardHit([weed.x, weed.y, weed.z], 1)?.kind, 'tumbleweed');
   assert.equal(T.hazardHit([weed.x, weed.y + 1.4, weed.z], 1), null);
   for (let t = 0; t < 60; t += 0.7) for (const h of T.hazardsAt(t)) if (h.kind === 'twister') assert.ok(T.query(h.x, h.z).distance < T.query(h.x, h.z).halfWidth, 'the whirlwinds stay on the flats');
-  assert.ok(T.launch && T.isGap((T.launch.gapStart + T.launch.gapEnd) / 2) && !at(T, (T.launch.gapStart + T.launch.gapEnd) / 2).onTrack);
-  assert.ok(MAPS.desert_dunes.checkpoints.some(cp => cp.launchLanding));
+  assert.equal(T.launch, undefined, 'no leap');
+  // the sinkhole: slow and dragging towards the middle near it, swallowing at the middle unless the dog is in the air; firm going either side
+  const hole = T.sinkholes[0], edge = T.query(hole.x + hole.radius - 1, hole.z), middle = T.query(hole.x + 1, hole.z), beside = at(T, hole.s, T.pointAt(hole.s).halfWidth - 1);
+  assert.ok(edge.mud && T.speedFactor(edge) < 0.6 && edge.pull[0] < 0, 'dragged in');
+  assert.ok(middle.gap && T.rules.gapClearance < 1, 'swallowed (a fall), unless in the air');
+  assert.ok(!beside.mud && !beside.gap, 'room to go round it');
+  // more turns: no straight longer than the start
+  const S = T.samples, N = T.sampleCount, step = T.length / N, w = Math.round(30 / step), heading = i => Math.atan2(S.tangentX[i % N], S.tangentZ[i % N]);
+  let run = 0, longest = 0;
+  for (let i = 0; i < 2 * N; i++) { let d = heading(i + w) - heading(i); d = Math.atan2(Math.sin(d), Math.cos(d)); run = Math.abs(d) < 10 * Math.PI / 180 ? run + 1 : 0; longest = Math.max(longest, run); }
+  assert.ok(Math.min(longest, N) * step < 170, `longest straight ${Math.round(longest * step)} m`);
 });
 
 test('Kombu\'s House: up the drive, in at the glass doors, the living room, round the pool room and out of the same doorway, the kitchen, up in the lift, the hallway, the computer room, the dog pen, the hill, the back drive and the road', () => {
@@ -170,13 +180,58 @@ test('Kombu\'s House: up the drive, in at the glass doors, the living room, roun
   for (const bone of GOLDEN_BONE_SPOTS.kombu_house) { const q = T.query(bone.x, bone.z); assert.ok(!q.blocked && !q.inWater && Math.abs(q.lateral) < q.halfWidth - 1, `bone at ${bone.s}`); }
 });
 
+test('Neon Nexus, the Undercity (Tom, 2026-11-21): every platform a boost; miss a jump and land below, past the robots, and a lift back up', () => {
+  const T = NEON;
+  T.setClock(3);
+  // a boost on every platform, wherever it has slid to
+  for (const zone of T.platforms) for (const pad of zone.pads) { const p = T.padAt(pad), q = T.query(p.x, p.z, -1, p.y); assert.ok(q.kick?.speed > 1 && !q.gap, pad.id); }
+  // over a gap between two platforms, the ground is the Undercity, `depth` metres down: a dog falls to it and races on
+  assert.equal(T.undercity.length, 2);
+  for (const zone of T.platforms) {
+    const s = zone.pads[0].s1 + 4, up = T.pointAt(s), q = T.query(up.x, up.z, -1, up.y);
+    const u = T.underAt(s);
+    assert.ok(u && q.level === u.id && q.onTrack && !q.gap && Math.abs(up.y - u.depth - q.y) < 0.01, zone.id);
+    const without = T.query(up.x, up.z);
+    assert.ok(without.gap && !without.level, '(asked without a height: the main road, as before)');
+  }
+  // down there all the way to its lift (it carries on under the road past the crossing), and up on the road above it is the road
+  for (const u of T.undercity) {
+    for (let s = u.sStart + 2; s < u.sEnd - 2; s += 10) { const p = T.pointAt(s), low = T.query(p.x, p.z, -1, p.y - u.depth + 0.1); assert.equal(low.level, u.id, `${u.id} at ${s}`); }
+    const p = T.pointAt(u.sEnd - 12); assert.equal(T.query(p.x, p.z, -1, p.y).level, undefined);
+    // its lift: from the bottom to the road above, landing short of the next catapult
+    const lift = T.launches.find(l => l.under === u.id), bottom = T.launchPoint(0, 0, lift), top = T.launchPoint(lift.duration, 0, lift);
+    assert.ok(Math.abs(bottom.y - (T.pointAt(lift.takeoffS).y - u.depth)) < 0.01 && Math.abs(top.y - T.pointAt(lift.landingS).y) < 0.01);
+    const next = T.launches.filter(l => !l.under && l.padStart > lift.landingS).sort((a, b) => a.padStart - b.padStart)[0];
+    assert.ok(next.padStart - lift.landingS > 6, 'room to land before the catapult');
+    assert.ok(!T.isGap(lift.takeoffS + 2), 'the road above the lift is whole');
+  }
+  // the robots: down there, too tall to jump; every so often each fires a ring of lightning, with a warning first
+  assert.ok(T.robots.length >= 6);
+  let warned = false, zapped = false;
+  for (let t = 0; t < T.robot.every * 2; t += 0.05) {
+    const h = T.hazardsAt(t), body = h.find(each => each.id === 'robot-0'), zap = h.find(each => each.id === 'robot-0-zap');
+    assert.ok(body.height > JUMP.force ** 2 / (2 * JUMP.gravity));
+    if (body.warn > 0) warned = true;
+    if (zap.active) { zapped = true; assert.ok(warned); }
+  }
+  assert.ok(zapped);
+  // a dog down there that runs into one is hit; one up on the road over it is not
+  const robot = T.hazardsAt(2).find(h => h.id === 'robot-0');
+  assert.equal(T.hazardHit([robot.x, robot.y, robot.z], 2)?.kind, 'robot');
+  const above = T.pointAt(T.query(robot.x, robot.z).s);
+  assert.equal(T.hazardHit([robot.x, above.y, robot.z], 2), null);
+  // a chew toy dropped on a platform goes along with it
+  const pad = T.platforms[0].pads[1], at3 = T.padAt(pad, 3), ride = T.rideAt(at3.x, at3.z, 3), later = T.ridePosition(ride, 5), at5 = T.padAt(pad, 5);
+  assert.ok(ride && Math.hypot(later[0] - at5.x, later[2] - at5.z) < 0.5);
+});
+
 test('Neon Nexus: the longest lap, three of them and fast; mega pads and three catapults; four pairs of roads where the longer has the bones; platform crossings; the accelerator; no bombs', () => {
   const T = NEON;
   assert.ok(T.length > 4900 && T.length < 5000, `${T.length} m`);
   assert.equal(lapsFor('neon_nexus'), 3);
   for (const [id, map] of Object.entries(MAPS)) if (map.procedural) assert.ok(T.length >= PROCEDURAL_TRACKS[id].length, `longer than ${id}`);
-  // nothing that knocks a dog over
-  assert.equal(T.hazardsAt(3).length, 0);
+  // nothing that knocks a dog over up on the road: the robots are all down in the Undercity
+  for (const h of T.hazardsAt(3)) assert.ok(T.pointAt(T.query(h.x, h.z).s).y - h.y > 10, `${h.id} is below`);
   // not a circle: it goes there and back across the city, so the same x is passed many times
   let crossings = 0; for (let i = 0; i < T.sampleCount; i++) if ((T.samples.x[i] - 100) * (T.samples.x[(i + 1) % T.sampleCount] - 100) < 0) crossings++;
   assert.ok(crossings >= 4, `${crossings} crossings`);
@@ -190,10 +245,11 @@ test('Neon Nexus: the longest lap, three of them and fast; mega pads and three c
     if (br) { const other = T.strips.find(o => o !== strip && Math.abs(o.sStart - strip.sStart) < 1); assert.ok(other && Boolean(other.mega) !== Boolean(strip.mega) && Boolean(other.branch) !== Boolean(strip.branch)); assert.equal(Boolean(strip.mega), (br.branch.kind === 'long') === Boolean(strip.branch)); }
     else assert.ok(strip.mega);
   }
-  // three catapults, the accelerator the first of them; every one has its own landing gate
-  assert.equal(T.launches.length, 3);
+  // three catapults, the accelerator the first of them; every one has its own landing gate (and a lift up from each Undercity)
+  assert.equal(T.launches.filter(l => !l.under).length, 3);
+  assert.equal(T.launches.filter(l => l.lift && l.under).length, 2);
   assert.equal(T.checkpoints.filter(cp => cp.launchLanding).length, 3);
-  for (const l of T.launches) { const end = T.launchPoint(l.duration, 0, l), land = T.pointAt(l.landingS); assert.ok(Math.hypot(end.x - land.x, end.z - land.z) < 0.01 && l.gapEnd - l.gapStart > 240); }
+  for (const l of T.launches.filter(each => !each.under)) { const end = T.launchPoint(l.duration, 0, l), land = T.pointAt(l.landingS); assert.ok(Math.hypot(end.x - land.x, end.z - land.z) < 0.01 && l.gapEnd - l.gapStart > 240); }
 
   assert.equal(T.branches.length, 4);
   const lengths = b => {
@@ -276,13 +332,14 @@ test('Neon Nexus: the longest lap, three of them and fast; mega pads and three c
 test('a hazard on a hill is cleared by a jump of its own height, measured from the ground each is on (the cheeses on the Dales)', async () => {
   const { DALES } = await import('../shared/dalesData.js');
   const { pull, cheeseRun } = DALES;
-  // a moment when a cheese is rolling, somewhere on the climb where the road is steep
+  // a moment when a cheese is rolling, somewhere on the climb (a steady 5 %: Tom, 2026-11-21) where the road is not bending
   let found = null;
   for (let t = 0; t < 60 && !found; t += 0.25) {
     for (const h of DALES.hazardsAt(t)) {
       if (h.kind !== 'cheese' || !h.active) continue;
       const q = DALES.query(h.x, h.z);
-      if (q.s > pull.sStart + 20 && q.s < pull.sEnd - 20 && Math.abs(q.grade) > 0.12) { found = { t, h, q }; break; }
+      // (on a straight-ish leg of the zig-zags: round a hairpin, 1.5 m back along the road is further than 1.5 m from it)
+      if (q.s > pull.sStart + 20 && q.s < pull.sEnd - 20 && Math.abs(q.grade) > 0.04 && Math.abs(q.curvature) < 1 / 60) { found = { t, h, q }; break; }
     }
   }
   assert.ok(found, 'a cheese rolling on the steep part of the climb');
@@ -290,9 +347,43 @@ test('a hazard on a hill is cleared by a jump of its own height, measured from t
   // the dog is a metre and a half down the road from it (lower ground), coming up
   const downhill = DALES.pointAt(q.s - 1.5, q.lateral);
   const ground = DALES.query(downhill.x, downhill.z).trackY;
-  assert.ok(h.y - ground > 0.15, 'the cheese stands on higher ground than the dog');
+  assert.ok(h.y - ground > 0.05, 'the cheese stands on higher ground than the dog');
   assert.ok(Math.hypot(downhill.x - h.x, downhill.z - h.z) <= cheeseRun.radius + 1, 'near enough to be hit');
   assert.equal(DALES.hazardHit([downhill.x, ground, downhill.z], t)?.id, h.id, 'on the ground: hit');
   assert.equal(DALES.hazardHit([downhill.x, ground + 0.6, downhill.z], t)?.id, h.id, 'a low hop: hit');
   assert.equal(DALES.hazardHit([downhill.x, ground + h.height + 0.15, downhill.z], t), null, 'a jump of the height of the cheese clears it');
+});
+
+test('Wendover Woods, remade (Tom, 2026-11-21): the hollow log, the beck to swim, the Treetop Walk, the long drift and the fallen log to jump', async () => {
+  const { WENDOVER_WOODS: T } = await import('../shared/wendoverWoodsData.js');
+  const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return T.query(p.x, p.z, -1, p.y); };
+  // the start where it always was: at the origin, running along +x
+  assert.ok(Math.hypot(T.startFinish.position[0], T.startFinish.position[2]) < 1 && Math.abs(Math.sin(T.startFinish.rotationY) - 1) < 0.05);
+  // through the hollow log: narrow
+  const mid = (T.hollow.sStart + T.hollow.sEnd) / 2;
+  assert.ok(T.pointAt(mid).halfWidth <= 4.6 && at(mid, 6).blocked);
+  // the beck: deep enough to swim
+  assert.equal(at((T.beck.sStart + T.beck.sEnd) / 2).movement, 'swim');
+  // the Treetop Walk: up in the branches, and shorter than the road round the bend
+  const W = T.treetop, b = T.branchAt((W.sStart + W.sEnd) / 2);
+  assert.ok(b.lift > 3 && b.open);
+  let path = 0, prev = null;
+  for (let s = W.sStart; s <= W.sEnd; s += 0.5) { const br = T.branchAt(s), p = T.pointAt(s, br ? br.side * br.centre : 0); if (prev) path += Math.hypot(p.x - prev.x, p.z - prev.z); prev = p; }
+  assert.ok(path < W.sEnd - W.sStart - 10, `${path.toFixed(0)} m against ${(W.sEnd - W.sStart).toFixed(0)} m`);
+  // the long drift: one bend all the way down, a drift's own size (40 to 150 m round), and downhill
+  const drift = T.sections.find(sec => sec.id === 'G');
+  let turned = 0;
+  for (let i = T.indexAtS(drift.sStart); i !== T.indexAtS(drift.sStart + 180); i = (i + 1) % T.sampleCount) turned += T.samples.curvature[i] * T.sampleSpacing;
+  assert.ok(Math.abs(turned) > 1.8, `${(Math.abs(turned) * 180 / Math.PI).toFixed(0)} degrees`);
+  assert.ok(T.pointAt(drift.sStart).y > T.pointAt(drift.sEnd).y + 5);
+  // the fallen log: right across the path, cleared by the jump the ramp in front of it gives
+  const logs = T.hazardsAt(0).filter(h => h.kind === 'log'), kicker = T.strips.find(strip => strip.hop);
+  assert.ok(logs.length >= 6 && kicker.sStart < T.fallenLog.s);
+  const apex = kicker.hop ** 2 / (2 * 16);
+  assert.ok(apex > logs[0].height + 0.5, 'the ramp throws a dog well over it');
+  // more turns: nothing straighter for longer than the start straight
+  const S = T.samples, N = T.sampleCount, step = T.length / N, w = Math.round(30 / step), heading = i => Math.atan2(S.tangentX[i % N], S.tangentZ[i % N]);
+  let run = 0, longest = 0;
+  for (let i = 0; i < 2 * N; i++) { let d = heading(i + w) - heading(i); d = Math.atan2(Math.sin(d), Math.cos(d)); run = Math.abs(d) < 10 * Math.PI / 180 ? run + 1 : 0; longest = Math.max(longest, run); }
+  assert.ok(Math.min(longest, N) * step < 175, `longest straight ${Math.round(longest * step)} m`);
 });

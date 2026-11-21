@@ -8,7 +8,7 @@ import { createKitWorld, rng, box, cyl, ball, cone, merge, paint, canvasTexture 
 
 const S = T.samples;
 const GRASS = 0x6fb34a, STONE = 0xa9a698, SLATE = 0x5d6470;
-const LANE = { A: [0xc9b78d, 0xc0ae84], B: [0x9ccb62, 0x93c259], C: [0xc9b78d, 0xbfad82], D: [0xd6d2c4, 0xcbc7b8], E: [0x9ccb62, 0x93c259], F: [0xb8b3a2, 0xaea998], G: [0x9ccb62, 0x93c259], H: [0xc9b78d, 0xbfad82], I: [0xd6d2c4, 0xcbc7b8], J: [0xc9b78d, 0xc0ae84] };
+const LANE = { K: [0x8fa3a3, 0x86999a], A: [0xc9b78d, 0xc0ae84], B: [0x9ccb62, 0x93c259], C: [0xc9b78d, 0xbfad82], D: [0xd6d2c4, 0xcbc7b8], E: [0x9ccb62, 0x93c259], F: [0xb8b3a2, 0xaea998], G: [0x9ccb62, 0x93c259], H: [0xc9b78d, 0xbfad82], I: [0xd6d2c4, 0xcbc7b8], J: [0xc9b78d, 0xc0ae84] };
 const walled = section => 'ACHJ'.includes(section);
 const stones = (g) => {
   const r = rng(8); g.fillStyle = '#6f6c62'; g.fillRect(0, 0, 128, 64);
@@ -28,6 +28,8 @@ export const createDales = () => createKitWorld(T, {
   ],
   start: { text: 'YORKSHIRE DALES', color: 0x7a6a52, background: '#f3ead2', ink: '#3c5a2a' },
   strips: { color: '#ffffff', background: 'rgba(60,120,50,0.9)' },
+  // the goat path across the first hairpin: a dirt track between post-and-rail fences
+  branch: { color: () => 0xa08c64, edges: [{ height: 1.0, every: 4, size: [64, 32], cutout: true, draw(g) { g.clearRect(0, 0, 64, 32); g.fillStyle = '#8a6a44'; g.fillRect(0, 0, 7, 32); g.fillRect(0, 6, 64, 4); g.fillRect(0, 18, 64, 4); } }] },
   water: { color: 0x6fb7d6 },
   env: { fog: [0xdff0fb, 260, 2600], background: 0xdff0fb, exposure: 1.0 },
   lights: { hemi: [0xf2fbff, 0x8fb86a, 1.6], sun: [0xfff6dc, 2.2] },
@@ -122,6 +124,24 @@ export const createDales = () => createKitWorld(T, {
       for (let k = 0; k < 68; k++) { const a = k * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
       add('Beck', g, keep(new THREE.MeshStandardMaterial({ color: 0x6fb7d6, roughness: 0.1, transparent: true, opacity: 0.8, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }))); }
+    // ---------- the stream: from the waterfall's pool down the beck, ankle deep over pebbles, with flat rocks out of it
+    { const [a, b] = [T.indexAtS(T.stream.sStart), T.indexAtS(T.stream.sEnd)];
+      const flow = canvasTexture(64, 64, (g) => { const q = rng(9); g.fillStyle = 'rgba(110,183,214,0.62)'; g.fillRect(0, 0, 64, 64); for (let k = 0; k < 40; k++) { g.fillStyle = `rgba(255,255,255,${0.15 + q() * 0.35})`; g.fillRect(q() * 64, q() * 64, 2 + q() * 10, 1 + q() * 1.5); } }, true); D.push(flow);
+      flow.repeat.set(2, 1);
+      const water = add('Stream_Water', band(T, a, b, i => ({ lat: -S.width[i] / 2, y: S.y[i] + 0.03 }), i => ({ lat: S.width[i] / 2, y: S.y[i] + 0.03 }), { every: 2 }),
+        keep(new THREE.MeshStandardMaterial({ map: flow, color: 0xbfe6f5, roughness: 0.08, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })));
+      water.renderOrder = 0;
+      animated.push(t => { flow.offset.x = -t * 0.9; });
+      // the rocks: a flat stone under each boost, its rim showing round the arrows
+      // (a flattened stone 2.8 m across and 3.5 m long, its top just under the arrows)
+      herd('Stream_Rocks', ball(1, 1, 0x9c9a8e, 0, 0, 0, 1, 0.1, 1.25), T.strips.filter(strip => strip.kind === 'rock').map((strip) => {
+        const mid = (strip.sStart + strip.sEnd) / 2, p = T.pointAt(mid, (strip.latMin + strip.latMax) / 2);
+        return [p.x, p.y - 0.22, p.z, p.rotationY, 2.8];
+      }));
+      // pebbles and reeds along the banks
+      const reeds = []; for (let s = T.stream.sStart; s < T.stream.sEnd; s += 2.2) { const side = r() < 0.5 ? -1 : 1, [x, , z] = beside(s, side, 0.6 + r() * 3); if (clear(x, z, 0.6)) reeds.push([x, ground(x, z), z, r() * 6, 0.7 + r() * 0.6]); }
+      herd('Reeds', merge([cyl(0.05, 0.07, 1.6, 4, 0x5f8a3a, 0, 0.8, 0), cyl(0.05, 0.07, 1.3, 4, 0x6f9a42, 0.2, 0.65, 0.1, 0.2), cyl(0.12, 0.12, 0.4, 5, 0x6b4a2c, 0, 1.55, 0)]), reeds).castShadow = false; }
+
     // ---------- on the lane: boulders on the tops, milk churns
     herd('Boulders', ball(1.25, 0, 0xb9b6a8, 0, 0.7, 0, 1.1, 0.9, 1), T.obstacles.filter(ob => ob.kind === 'boulder').map((ob, k) => [ob.x, ob.y, ob.z, k * 2, 1]));
     herd('Milk_Churns', merge([cyl(0.6, 0.7, 1.6, 10, 0xc9ced4, 0, 0.8, 0), cyl(0.35, 0.55, 0.5, 10, 0xc9ced4, 0, 1.8, 0), cyl(0.5, 0.5, 0.12, 10, 0xaab0b6, 0, 2.1, 0)]), T.obstacles.filter(ob => ob.kind === 'churn').map(ob => [ob.x, ob.y, ob.z, 0, 1]));
@@ -174,7 +194,7 @@ export const createDales = () => createKitWorld(T, {
 
     // ---------- what moves: the cheeses rolling down the Long Pull, the sheep crossing
     const cheeseG = merge([cyl(T.cheeseRun.radius, T.cheeseRun.radius, 0.7, 18, 0xf2c94c, 0, 0, 0, 0, Math.PI / 2), cyl(T.cheeseRun.radius * 0.55, T.cheeseRun.radius * 0.55, 0.74, 14, 0xe8b23a, 0, 0, 0, 0, Math.PI / 2), box(0.76, 0.5, 0.5, 0xd8232f, 0, T.cheeseRun.radius * 0.6, 0)]); D.push(cheeseG);
-    T.cheeseRun.lanes.forEach((_, k) => {
+    [...T.cheeseRun.lanes.map((_, k) => k), 'goat'].forEach((k) => {
       const cheese = new THREE.Mesh(cheeseG, prop); cheese.rotation.order = 'YXZ'; cheese.castShadow = true; cheese.name = 'Cheese'; group.add(cheese);
       movers[`cheese-${k}`] = h => { cheese.visible = h.fade > 0.01; cheese.position.set(h.x, h.y + T.cheeseRun.radius, h.z); cheese.rotation.set(-h.spin, h.rotationY, 0); cheese.scale.setScalar(0.5 + 0.5 * h.fade); };
     });
@@ -183,6 +203,6 @@ export const createDales = () => createKitWorld(T, {
       const sheep = new THREE.Mesh(sheepG, prop); sheep.castShadow = true; sheep.name = 'Sheep'; group.add(sheep);
       movers[`sheep-${k}-${n}`] = h => { sheep.position.set(h.x, h.y + 0.08 * Math.abs(Math.sin(h.trot)), h.z); sheep.rotation.y = h.rotationY; };
     } });
-    for (const [text, s, side] of [['BOOST UP THE HILL', T.pull.sStart - 20, 1], ['CHEESE!', T.pull.sStart + 6, -1], ['FORD', T.ford.sStart - 18, 1], ['SHEEP', T.flocks[0] - 22, 1], ['BOOST UP THE HILL', T.bank.sStart - 16, -1], ['THE CAVE', T.cave.sStart - 34, 1]]) sign(text, s, side, '#f3ead2', '#3c5a2a');
+    for (const [text, s, side] of [['BOOST UP THE HILL', T.pull.sStart - 20, 1], ['CHEESE!', T.pull.sStart + 6, -1], ['FORD', T.ford.sStart - 18, 1], ['SHEEP', T.flocks[0] - 22, 1], ['BOOST UP THE HILL', T.bank.sStart - 16, -1], ['THE CAVE', T.cave.sStart - 34, 1], ['GOAT PATH', T.goatPath.sStart - 14, T.goatPath.side], ['ROCK TO ROCK', T.stream.sStart + 2, 1]]) sign(text, s, side, '#f3ead2', '#3c5a2a');
   },
 });

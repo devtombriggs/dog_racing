@@ -3,13 +3,11 @@
 // Each can be used once a lap.  Shared by the server (which takes him through), the game (which draws
 // the mouths and hides him) and the tests.
 //
-// Wendover Woods has four long ones, built into its model (shared/wendoverData.js): each skips about
-// 100 m of road, so he may take only two of them a lap (his choice which) and is underground a while.
-// Every other map but Treat Road has two short ones, placed here on clear stretches of road.  Either
+// Every map but Treat Road has two short ones, placed here on clear stretches of road.  (Wendover Woods had four long ones built
+// into its old model; since it was remade as a generated track (Tom, 2026-11-21) it has two like the rest.)  Either
 // way they give Ralph, the slowest dog, something back, not a different race.
 import { PICKUP_PATHS, BOX_ROW_S, BONE_S } from './pickupSpots.js';
 import { PROCEDURAL_TRACKS, MAPS } from './maps.js';
-import { WENDOVER } from './wendoverData.js';
 
 export const BURROW = {
   length: 45,            // metres of road it skips
@@ -26,6 +24,9 @@ export const BURROW = {
 // dash out than the map build gave them (running the 100 m takes Ralph about 6 s: this saves him about 4)
 export const WENDOVER_BURROW = { duration: 2.2, boostSeconds: 0.8, speedMultiplier: 1.2, perLap: 2 };
 
+// where a map's burrows go, where it is not BURROW.targets (Squelch Hollow, since Tom, 2026-11-21: the second half of the lap
+// is the mudslide and the mud pit, kickers and pads, with no clear 45 m for a burrow)
+const TARGETS = { mud_park: [0.05, 0.2] };
 const CROWDED = ['boneyard', 'the_vets'];        // maps with a pickup every 20 or 30 m: a mouth may be nearer one there
 const lapDistance = (a, b, length) => { const d = Math.abs(a - b) % length; return Math.min(d, length - d); };
 
@@ -43,7 +44,7 @@ function place(mapId) {
   const usable = s => clear(s) && clear(s + BURROW.length) && s + BURROW.length < L - 60
     && !flights.some(range => within(s, range) || within(s + BURROW.length, range) || within(s + BURROW.length / 2, range));
   const out = [];
-  BURROW.targets.forEach((fraction, k) => {
+  (TARGETS[mapId] ?? BURROW.targets).forEach((fraction, k) => {
     for (let d = 0; d <= 0.4 * L; d += 5) {
       const entryS = [L * fraction + d, L * fraction - d].find(s => usable(s) && out.every(other => lapDistance(s, other.entryS, L) > Math.min(150, L * 0.2)));
       if (entryS === undefined) continue;
@@ -65,12 +66,11 @@ function place(mapId) {
 
 /** Every map's burrows: { mapId: [{ id, entryS, exitS, entry, entryYaw, exit, exitYaw, halfWidth, duration, ... }] } */
 export const BURROWS = {
-  wendover: WENDOVER.tunnels.map(tunnel => ({ ...tunnel, duration: WENDOVER_BURROW.duration, boostSeconds: WENDOVER_BURROW.boostSeconds, speedMultiplier: WENDOVER_BURROW.speedMultiplier })),
-  ...Object.fromEntries(['frostpeak', 'modbury_heights', 'farmyard', 'water_park', 'pet_mall', 'mud_park', 'desert_dunes', 'speed_bowl', 'kombu_house', 'neon_nexus', 'yorkshire_dales', 'boneyard', 'the_vets', 'monkey_jungle'].map(mapId => [mapId, place(mapId)])),
+  ...Object.fromEntries(['wendover', 'frostpeak', 'modbury_heights', 'farmyard', 'water_park', 'pet_mall', 'mud_park', 'desert_dunes', 'speed_bowl', 'kombu_house', 'neon_nexus', 'yorkshire_dales', 'boneyard', 'the_vets', 'monkey_jungle'].map(mapId => [mapId, place(mapId)])),
 };
 
 /** How many burrows Ralph may go down in one lap of a map (every one of them, unless it says otherwise). */
-export const BURROWS_PER_LAP = { wendover: WENDOVER_BURROW.perLap };
+export const BURROWS_PER_LAP = {};
 
 // How far round the lap each of a map's checkpoints is, in order (a dog coming out of a burrow is
 // credited with the ones it went under)

@@ -5,6 +5,7 @@ import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } fro
 import { BASE_SPEED, downhillSpeed, downhillShare, swimSpeed } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
 import { PAD_KICK } from '../../../shared/items.js';
+import { SLALOM } from '../../../shared/slalom.js';
 import { DRIFT, AUTO_DRIFT, DRIFT_ARC, driftPerks, driftCanStart, driftArc, driftSteering, driftStep, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow, autoDriftHeld, autoDriftCurvature } from '../../../shared/drift.js';
 import { DRIFT_HUD_COLOURS } from './driftEffects.js';
 import { DOGS, STAT_EFFECT, WATER_ACCELERATION, statScale, swimShare, turnSpeedLoss, pickupShare } from '../../config/dogs.js';
@@ -218,6 +219,25 @@ export class LocalDog extends DogAvatar {
   // ---------------------------------
 
   // Off the edge of the track: drop, until the server puts the dog back
+  // Ran into one of Frostpeak's slalom gates or snowmen (the server says): slowed, but not stopped (shared/slalom.js)
+  slalomBump(kind) {
+    const rule = SLALOM[kind];
+    if (!rule) return;
+    // (held down to a share of top speed for a moment, then eased back: never a dead stop)
+    this.snowDrag = { slow: rule.slow, until: performance.now() + rule.holdMs, easeMs: rule.easeMs };
+    this.currentSpeed = Math.min(this.currentSpeed, this.runSpeed * rule.slow);
+    this.#endDrift(false, true);
+  }
+
+  /** What is left of a slalom bump's drag on top speed: 1 once it has worn off */
+  #snowDragNow(now) {
+    const d = this.snowDrag;
+    if (!d) return 1;
+    const past = now - d.until;
+    if (past >= d.easeMs) { this.snowDrag = null; return 1; }
+    return past <= 0 ? d.slow : d.slow + (1 - d.slow) * past / d.easeMs;
+  }
+
   fell(data) {
     this.fall = { position: new THREE.Vector3().fromArray(data.position), startedAt: performance.now() };
     this.#endDrift(false, true);
@@ -530,7 +550,7 @@ export class LocalDog extends DogAvatar {
   get #inWater() {
     const { world } = this.race, { position } = this;
     if (world.poolAt(position)?.inWater) return true;
-    if (world.coastalTrack?.query(position.x, position.z).inWater) return true;
+    if (world.coastalTrack?.query(position.x, position.z, -1, position.y).inWater) return true;
     return this.offTrack && world.isOverWater(position);
   }
 
@@ -554,13 +574,25 @@ export class LocalDog extends DogAvatar {
     // the bog beside a pool: slower than swimming, and no hopping out of it (a jump from the road sails over)
     this.inBog = Boolean(world.woodland && !this.#clearOfGround && woodlandBogAt(position.x, position.z));
     const inWater = !this.isJumping && (woodlandSurface?.inWater || (this.offTrack && world.isOverWater(position)));
-    const coastalGround = coastalTrack?.query(position.x, position.z);
+    const coastalGround = coastalTrack?.query(position.x, position.z, -1, position.y);
     // a boost pad whose boost stays with the dog after the pad (Neon Nexus)
     const padNow = performance.now();
     if (coastalGround?.kick && !this.isJumping && padNow >= this.stunUntil) {
       const pad = coastalGround.kick;
       if (!(this.padKick && this.padKick.until > padNow) && this.currentSpeed > 0) this.currentSpeed += this.sprintSpeed * (pad.speed - 1) * PAD_KICK.instant;
-      this.padKick = { speed: pad.speed, until: padNow + (pad.hold + PAD_KICK.easeOut) * 1000, quick: pad.quick ?? PAD_KICK.quick, mega: Boolean(pad.mega) };
+      // (a weaker pad never cuts short a stronger boost: landing on a platform just after a mega pad)
+      if (!(this.padKick && this.padKick.until > padNow && this.padKick.speed > pad.speed)) {
+        this.padKick = { speed: pad.speed, until: padNow + (pad.hold + PAD_KICK.easeOut) * 1000, quick: pad.quick ?? PAD_KICK.quick, mega: Boolean(pad.mega) };
+      }
+    }
+    // a kicker (Squelch Hollow): up the ramp and into the air, steering all the way, with the pad's boost
+    if (coastalGround?.hop && !this.isJumping && padNow >= this.stunUntil && this.currentSpeed > 4) {
+      this.isJumping = true;
+      this.isLanding = false;
+      this.jumpedFromOffTrack = false;
+      this.verticalVelocity = coastalGround.hop;
+      this.jumpGravity = JUMP.gravity;
+      if (!this.race.specials.animating(this.id)) { this.play('Jump'); if (this.currentAction === this.actions.Jump) this.currentAction.time = 0.2; }
     }
     const kickLeft = this.padKick ? (this.padKick.until - padNow) / 1000 : 0;
     const kickNow = kickLeft > 0 ? 1 + (this.padKick.speed - 1) * Math.min(1, kickLeft / PAD_KICK.easeOut) : 1;
@@ -596,6 +628,7 @@ export class LocalDog extends DogAvatar {
       (special?.speed ?? 1) *
       (performance.now() < this.quakeUntil ? this.quakeSpeed : 1) *      // (Jazz's Earthquake)
       downhillSpeed(stats, slope) *      // (Jimmy's wheels, where the road drops)
+      this.#snowDragNow(performance.now()) *      // (Frostpeak's slalom gates and snowmen)
       (performance.now() < this.stunUntil ? 0.15 : 1);
     // (the last of a dog's speed comes slowly, and an agile dog is back up to speed sooner)
     const effectiveAcceleration = this.acceleration *
@@ -833,14 +866,19 @@ export class LocalDog extends DogAvatar {
     const { coastalTrack } = world;
 
     // Slide along the coastal banks and dunes; exposed cliff edges remain open.
-    let coastalSurface = coastalTrack?.query(position.x, position.z);
+    let coastalSurface = coastalTrack?.query(position.x, position.z, -1, position.y);
     if (coastalSurface?.blocked && !ghostsThrough(frame.special, coastalSurface)) {      // (the twins' Trip Wire goes through whatever stands on the road)
       // how far into the wall it had got this step, against how far it travelled: 1 is straight into it
       const into = Math.hypot(position.x - coastalSurface.clampX, position.z - coastalSurface.clampZ);
       position.x = coastalSurface.clampX;
       position.z = coastalSurface.clampZ;
-      coastalSurface = coastalTrack.query(position.x, position.z);
+      coastalSurface = coastalTrack.query(position.x, position.z, -1, position.y);
       this.#hitWall(frame, into, coastalTrack.speedFactor(coastalSurface, this.coastalStats, this.isJumping));
+    }
+    // a sinkhole (Dune Dash) drags a dog on the ground towards its middle
+    if (coastalSurface?.pull && !this.isJumping) {
+      position.x += coastalSurface.pull[0] * frame.delta;
+      position.z += coastalSurface.pull[1] * frame.delta;
     }
     if (coastalSurface) {
       // The ground the dog has just run on to sets its pace at once (mud, water, a climb).  Everything
@@ -883,11 +921,13 @@ export class LocalDog extends DogAvatar {
   #rise(frame) {
     const { delta, special } = frame;
 
-    // The Water Park's rubber rings: a dog that comes down on one (or swims into it) is thrown up and
-    // on, at no less than its full pace, which carries it to the next ring
+    // The Water Park's rubber rings: a dog that comes down on one (or runs on to one from the shallows) is thrown up and
+    // on, at no less than its full pace, which carries it to the next ring.  A dog that has fallen in and is swimming can get on
+    // one only near the start of the lagoon (Tom, 2026-11-21: "you shouldn't be able to bounce back on, you need to swim")
     const { proceduralTrack } = this.race.world, bounce = proceduralTrack?.rules.bounce;
+    const swimmingNow = Boolean(bounce) && !this.isJumping && proceduralTrack.query(this.position.x, this.position.z).movement === 'swim';
     if (bounce && !special && this.jumpHeight < 0.5 && this.verticalVelocity <= 0
-      && proceduralTrack.ringAt(this.position.x, this.position.z)) {
+      && proceduralTrack.ringAt(this.position.x, this.position.z, swimmingNow)) {
       this.isJumping = true;
       this.isLanding = false;
       this.jumpedFromOffTrack = false;
@@ -959,7 +999,12 @@ export class LocalDog extends DogAvatar {
     const groundBelow = world.groundHeightAt(position, this.groundY);
     // The road stops and carries on a long way below (the window at the Vets, the end of the stair in
     // the jungle): the dog runs off the end and falls to it, rather than being put down on it
-    if (world.proceduralTrack?.drops?.length && this.groundY - groundBelow > DROP.from) {
+    // (and off a platform on Neon Nexus, down to the Undercity: but not in the middle of a jump from one platform to the next)
+    // (Ralph flying and Enzo bouncing stay up on the level they are on, across any gap: Tom, 2026-11-21.  If it ends over a
+    // gap, they come down like any jump)
+    const aloft = Boolean(special?.flyHeight || special?.bouncing);
+    const below = !aloft && (Boolean(world.proceduralTrack?.drops?.length) || (Boolean(world.proceduralTrack?.undercity?.length) && !this.isJumping));
+    if (below && this.groundY - groundBelow > DROP.from) {
       // (a dog that jumped off the end keeps the rise of its jump, and falls from the top of it)
       this.jumpHeight += this.groundY - groundBelow;
       this.groundY = groundBelow;
@@ -971,14 +1016,16 @@ export class LocalDog extends DogAvatar {
     }
     // ...except down Frostpeak's black run, where that would sail the dog out level over a
     // 45 % slope: there a jump is a hop that follows the mountain down
-    const groundNow = this.isJumping && !steepRun && !special?.flyHeight   // (flying, he follows the ground)
-      ? Math.max(groundBelow, this.groundY)
-      : groundBelow;
+    const groundNow = aloft && this.groundY - groundBelow > DROP.from ? this.groundY      // (over a gap: held at the level he was on)
+      : this.isJumping && !steepRun && !special?.flyHeight   // (flying, he follows the ground)
+        ? Math.max(groundBelow, this.groundY)
+        : groundBelow;
 
     // Ease onto the new height so tile edges and kerbs do not jolt the dog,
-    // but go straight there after a big change (a respawn, a drop)
+    // but go straight there after a big change (a respawn, a drop), and in the air up a hill: there the ground
+    // rising under a jump would otherwise eat into it, and a sheep on a climb could not be cleared (Tom, 2026-11-21)
     this.groundY =
-      Math.abs(groundNow - this.groundY) > 2.5
+      Math.abs(groundNow - this.groundY) > 2.5 || (this.isJumping && groundNow > this.groundY)
         ? groundNow
         : this.groundY + (groundNow - this.groundY) * (1 - Math.exp(-22 * delta));
 

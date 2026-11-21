@@ -3,7 +3,7 @@
 // shared/desertData.js; the parts every kit map shares are in ../trackKit3d.js.
 import * as THREE from 'three';
 import { DESERT as T } from '../../../shared/desertData.js';
-import { createKitWorld, rng, cyl, ball, cone, merge } from '../trackKit3d.js';
+import { createKitWorld, rng, cyl, ball, cone, merge, canvasTexture } from '../trackKit3d.js';
 
 const S = T.samples;
 const SAND = 0xe2c285, ROCK = 0xa9683f;
@@ -22,7 +22,7 @@ export const createDesert = () => createKitWorld(T, {
   env: { fog: [0xf1dcae, 160, 1900], background: 0xf1dcae, exposure: 1.0 },
   lights: { hemi: [0xfff3d6, 0xd9b26e, 1.5], sun: [0xfff1cf, 2.4] },
 
-  build({ group, D, movers, herd, clear, beside, sign, add, keep, prop }) {
+  build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, animated }) {
     const r = rng(31);
     const scatter = (count, margin, make, far = 520) => { const list = []; let tries = 0; while (list.length < count && tries++ < 6000) { const x = -far + r() * far * 2, z = -far + r() * far * 2; if (clear(x, z, margin)) list.push(make(x, z)); } return list; };
     // dunes: long low humps of sand, everywhere but on the trail
@@ -44,10 +44,23 @@ export const createDesert = () => createKitWorld(T, {
     herd('Canyon_Rocks', ball(1, 0, ROCK, 0, 0.5, 0, 1, 1.25, 1), walls);
     herd('Boulders', ball(1, 0, 0x8f6a4c, 0, 0.75, 0, 1.25, 1.0, 1.25), T.obstacles.map((ob, k) => [ob.x, ob.y, ob.z, k * 1.3, 1]));
     herd('Pyramids', cone(1, 0.9, 4, 0xd9b877), [[-640, 0, -420, 0.4, 150], [-470, 0, -560, 0.4, 100], [690, 0, 380, 0.2, 180]]);
-    // the ravine under the leap
-    const a = T.pointAt(T.launch.gapStart), b = T.pointAt(T.launch.gapEnd);
-    const ravine = add('Ravine', new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2), keep(new THREE.MeshStandardMaterial({ color: 0x5a3320, roughness: 1 })));
-    ravine.position.set((a.x + b.x) / 2, 0.03, (a.z + b.z) / 2); ravine.scale.set(30, 1, 46); ravine.rotation.y = a.rotationY;
+    // the sinkhole: a funnel of sand spiralling down into the dark, turning, with a ring of rocks round the rim
+    { const hole = T.sinkholes[0], swirl = canvasTexture(128, 128, (g) => {
+        const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64); grad.addColorStop(0, '#2a1608'); grad.addColorStop(0.25, '#6b4320'); grad.addColorStop(0.7, '#c99a5a'); grad.addColorStop(1, '#d9b06a');
+        g.fillStyle = grad; g.fillRect(0, 0, 128, 128); g.strokeStyle = 'rgba(90,55,25,0.55)'; g.lineWidth = 3;
+        for (let arm = 0; arm < 5; arm++) { g.beginPath(); for (let k = 0; k <= 40; k++) { const t = k / 40, a = arm * 1.2566 + t * 4.2, r = 6 + t * 58; g.lineTo(64 + Math.cos(a) * r, 64 + Math.sin(a) * r); } g.stroke(); }
+      });
+      D.push(swirl);
+      // (laid on the sand of the road, turning, darker and darker towards the throat)
+      const funnel = add('Sinkhole', new THREE.CircleGeometry(hole.radius, 48).rotateX(-Math.PI / 2),
+        keep(new THREE.MeshStandardMaterial({ map: swirl, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+      funnel.position.set(hole.x, hole.y + 0.05, hole.z); funnel.renderOrder = 1;
+      animated.push(t => { funnel.rotation.y = -t * 0.9; });
+      const throat = add('Sinkhole_Throat', new THREE.CircleGeometry(hole.core, 32).rotateX(-Math.PI / 2), keep(new THREE.MeshBasicMaterial({ color: 0x120804, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })));
+      throat.position.set(hole.x, hole.y + 0.07, hole.z); throat.renderOrder = 2;
+      const rim = [];
+      for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2 + 0.2; rim.push([hole.x + Math.cos(a) * (hole.radius + 0.8), hole.y - 0.3, hole.z + Math.sin(a) * (hole.radius + 0.8), a, 0.45 + (k % 3) * 0.15]); }
+      herd('Sinkhole_Rim', ball(1, 0, 0x8f6a4c, 0, 0.4, 0, 1.3, 0.7, 1), rim); }
 
     // the whirlwinds: a funnel of rings, wider towards the top, each turning
     const funnelM = keep(new THREE.MeshStandardMaterial({ color: 0xd9b98a, roughness: 1, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
@@ -64,6 +77,6 @@ export const createDesert = () => createKitWorld(T, {
       movers[`weed-${k}`] = h => { weed.visible = h.fade > 0.01; weed.position.set(h.x, h.y + T.weedRun.radius, h.z); weed.rotation.set(0, h.rotationY, h.spin); weed.scale.setScalar(0.5 + 0.5 * h.fade); };
     });
     void prop;
-    for (const [text, s] of [['SOFT SAND', T.mud[0].s - 26], ['TWISTERS!', T.twisters[0] - 44], ['TUMBLEWEED', T.weedLanes[0] - 24], ['ROCKS', T.obstacles[0].s - 16], ['LEAP!', T.launch.padStart - 36]]) sign(text, s, 1, '#f4d58a', '#5a3a1a');
+    for (const [text, s] of [['SOFT SAND', T.mud[0].s - 26], ['TWISTERS!', T.twisters[0] - 44], ['TUMBLEWEED', T.weedLanes[0] - 24], ['ROCKS', T.obstacles[0].s - 16], ['SINKHOLE!', T.sinkholes[0].s - 40]]) sign(text, s, 1, '#f4d58a', '#5a3a1a');
   },
 });

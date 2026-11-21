@@ -5,8 +5,8 @@
 // Golden Bones down it.  Mega boost pads (2.6 times top speed, and the boost stays with the dog for three
 // seconds after the pad) run all the way round wherever there is one road; where there are two, the mega
 // pads are on the longer and ordinary boost pads on the other.  Three times the road stops and there are only
-// platforms sliding from side to side: jump from one to the next, and a dog that drops between them starts the
-// crossing again.  Three catapults fire the dogs on round the map: over the second hairpin, up the ramp, and
+// platforms sliding from side to side, each a boost pad: jump from one to the next.  A dog that drops between them lands in
+// the Undercity below, races on past its robots, and takes a lift back up.  Three catapults fire the dogs on round the map: over the second hairpin, up the ramp, and
 // (the accelerator) 260 m back across the city to the start.  A lap is about two minutes; three laps.  Built by shared/trackKit.js; the scenery
 // is src/tracks/neon/NeonTrack.js.
 //
@@ -30,6 +30,18 @@ const MEGA = { speed: 2.6, hold: 3, mega: true }, PAD = { speed: 1.8, hold: 3 };
 // A platform crossing: a break to jump, a platform, a break, a platform... each platform slides from side to side,
 // a little behind the one before it (step: the share of a swing), so the three move like a snake and there is always a line across
 const CROSSING = { gap: 8, pad: 40, pads: 3, half: 3.4, reach: 4.2, period: 9, step: 0.07 };       // (long enough to land on at a mega boost and jump again)
+// Every platform is a boost pad too, moving with it (Tom, 2026-11-21): land on one and it carries you into the next jump
+const PLATFORM_BOOST = { speed: 1.6, hold: 1.2 };
+// The Undercity (Tom, 2026-11-21: "if you do fall you land on the level below ... nasty robots down there which can stun you"):
+// a dark road `depth` metres under each crossing.  Miss a jump and you land on it, run its length past the robots, and a lift
+// at the far end takes you back up to the main road, just before the next catapult.  Falling is meant to cost: the main road
+// has the boosts, the Undercity has the robots and the ride up.
+const UNDER = { depth: 14 };
+// The robots: each rolls from side to side across the Undercity, and every `every` seconds fires a ring of lightning `zap`
+// metres round it (its eye glows for `warn` seconds first).  Touch one, or be in the ring, and you are stunned.  Too tall to jump
+const ROBOT = { radius: 1.1, height: 2.8, period: 5.5, pause: 0.12, zap: 3.6, every: 3.4, warn: 0.9, on: 0.55 };
+// the lift at the end of each: in at the bottom, up the shaft, out on to the main road with a little boost
+const LIFT = { duration: 2.2, run: 10, landing: 16, exitSpeedMultiplier: 1.15, boostSeconds: 1 };
 const BONE_EVERY = 50;                  // metres between the bones down a long road
 // A catapult: what every one of them does to a dog on landing
 const FLIGHT = { exitSpeedMultiplier: 2.2, boostSeconds: 3, pad: 30, landing: 14 };
@@ -55,7 +67,7 @@ export const NEON = makeTrack({
     G: { name: 'The Loop', surface: 'deck' }, H: { name: 'The Ramp', surface: 'deck' }, I: { name: 'The Accelerator', surface: 'deck' },
     J: { name: 'Touchdown', surface: 'deck' },
   },
-}, ({ sAtU, launchBetween, sstep }) => {
+}, ({ sAtU, launchBetween, sstep, pointAt, pingPong }) => {
   // the catapults: run on to the pad and be fired on round the map.  The accelerator is the first of them
   const launches = [
     { id: 'accelerator', ...launchBetween(29.0, 31.0, { ...FLIGHT, duration: 3.4, arcHeight: 42, pad: 34 }) },
@@ -79,7 +91,7 @@ export const NEON = makeTrack({
   const crossing = (id, u) => {
     const sStart = sAtU(u), pads = [];
     for (let k = 0; k < CROSSING.pads; k++) { const s0 = sStart + CROSSING.gap + k * (CROSSING.pad + CROSSING.gap); pads.push({ s0, s1: s0 + CROSSING.pad, half: CROSSING.half, reach: CROSSING.reach, period: CROSSING.period, phase: k * CROSSING.step }); }
-    return { id, sStart, sEnd: pads.at(-1).s1 + CROSSING.gap, pads };
+    return { id, sStart, sEnd: pads.at(-1).s1 + CROSSING.gap, pads, boost: PLATFORM_BOOST };
   };
   const platforms = [crossing('crossing-climb-1', 8.9), crossing('crossing-climb-2', 10.0), crossing('crossing-ramp', 23.3)];
 
@@ -112,6 +124,40 @@ export const NEON = makeTrack({
     }
     bones.push(...trail); trails.push({ id: b.id, onBranch, bones: trail });
   }
-  return { launches, branches, platforms, strips, extras: { crossing: CROSSING, trails, pickups: { rows, bones } } };
+  // the Undercity: one under both crossings on the climb (whichever you fall at, you run the rest of the way underneath),
+  // and one under the crossing on the ramp.  Each ends in a lift that comes up just before the next catapult
+  const catapult = id => launches.find(l => l.id === id);
+  const undercity = [
+    { id: 'undercity-climb', sStart: platforms[0].sStart - 6, sEnd: catapult('catapult-turn').padStart - 22, depth: UNDER.depth },
+    { id: 'undercity-ramp', sStart: platforms[2].sStart - 6, sEnd: catapult('catapult-ramp').padStart - 16, depth: UNDER.depth },
+  ];
+  for (const u of undercity) {
+    const takeoffS = u.sEnd - 8;
+    launches.push({ id: `lift-${u.id}`, lift: true, under: u.id, padStart: takeoffS - LIFT.run, takeoffS, gapStart: takeoffS, gapEnd: takeoffS + 4, landingS: takeoffS + LIFT.landing,
+      gapStartIndex: -1, gapEndIndex: -1, duration: LIFT.duration, arcHeight: 0, exitSpeedMultiplier: LIFT.exitSpeedMultiplier, boostSeconds: LIFT.boostSeconds });
+  }
+  // the robots: spread down each Undercity (none on the first stretch, where a dog lands, or by the lift)
+  const robots = [];
+  for (const u of undercity) {
+    const from = u.sStart + 40, to = u.sEnd - 30, count = Math.max(2, Math.round((to - from) / 55));
+    for (let k = 0; k < count; k++) robots.push({ id: `robot-${robots.length}`, under: u.id, s: from + (to - from) * (k + 0.5) / count, phase: (robots.length * 0.37) % 1, zapPhase: (robots.length * 0.29) % 1 });
+  }
+  const underOf = id => undercity.find(u => u.id === id);
+  function hazardsAt(t) {
+    const out = [];
+    for (const robot of robots) {
+      const c = pointAt(robot.s), reach = c.halfWidth - 2.2, m = pingPong(t + robot.phase * ROBOT.period, ROBOT.period, ROBOT.pause);
+      const p = pointAt(robot.s, -reach + 2 * reach * m.k), y = c.y - underOf(robot.under).depth;
+      const cycle = ((t / ROBOT.every + robot.zapPhase) % 1 + 1) % 1 * ROBOT.every;        // seconds into its zap cycle
+      const warn = cycle < ROBOT.warn ? cycle / ROBOT.warn : 0, zapping = cycle >= ROBOT.warn && cycle < ROBOT.warn + ROBOT.on;
+      const base = { x: p.x, y, z: p.z, rotationY: c.rotationY + (m.dir > 0 ? Math.PI / 2 : -Math.PI / 2), height: ROBOT.height, under: robot.under };
+      out.push({ ...base, id: robot.id, kind: 'robot', radius: ROBOT.radius, active: true, warn, zapping });
+      out.push({ ...base, id: `${robot.id}-zap`, kind: 'zap', radius: ROBOT.zap, active: zapping, of: robot.id });
+    }
+    return out;
+  }
+  return { launches, branches, platforms, strips, undercity, hazardsAt,
+    extras: { crossing: CROSSING, trails, pickups: { rows, bones }, robots, robot: ROBOT, lift: LIFT,
+      hazardZones: { robots: robots.map(robot => robot.s) } } };
 });
 export default NEON;

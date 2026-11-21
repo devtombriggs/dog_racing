@@ -141,12 +141,14 @@ function buildRoute(mapId) {
   for (const zone of track?.platforms ?? []) {
     const edges = [zone.sStart, ...zone.pads.flatMap(pad => [pad.s0, pad.s1]), zone.sEnd];
     // (a rope bridge is one platform from end to end: no breaks to jump)
-    for (let k = 0; k < edges.length; k += 2) if (edges[k + 1] - edges[k] > 1) jumps.push({ id: `${zone.id}-gap-${k / 2}`, s0: edges[k] + 0.4, s1: edges[k + 1] - 0.4, height: 0.35, must: true });
+    for (let k = 0; k < edges.length; k += 2) if (edges[k + 1] - edges[k] > 1) jumps.push({ id: `${zone.id}-gap-${k / 2}`, s0: edges[k] + 0.4, s1: edges[k + 1] - 0.4, height: 0.35, must: true, platform: true });
     for (const pad of zone.pads) sliders.push({ s0: pad.s0, s1: pad.s1, half: pad.half, lateralAt: t => track.padLateral(pad, t) });
   }
   // doorways (Kombu's House, the Vets): line up for them in good time
   for (const door of track?.doors ?? []) narrow.push({ from: door.s - 26, to: door.s + (door.depth ?? 4) / 2 + 1, half: door.width / 2 - 1.5 });
   if (track?.obstacles) for (const o of track.obstacles) obstacles.push({ s: o.s, lateral: o.lateral, radius: o.radius });
+  // a sinkhole (Dune Dash): round it, as near the rim as it dares (the middle swallows a dog)
+  for (const hole of track?.sinkholes ?? []) obstacles.push({ s: hole.s, lateral: hole.lateral, radius: hole.core + 2.2, reach: hole.radius * 0.6 });
   // the pig pen's mud (slow, and a pig trots round each wallow) and the ground the windmill's sails sweep:
   // nothing solid, but a dog that knows the farm keeps out of them
   for (const patch of track?.mud ?? []) obstacles.push({ s: patch.s, lateral: patch.lateral, radius: patch.across - CLEARANCE + 0.25, reach: patch.along + 1, optional: true });
@@ -154,11 +156,11 @@ function buildRoute(mapId) {
   // the Water Park's fountain jets: there is room to run between them
   for (const jet of track?.jets ?? []) obstacles.push({ s: jet.s, lateral: (jet.lane - 1) * 0.62 * pointAt(jet.s).halfWidth, radius: jet.radius, optional: true });
   if (track?.barn) narrow.push({ from: track.barn.start - 14, to: track.barn.end + 4, half: track.barn.inside - 1.2 });
-  for (const launch of track?.launches ?? (track?.launch ? [track.launch] : [])) {
+  for (const launch of (track?.launches ?? (track?.launch ? [track.launch] : [])).filter(l => !l.under)) {      // (not the lifts up from below)
     narrow.push({ from: launch.padStart - 30, to: launch.takeoffS + 2, half: pointAt(launch.landingS).halfWidth - 1.8 });
     pads.push({ from: launch.padStart - 30, to: launch.takeoffS + 6 });
   }
-  if (mapId === 'wendover') {
+  if (mapId === 'wendover' && !track) {
     WENDOVER_JUMPS.forEach(([x, z], k) => { const { s } = locate([x, NaN, z]); jumps.push({ id: `hop-${k}`, s0: s - 0.8, s1: s + 0.8, height: 0.9 }); });
     // the pools are swum down the middle: the banks beside them are bog
     for (const pool of WENDOVER.pools) narrow.push({ from: pool.sStart - 15, to: pool.sEnd + 6, half: 4.5 });
@@ -193,17 +195,18 @@ function buildRoute(mapId) {
    * The ground under (x, z): { y, speed, hills, swimming, hint }.  speed: the share of its top speed the
    * dog keeps there; hills: whether that already counts the slope.
    */
-  function groundAt(x, z, s, dog, swimming, hint, heightAt, airborne = false) {
+  function groundAt(x, z, s, dog, swimming, hint, heightAt, airborne = false, y = null) {
     if (track) {
-      const q = track.query(x, z, hint);
+      const q = track.query(x, z, hint, y);         // (y: how high it is, where there is a level below)
       return {
         y: q.dogY ?? q.y, hint: q.index, swimming: q.movement === 'swim', inWater: Boolean(q.inWater),
         speed: track.speedFactor ? track.speedFactor(q, { stamina: 0.5, swimming: clamp(swimming / 10, 0, 1) }, airborne) : 1,
         hills: Boolean(track.speedFactor),
         kick: airborne ? null : q.kick ?? null,       // a boost pad whose boost stays with the dog
+        hop: airborne ? null : q.hop ?? null,         // a kicker ramp (Squelch Hollow): it throws the dog up
       };
     }
-    if (mapId === 'wendover') {
+    if (mapId === 'wendover' && !track) {
       const water = woodlandWaterAt(x, z);
       if (water) return { y: woodlandDogY(water, dog), speed: water.inWater ? woodlandSwimMultiplier(swimming) : 1, hills: water.inWater, swimming: water.swimming, inWater: water.inWater, hint: -1 };
     }
@@ -212,14 +215,14 @@ function buildRoute(mapId) {
 
   return {
     mapId, length, pointAt, locate, ahead, limitAt, onPad, groundAt, obstacles, jumps, boxes, bones, burrows, sliders,
-    steep: mapId === 'frostpeak', drops: Boolean(track?.drops?.length),
+    steep: mapId === 'frostpeak', drops: Boolean(track?.drops?.length), undercity: Boolean(track?.undercity?.length), maze: track?.maze ?? null,
     // the farm's tractor, sheep, pigs, sails and rolling bales: where they are is a matter of the race clock
     hazardHit: track?.hazardHit ?? null,
     hazardZones: Object.values(track?.hazardZones ?? {}).flat(),
     // the Water Park's rubber rings, and what one does to a dog that lands on it
     // how slippery the road is at s (the mud run), 0 to 1
     slipAt: track?.slipAt ?? (() => 0),
-    rings: track?.rings ?? [], ringAt: track?.ringAt ?? (() => null), bounce: track?.rules.bounce ?? null,
+    rings: track?.rings ?? [], ringsAt: track?.ringsAt ?? (() => track?.rings ?? []), ringAt: track?.ringAt ?? (() => null), bounce: track?.rules.bounce ?? null,
     // a second road beside the main one for a while (Neon Nexus): { id, side, centre, half, slope, branch } at s, or null
     branchAt: track?.branches?.length ? track.branchAt : null,
   };
@@ -251,7 +254,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   // where it is and how it is moving
   let s = 0, lateral = 0, sideSpeed = 0, speed = 0, yaw = 0, hint = -1;
   let position = [0, 0, 0], groundY = 0, slope = 0;
-  let jumpHeight = 0, jumpSpeed = 0, jumpGravity = JUMP.gravity, jumping = false, ringHop = 0;
+  let jumpHeight = 0, jumpSpeed = 0, jumpGravity = JUMP.gravity, jumping = false, ringHop = 0, airborneAt = -1e9;
   // its clocks, in seconds of its own running time
   let specialBegan = 0;        // when its special last started (Enzo's bounces are counted from it)
   // Drifting (shared/drift.js), toned down for a computer dog by its level's `drift`:
@@ -392,7 +395,9 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
 
     // the rubber rings across the water: every dog but a real swimmer goes from ring to ring
     if (stats.swimming < 9) {
-      const ring = route.rings.find(r => { const gap = route.ahead(r.s, s); return gap > -1 && gap < 40; });
+      // (the rings drift down the lagoon: aim for the next one where it is now; a dog that has fallen in swims, and only near the
+      // start can it get on one again)
+      const ring = route.ringsAt().find(r => { const gap = route.ahead(r.s, s); return gap > -1 && gap < 40; });
       if (ring) return clamp(ring.lateral, -limit, limit);
     }
 
@@ -457,7 +462,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       // (a dog too slow to stay up the whole way goes when the middle of its jump is the middle of the gap)
       const spare = speed * (fall - rise) - (jump.s1 - jump.s0);
       let from = speed * (rise + tick) - Math.min(0, spare) / 2;
-      if (jump.must && decide(`${jump.id}:${lap()}:${attempt}`, L.jumpMiss)) from = -1.2;        // misjudged: goes too late
+      // misjudged: goes too late.  (A moving platform is missed more often: falling into the Undercity is part of Neon Nexus)
+      if (jump.must && decide(`${jump.id}:${lap()}:${attempt}`, jump.platform ? L.platformMiss ?? L.jumpMiss : L.jumpMiss)) from = -1.2;
       if (gap <= from) return true;
     }
     // a chew toy it cannot steer round, a sheep or a pig about to be under its paws
@@ -473,6 +479,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
 
   // The farm's tractor, animals, sails and bales: is one going to be where this dog will be?  Returns how
   // fast it may go (it waits for what cannot be jumped) and whether to jump now.
+  // how far under the main road it is running (0 up on it; the Undercity's depth down there)
+  const below = () => { const drop = route.pointAt(s).y - groundY; return route.undercity && drop > 5 ? drop : 0; };
   function watchHazards(world, top) {
     if (!route.hazardHit || world.shielded || world.special || world.raceSeconds == null) return { cap: top, jump: false };       // (nothing knocks a dog out of its special)
     if (!route.hazardZones.some(zone => Math.abs(route.ahead(zone, s)) < 45)) return { cap: top, jump: false };
@@ -481,7 +489,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       const quicker = Math.min(top, speed + acceleration * ahead);
       for (const [reach, side] of [[speed * ahead, 0], [(speed + quicker) / 2 * ahead, 0], [speed * ahead, 0.9], [speed * ahead, -0.9]]) {
         const there = route.pointAt(s + reach, lateral + side);       // (and a little to either side: nothing is cut fine)
-        const hazard = route.hazardHit([there.x, there.y, there.z], world.raceSeconds + ahead);
+        const hazard = route.hazardHit([there.x, there.y - below(), there.z], world.raceSeconds + ahead);
         if (!hazard) continue;
         // a sheep or a pig: over it, if there is time to get up (the jump is highest 0.2 to 0.65 s in)
         if (hazard.height <= 1.3 && ahead >= 0.2) return { cap: top, jump: ahead <= 0.6 };
@@ -492,7 +500,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
           for (const step of [2.6, -2.6, 4.8, -4.8, 7, -7]) {
             const aside = clamp(lateral + step, -room, room);
             if (Math.abs(aside - lateral) < 1.8) continue;
-            const clearAt = when => { const p = route.pointAt(s + speed * when, aside); return !route.hazardHit([p.x, p.y, p.z], world.raceSeconds + when); };
+            const clearAt = when => { const p = route.pointAt(s + speed * when, aside); return !route.hazardHit([p.x, p.y - below(), p.z], world.raceSeconds + when); };
             if ([ahead - 0.3, ahead - 0.15, ahead, ahead + 0.15, ahead + 0.3].every(when => when < 0 || clearAt(when))) return { cap: top, jump: false, dodge: aside };
           }
         }
@@ -563,13 +571,17 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     // Enzo's Belly Bounce: where he is in the bounce, and the burst of speed that goes with it (as a player's Enzo has it)
     if (world.special?.bounce) world = { ...world, special: { ...world.special, ...bellyBounce(world.special, time - specialBegan), bouncing: true } };
 
-    let ground = route.groundAt(position[0], position[2], s, dog, stats.swimming, hint, heightAt, jumping);
+    let ground = route.groundAt(position[0], position[2], s, dog, stats.swimming, hint, heightAt, jumping, position[1]);
     hint = ground.hint;
+
+    // ----- a kicker ramp under it: up into the air (Squelch Hollow)
+    if (ground.hop && !jumping && time >= stunUntil && speed > 4) { jumping = true; jumpSpeed = ground.hop; jumpGravity = JUMP.gravity; }
 
     // ----- how fast
     if (ground.kick && time >= stunUntil) {
       if (!(kick && kick.until > time) && speed > 0) speed += sprintSpeed * (ground.kick.speed - 1) * PAD_KICK.instant;
-      kick = { speed: ground.kick.speed, until: time + ground.kick.hold + PAD_KICK.easeOut, quick: ground.kick.quick ?? PAD_KICK.quick };
+      // (a weaker pad never cuts short a stronger boost: a platform after a mega pad)
+      if (!(kick && kick.until > time && kick.speed > ground.kick.speed)) kick = { speed: ground.kick.speed, until: time + ground.kick.hold + PAD_KICK.easeOut, quick: ground.kick.quick ?? PAD_KICK.quick };
     }
     driftRound(dt, ground, world);
     const top = topSpeed(ground, world);
@@ -583,6 +595,9 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     const branch = finishing || !route.branchAt ? null : route.branchAt(s);
     const riding = branch && decide(`branch-${branch.id}:${lap()}`, branch.branch.bots ?? 0.5) ? branch : null;
     if (riding) target = riding.side * riding.centre + lane * riding.half;
+    // the farm's maze (Tom, 2026-11-21): the quickest way through, a little ahead of where it is, and not too fast to turn through the gaps
+    const inMaze = route.maze && !finishing && route.ahead(s, route.maze.sStart - route.maze.from) >= 0 && route.ahead(s, route.maze.sEnd + 24) <= 0;
+    if (inMaze) { target = route.maze.line(s + Math.max(3, speed * 0.25)); cap = Math.min(cap, top * (0.74 + 0.03 * (stats.agility - 5))); }
     // a moving platform coming up (or under it): be where it will be when it gets there
     if (!finishing && world.raceSeconds != null) {
       const k = route.sliders.findIndex(q => route.ahead(q.s1, s) > 0 && route.ahead(q.s0, s) < 26);
@@ -619,7 +634,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     if (ringHop && jumping && time >= stunUntil) speed = ringHop;      // thrown on by a rubber ring: carried at its pace
 
     // ----- across the road, then along it
-    const sideways = clamp(0.3 * speed, 1, 5.5) * statScale(stats.agility, STAT_EFFECT.agilityTurn);
+    // (in the farm's maze it turns hard, as a dog does going from one gap in the corn to the next at a slower pace)
+    const sideways = clamp(0.3 * speed, 1, 5.5) * statScale(stats.agility, STAT_EFFECT.agilityTurn) * (inMaze ? 2.4 : 1);
     if (riding) {
       const most = (sideways + Math.abs(riding.slope) * speed * 1.5 + 1) * dt, move = clamp(target - lateral, -most, most);
       sideSpeed = move / dt; lateral += move;
@@ -646,10 +662,12 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       const height = route.onPad(s) || route.onPad(s + speed * 0.5) ? Math.min(1.4, world.special.flyHeight) : world.special.flyHeight;
       jumpHeight += (height - jumpHeight) * (1 - Math.exp(-4 * dt));
     } else if (jumping) {
+      airborneAt = time;
       jumpSpeed -= jumpGravity * dt;
       jumpHeight += jumpSpeed * dt;
       if (jumpHeight <= 0) { jumpHeight = jumpSpeed = 0; jumping = false; ringHop = 0; }
-    } else if (route.bounce && !world.special && !finishing && route.ringAt(position[0], position[2])) {
+    } else if (route.bounce && !world.special && !finishing && route.ringAt(position[0], position[2], ground.swimming && time - airborneAt > 0.15)) {
+      // (just down from a bounce it is on the ring, not in the water: only a dog that has been swimming a moment cannot get on)
       // a rubber ring under it: thrown up and on at full pace
       jumping = true; jumpSpeed = route.bounce.force; jumpGravity = route.bounce.gravity;
       ringHop = route.bounce.pace;
@@ -662,11 +680,18 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
 
     // ----- where that puts it
     const point = route.pointAt(s, lateral);
-    ground = route.groundAt(point.x, point.z, s, dog, stats.swimming, hint, heightAt, jumping);
+    ground = route.groundAt(point.x, point.z, s, dog, stats.swimming, hint, heightAt, jumping, groundY + jumpHeight);
     hint = ground.hint;
-    // the road stops and carries on a long way below: it falls to it
-    if (route.drops && groundY - ground.y > DROP.from) { jumpHeight += groundY - ground.y; if (!jumping) jumpSpeed = 0; jumping = true; jumpGravity = DROP.gravity; }
-    groundY = ground.y;
+    const dropping = groundY - ground.y > DROP.from;
+    if (dropping && (world.special?.flyHeight || world.special?.bouncing)) {
+      // flying or bouncing: held up on the level it is on, across the gap (if it ends there, the jump comes down below)
+    } else if (dropping && route.undercity && jumping && jumpGravity !== DROP.gravity) {
+      // in the air between two platforms (Neon Nexus): still up there; it only comes down below if the jump ends over nothing
+    } else {
+      // the road stops and carries on a long way below (or a platform ends under it, over the Undercity): it falls to it
+      if ((route.drops || route.undercity) && dropping) { jumpHeight += groundY - ground.y; if (!jumping) jumpSpeed = 0; jumping = true; jumpGravity = DROP.gravity; }
+      groundY = ground.y;
+    }
     const next = [point.x, groundY + jumpHeight, point.z];
     const dx = next[0] - position[0], dz = next[2] - position[2];
     if (dx * dx + dz * dz > 1e-5) yaw += wrapAngle(Math.atan2(dx, dz) - yaw) * (1 - Math.exp(-14 * dt));

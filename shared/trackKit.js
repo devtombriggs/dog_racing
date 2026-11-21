@@ -18,19 +18,28 @@ import { swimSpeed } from './dogStats.js';
 //                                           // a launch over it with `lift: true` (kit.launchBetween), which carries a dog straight up the shaft
 //     hills: { down, downMax },             // how much a descent adds to a dog's speed (little, unless this says more)
 //     rules: { ... },                       // anything to add to (or change in) the usual rules
-//   }, kit => ({                            // kit: pointAt, sAtU, along, within, pingPong, launchBetween, length ...
+//   }, kit => ({                            // kit: pointAt, sAtU, along, within, pingPong, launchBetween, branchAt (at race time), length ...
 //     launch,                               // kit.launchBetween(u0, u1, {...}): a leap or a cannon over a gap in the road
 //     obstacles: [{ id, kind, s, lateral, radius }],            // solid things standing on the road
 //     patches: [{ id, kind, s, lateral, along, across, speed, slowName }],   // something lying on the road that slows a dog
-//     strips: [{ id, sStart, sEnd, latMin, latMax, speed }],     // boost pads: faster while a dog is on one
+//     sinkholes: [{ id, s, lateral, radius, core, pull, speed }],   // a pit of sand (Dune Dash): inside `radius` a dog is slowed to `speed`
+//                                           // and dragged towards the middle (`pull` m/s at the edge of the core); inside `core` it is
+//                                           // swallowed (a fall, unless it is in the air)
+//     crosses: true                         // (on the definition) the lap runs over itself somewhere: the road under a dog is found by its height too
+//     strips: [{ id, sStart, sEnd, latMin, latMax, speed }],     // boost pads: faster while a dog is on one (hop: m/s up, a kicker ramp)
 //                                           // (hold: seconds the boost stays with the dog after the pad; quick: how much faster its speed builds
 //                                           //  meanwhile; branch: the id of the second road it lies on; mega: drawn as a mega pad)
 //     water: [{ sStart, sEnd, depth, ramp }],                    // a pool right across the road: dogs wade, then swim
 //     dividers: [{ sStart, sEnd, half, taper }],                 // an island down the middle: the road is two roads for a while
 //     branches: [{ id, sStart, sEnd, side, offset, half, rise, ramp }],   // a second road that leaves the main one on `side` (+1 the
 //                                           // dogs' left), runs `offset` metres from its middle (and `rise` metres above it), and joins it again
-//     platforms: [{ id, sStart, sEnd, pads: [{ s0, s1, half, reach, period, phase }] }],   // a stretch with no road at all, only
+//     platforms: [{ id, sStart, sEnd, boost, pads: [{ s0, s1, half, reach, period, phase }] }],   // a stretch with no road at all, only
 //                                           // platforms sliding from side to side: a dog over nothing falls, and starts the crossing again
+//                                           // (boost: { speed, hold }: every platform is a boost pad, moving with it)
+//     undercity: [{ id, sStart, sEnd, depth, wade, surface }],   // a second road `depth` metres under the main one from sStart to sEnd (Neon Nexus,
+//                                           // the river under Monkey Jungle's bridges: wade, how deep the water over it is):
+//                                           // a dog that falls off a platform lands on it instead of starting again.  Its way back up is
+//                                           // a lift: a launch with `lift: true, under: id`, which only takes a dog that is down there
 //     slipAt: s => 0..1,                    // how slippery (leave out for a dry track)
 //     hazardsAt: t => [{ id, kind, x, y, z, rotationY, radius, height, active }],   // everything that moves, t = seconds since GO
 //     keepClear: [[s0, s1], ...],           // stretches with no pickups or burrow mouths, besides the ones worked out here
@@ -197,15 +206,17 @@ export function makeTrack(def, features = () => ({})) {
   };
 
   // ---------- what this track has on it
-  const parts = features({ length: LENGTH, sampleCount: N, pointAt, sAtU, along, within, wrapS, indexAtS, launchBetween, pingPong, sstep, clamp01 });
+  const parts = features({ length: LENGTH, sampleCount: N, pointAt, sAtU, along, within, wrapS, indexAtS, launchBetween, pingPong, sstep, clamp01, branchAt });
   // (a track may have more than one leap: `launches`.  `launch` is the first of them)
   const launches = (parts.launches ?? (parts.launch ? [parts.launch] : [])).map((l, index) => ({ ...l, index }));
   const launch = launches[0] ?? null;
-  const isGap = s => launches.some(l => s > l.gapStart && s < l.gapEnd);
-  const isGapSegment = i => launches.some(l => i >= l.gapStartIndex && i < l.gapEndIndex);
+  // (a lift up from the level below leaves the main road above it whole)
+  const isGap = s => launches.some(l => !l.under && s > l.gapStart && s < l.gapEnd);
+  const isGapSegment = i => launches.some(l => !l.under && i >= l.gapStartIndex && i < l.gapEndIndex);
   const place = (o, lateral = o.lateral ?? 0) => { const c = pointAt(o.s), q = pointAt(o.s, lateral); return { ...o, lateral, x: q.x, y: q.y, z: q.z, rotationY: o.rotationY ?? c.rotationY }; };
   const obstacles = (parts.obstacles ?? []).map(o => place(o));
   const patches = (parts.patches ?? []).map(o => place(o));
+  const sinkholes = (parts.sinkholes ?? []).map(o => place(o));
   const strips = parts.strips ?? [], water = parts.water ?? [], dividers = parts.dividers ?? [];
   branches = (parts.branches ?? []).map(b => ({ ramp: 0.3, rise: 0, half: 6, ...b }));
   // ---------- moving platforms.  Where each one is depends on the race clock: whoever asks (the server for
@@ -226,6 +237,24 @@ export function makeTrack(def, features = () => ({})) {
     }
     return false;
   }
+  /** the platform under (s, lateral) at t seconds, if there is one */
+  function padUnder(s, lateral, t = clock) {
+    for (const zone of platforms) {
+      if (!(along(s, zone.sStart) > -PAD_LIP && along(s, zone.sEnd) < PAD_LIP)) continue;
+      const pad = zone.pads.find(each => along(s, each.s0) > -PAD_LIP && along(s, each.s1) < PAD_LIP && Math.abs(lateral - padLateral(each, t)) < each.half + PAD_LIP);
+      return pad ? { pad, zone } : null;
+    }
+    return null;
+  }
+  // ---------- the level below: { id, sStart, sEnd, depth }.  Whether a dog is on it goes by how high the dog is, so whoever asks
+  // where a dog is (query) says how high it is as well
+  const undercity = parts.undercity ?? [];
+  const underAt = s => undercity.find(u => along(s, u.sStart) >= 0 && along(s, u.sEnd) <= 0) ?? null;
+  const UNDER_PLATFORM = 0.6;          // a dog this far below the top of a crossing's platforms is under them, on its way down
+  /** something carried along on a platform (a chew toy dropped on one): where it is at t seconds.  ride: { pad, offset, along } */
+  const ridePosition = (ride, t = clock) => { const pad = platforms.flatMap(zone => zone.pads).find(each => each.id === ride.pad); if (!pad) return null; const s = (pad.s0 + pad.s1) / 2 + ride.along, p = pointAt(s, padLateral(pad, t) + ride.offset); return [p.x, p.y, p.z]; };
+  /** what a thing set down at (x, z) at t seconds rides on: a platform ({ pad, offset, along }), or null */
+  const rideAt = (x, z, t = clock) => { const q = project(x, z, nearestSample(x, z, -1)), on = padUnder(q.s, q.lateral, t); return on ? { pad: on.pad.id, offset: q.lateral - padLateral(on.pad, t), along: q.s - (on.pad.s0 + on.pad.s1) / 2 } : null; };
   // ---------- drops: where the road stops and carries on lower down.  { s, index, top, bottom, height }
   const drops = (def.drops ?? []).map(k => { let i = 0; while (!(U[i] >= k && U[i] < k + 1 && !(U[wrapIndex(i - 1)] >= k && U[wrapIndex(i - 1)] < k + 1))) i++; const top = Y[wrapIndex(i - 1)]; return { s: S[i], index: i, top, bottom: Y[i], height: top - Y[i] }; });
   const isHole = s => platforms.some(zone => along(s, zone.sStart) >= 0 && along(s, zone.sEnd) < 0);
@@ -243,6 +272,7 @@ export function makeTrack(def, features = () => ({})) {
     const launch = launches[which?.index ?? which] ?? launches[0];
     const t = Math.max(0, Math.min(1, elapsed / launch.duration));
     const a = pointAt(launch.takeoffS, lateral), b = pointAt(launch.landingS, lateral);
+    if (launch.under) a.y -= undercity.find(u => u.id === launch.under)?.depth ?? 0;        // (a lift up from the level below)
     if (launch.lift) {
       // a lift: in at the bottom, straight up the shaft (slowly at first, then fast), and out at the top
       const IN = 0.16, OUT = 0.86, mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2, flat = Math.hypot(b.x - a.x, b.z - a.z) / 2, rise = b.y - a.y;
@@ -262,14 +292,18 @@ export function makeTrack(def, features = () => ({})) {
   }
 
   const NEAR = 30 + Math.max(0, ...branches.map(b => b.offset + b.half));
-  function nearestSample(x, z, hint = -1) {
+  // (y: how high the dog is, where the road crosses itself: the road under it is the one nearest its height as well.  CROSSES:
+  // whether this lap has a place where one stretch of road runs over or under another)
+  const CROSSES = Boolean(def.crosses);
+  const away = (i, x, z, y) => (x - X[i]) ** 2 + (z - Z[i]) ** 2 + (CROSSES && y != null ? (3 * (y - Y[i])) ** 2 : 0);
+  function nearestSample(x, z, hint = -1, y = null) {
     let best = -1, bd = Infinity;
     let edge = false;
-    if (hint >= 0) for (let k = -30; k <= 30; k++) { const i = wrapIndex(hint + k), d = (x - X[i]) ** 2 + (z - Z[i]) ** 2; if (d < bd) { bd = d; best = i; edge = Math.abs(k) === 30; } }
+    if (hint >= 0) for (let k = -30; k <= 30; k++) { const i = wrapIndex(hint + k), d = away(i, x, z, y); if (d < bd) { bd = d; best = i; edge = Math.abs(k) === 30; } }
     // (a dog on a branch is a long way from the middle of the main road, but still beside the same stretch of it)
     if (best >= 0 && !edge && bd < NEAR * NEAR) return best;
     best = -1; bd = Infinity;
-    for (let i = 0; i < N; i++) { const d = (x - X[i]) ** 2 + (z - Z[i]) ** 2; if (d < bd) { bd = d; best = i; } }
+    for (let i = 0; i < N; i++) { const d = away(i, x, z, y); if (d < bd) { bd = d; best = i; } }
     return best;
   }
   function project(x, z, best) {
@@ -286,9 +320,12 @@ export function makeTrack(def, features = () => ({})) {
     return out;
   }
 
-  /** Everything gameplay needs to know about a position.  hint = `index` from this dog's last query (-1: search). */
-  function query(x, z, hint = -1) {
-    const p = project(x, z, nearestSample(x, z, hint)), i = p.t < 0.5 ? p.a : p.b, hw = p.halfWidth, sec = SEC[p.a];
+  /**
+   * Everything gameplay needs to know about a position.  hint = `index` from this dog's last query (-1: search).  y: how high it
+   * is, where there is a level below (undercity): left out, it is on the main road
+   */
+  function query(x, z, hint = -1, y = null) {
+    const p = project(x, z, nearestSample(x, z, hint, y)), i = p.t < 0.5 ? p.a : p.b, hw = p.halfWidth, sec = SEC[p.a];
     // a branch beside the road here: which of the two roads is this on, and where may a dog stand?
     const br = branches.length ? branchAt(p.s, hw) : null;
     let held = null, lane = null, yaw = yawAt(p.a);
@@ -329,9 +366,30 @@ export function makeTrack(def, features = () => ({})) {
       const patch = lane ? null : patchAt(p.s, p.lateral), strip = patch ? null : stripAt(p.s, p.lateral, lane);
       if (patch) { q.mud = true; q.mudSpeed = patch.speed ?? 0.55; q.surface = patch.kind ?? 'mud'; q.slowName = patch.slowName; }
       if (strip?.hold) { q.kick = strip; q.surface = 'boost'; }       // a pad whose boost stays with the dog for `hold` seconds after it
+      if (strip?.hop) q.hop = strip.hop;                              // a kicker (Squelch Hollow): a ramp that throws the dog up `hop` m/s as well
       else if (strip) { q.boost = strip.speed ?? 1.35; q.surface = 'boost'; }
     }
     if (platforms.length) q.gap = overNothing(p.s, lateral);     // nothing under it: see rules.gapClearance
+    // a sinkhole: slow, dragged in, and swallowed at the middle (q.pull: m/s towards the middle, along x and z)
+    for (const hole of sinkholes) {
+      const dx = hole.x - x, dz = hole.z - z, d = Math.hypot(dx, dz);
+      if (d >= hole.radius) continue;
+      q.mud = true; q.mudSpeed = hole.speed; q.surface = 'quicksand'; q.slowName = 'SINKHOLE!'; q.sinkhole = hole.id;
+      const drag = hole.pull * Math.min(1, (hole.radius - d) / Math.max(0.1, hole.radius - hole.core)) * Math.max(0.35, hole.core / Math.max(d, hole.core));
+      q.pull = d > 1e-6 ? [dx / d * drag, dz / d * drag] : [0, 0];
+      if (d < hole.core) q.gap = true;                          // (swallowed, unless it is in the air: see rules.gapClearance)
+    }
+    // on a platform that is a boost pad (it moves with the platform)
+    if (platforms.length && !q.gap && !q.blocked && isHole(p.s)) { const on = padUnder(p.s, lateral); const boost = on?.pad.boost ?? on?.zone.boost; if (boost) { q.kick = boost; q.surface = 'boost'; q.platform = on.pad.id; } }
+    // the level below: a dog well under the main road is on it, and so is one over nothing up there (that is where it will land)
+    const under = undercity.length && y != null ? underAt(p.s) : null;
+    // (and so is one that has dropped below the top of the platforms: a platform sliding over it does not catch it from underneath)
+    if (under && (y < p.trackY - under.depth / 2 || q.gap || (isHole(p.s) && y < p.trackY - UNDER_PLATFORM))) {
+      const low = p.trackY - under.depth;
+      Object.assign(q, { level: under.id, trackY: low, y: low, gap: false, kick: undefined, boost: 0, mud: false, slowName: undefined, surface: under.surface ?? 'deck', inWater: false, waterDepth: 0, movement: 'run', lane: null });
+      // (a level below that is a river bed: the dog wades it, as slow as its swimming makes it)
+      if (under.wade) Object.assign(q, { surface: 'water', inWater: true, waterDepth: under.wade, waterY: low + under.wade, movement: 'wade' });
+    }
     q.onTrack = !isGap(p.s);                                   // "supported": what the race rules look at
     q.dogY = q.movement === 'swim' ? waterY - SWIM_DRAFT : q.y;    // where to draw the dog (it floats when swimming)
     return q;
@@ -364,7 +422,7 @@ export function makeTrack(def, features = () => ({})) {
       if (!h.active || position[1] - h.y > h.height) continue;
       if (Math.hypot(position[0] - h.x, position[2] - h.z) > h.radius + DOG) continue;
       // (only where both are plainly on the same stretch of road: not one floor above another)
-      const under = query(position[0], position[2]).trackY, foot = query(h.x, h.z).trackY;
+      const under = query(position[0], position[2], -1, position[1]).trackY, foot = query(h.x, h.z, -1, h.y).trackY;
       const dogUp = position[1] - under, hazardUp = h.y - foot;
       if (Math.abs(under - foot) < 3 && dogUp > -0.5 && Math.abs(hazardUp) < 0.6 && dogUp - Math.max(0, hazardUp) > h.height) continue;
       return h;
@@ -376,7 +434,7 @@ export function makeTrack(def, features = () => ({})) {
   const cpCount = Math.max(4, Math.round(LENGTH / (def.checkpointSpacing ?? 100))), every = [];
   for (let c = 0; c < cpCount; c++) { const i = wrapIndex(Math.round(c * N / cpCount)); every.push({ sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] }); }
   let checkpoints = every;
-  for (const launch of launches) {
+  for (const launch of launches.filter(l => !l.under)) {        // (a lift from the level below is not a gate: most dogs never take it)
     // None in mid-air or on the run up to the leap; the landing is a gate every dog must come down on.
     checkpoints = checkpoints.filter(cp => cp.s < launch.padStart - 8 || cp.s > launch.landingS + 20);
     for (const [s, launchLanding] of [[launch.padStart - 8, false], [launch.landingS, true]]) {
@@ -408,10 +466,10 @@ export function makeTrack(def, features = () => ({})) {
   // divides or joins, and round everything standing or lying on it
   const around = (s, pad) => [s - pad, s + pad];
   const pickupHazards = [
-    ...launches.map(l => [l.padStart - 30, l.landingS + 30]),
+    ...launches.filter(l => !l.under).map(l => [l.padStart - 30, l.landingS + 30]),        // (a lift from below leaves the road above it alone)
     ...water.map(pool => [pool.sStart - 8, pool.sEnd + 8]),
     ...dividers.flatMap(d => [around(d.sStart + (d.taper ?? 16) / 2, (d.taper ?? 16) / 2 + 8), around(d.sEnd - (d.taper ?? 16) / 2, (d.taper ?? 16) / 2 + 8)]),
-    ...obstacles.map(o => around(o.s, 10)), ...patches.map(patch => around(patch.s, patch.along + 6)), ...(def.doors ?? []).map(door => around(sAtU(door.u), 9)),
+    ...obstacles.map(o => around(o.s, 10)), ...patches.map(patch => around(patch.s, patch.along + 6)), ...sinkholes.map(hole => around(hole.s, hole.radius + 6)), ...(def.doors ?? []).map(door => around(sAtU(door.u), 9)),
     // (where a branch leaves the road and where it joins it again)
     ...branches.flatMap(b => { const d = (b.sEnd - b.sStart) * b.ramp * 0.45; return [[b.sStart - 6, b.sStart + d], [b.sEnd - d, b.sEnd + 6]]; }),
     ...platforms.map(zone => [zone.sStart - 34, zone.sEnd + 16]),
@@ -422,9 +480,9 @@ export function makeTrack(def, features = () => ({})) {
   // bone wherever the road is clear and the last one is far enough behind.  -> { rows: [s], bones: [[s, metres across]] }
   let autoPickups = null;
   if (parts.autoPickups) {
-    const { rowEvery = 240, boneEvery = 110, apart = 38, from = 42, pairs = false } = parts.autoPickups, rows = [], bones = [];       // (pairs: two bones side by side each time)
+    const { rowEvery = 240, boneEvery = 110, apart = 38, from = 42, pairs = false, first = null } = parts.autoPickups, rows = [], bones = [];       // (pairs: two bones side by side each time; first: where the first row goes, if it matters)
     const free = s => !pickupHazards.some(([a, b]) => s > a - 5 && s < b + 5);
-    let lastRow = from - rowEvery * 0.55, lastBone = from - boneEvery, last = -Infinity;
+    let lastRow = first != null ? first - rowEvery : from - rowEvery * 0.55, lastBone = from - boneEvery, last = -Infinity;
     for (let s = from; s < LENGTH - 32; s += 3) {
       if (!free(s) || s - last < apart) continue;
       if (s - lastRow >= rowEvery) { rows.push(s); lastRow = last = s; }
@@ -441,12 +499,12 @@ export function makeTrack(def, features = () => ({})) {
     samples: { x: X, y: Y, z: Z, width: W, s: S, u: U, tangentX: TX, tangentZ: TZ, normalX: NX, normalZ: NZ, grade: GRADE, curvature: KAPPA, section: SEC },
     sections, checkpoints, startPositions,
     startFinish: { position: [X[0], Y[0], Z[0]], rotationY: yawAt(0), halfWidth: W[0] / 2 },
-    obstacles, mud: patches, strips, water, dividers, branches, doors, platforms, drops, pickupHazards, boxLanes,
+    obstacles, mud: patches, sinkholes, strips, water, dividers, branches, doors, platforms, drops, pickupHazards, boxLanes,
     ...(launch ? { launch, launches, launchPoint } : {}),
     ...(autoPickups ? { pickups: autoPickups } : {}),
     ...(parts.extras ?? {}),
     rules: { hasBarriers: true, fallStartsBelow: 2.0, respawnDelaySeconds: 1.0, respawnPenaltySeconds: 1.5, respawnSpeedMultiplier: 0.55, gravity: 24, killPlaneY: -60, hazardStunMs: 1100, gapClearance: 0.2, ...(def.rules ?? {}) },
-    query, pointAt, indexAtS, sAtU, along, within, isGap, isGapSegment, depthAt, dividerAt, setClock, padAt, padLateral, isHole, isHoleSegment: i => isHole(S[i]), branchAt, holdLateral, speedFactor, hazardsAt, hazardHit,
+    query, pointAt, indexAtS, sAtU, along, within, isGap, isGapSegment, depthAt, dividerAt, setClock, padAt, padLateral, padUnder, ridePosition, rideAt, undercity, underAt, isHole, isHoleSegment: i => isHole(S[i]), branchAt, holdLateral, speedFactor, hazardsAt, hazardHit,
     ...(slipAt ? { slipAt } : {}),
   };
 }

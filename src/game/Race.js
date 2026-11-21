@@ -270,6 +270,12 @@ export class Race {
       // FALLS, RESCUES, THE CANNON AND THE BURROWS
       // ---------------------------------
 
+      // Frostpeak: someone knocked down a slalom gate or a snowman (shared/slalom.js)
+      slalomHit: (data) => {
+        world.slalomWorld?.hit(data.index, data.downMs);
+        if (mine(data.playerId)) local.slalomBump(data.kind);
+      },
+
       playerFell: (data) => {
         if (!world.proceduralTrack || !mine(data.playerId)) return;
         local.fell(data);
@@ -444,7 +450,7 @@ export class Race {
     ]);
     const itemAnchors = new Map([[this.myId, local.bones.head ?? player]]);
     remotes.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
-    this.items.update(delta, itemAnchors, world.ballGround);
+    this.items.update(delta, itemAnchors, world.ballGround, world.proceduralTrack);
     this.fireworks.update(delta);
     this.kelp.update(delta);
     this.sheep.update(delta);
@@ -464,7 +470,8 @@ export class Race {
     // at once; the server tells everyone (you included) which bone went, so it vanishes for all.
     const otherDogs = new Map();
     remotes.forEach((remote, id) => otherDogs.set(id, remote.position));
-    if (goldenBones.update(delta, player.position, canMove && !local.carried, otherDogs)) local.boneKick();
+    // (Ralph flying cannot take a Golden Bone: Tom, 2026-11-21.  He flies through it and leaves it for the others)
+    if (goldenBones.update(delta, player.position, canMove && !local.carried && !specials.physics(local.id)?.flyHeight, otherDogs)) local.boneKick();
 
     // ---------------------------------
     // RACE TIMER
