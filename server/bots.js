@@ -136,6 +136,10 @@ function buildRoute(mapId) {
     // (the bridges are railed, and narrower than the road)
     for (const c of track.chasms) narrow.push({ from: c.ravineStart - 12, to: c.ravineEnd + 4, half: Math.min(...[c.ravineStart, c.s, c.ravineEnd].map(s => pointAt(s).halfWidth)) - 1.3 });
   }
+  // a log right across the road (Wendover Woods): nothing to steer round, so it is jumped, timed like a gap.
+  // (It used to be left to the hazard watch, which only jumps what it sees 0.2 to 0.6 s off: a dog that came to
+  // it slowly, or was knocked down beside it, stopped in front of it for good, Tom 2026-11-22)
+  if (track?.fallenLog) { const { s: logS, radius } = track.fallenLog, reach = radius + 0.7; jumps.push({ id: 'fallen-log', s0: logS - reach, s1: logS + reach, height: 1.05, hazardKind: 'log' }); }
   // moving platforms (Neon Nexus): every break between them has to be jumped, and each has to be steered for
   const sliders = [];
   for (const zone of track?.platforms ?? []) {
@@ -481,18 +485,26 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   // fast it may go (it waits for what cannot be jumped) and whether to jump now.
   // how far under the main road it is running (0 up on it; the Undercity's depth down there)
   const below = () => { const drop = route.pointAt(s).y - groundY; return route.undercity && drop > 5 ? drop : 0; };
+  const plannedJump = new Set(route.jumps.map(jump => jump.hazardKind).filter(Boolean));
   function watchHazards(world, top) {
     if (!route.hazardHit || world.shielded || world.special || world.raceSeconds == null) return { cap: top, jump: false };       // (nothing knocks a dog out of its special)
     if (!route.hazardZones.some(zone => Math.abs(route.ahead(zone, s)) < 45)) return { cap: top, jump: false };
     for (let ahead = 0.15; ahead <= L.foresight + 1e-6; ahead += 0.15) {
-      // where it will be then: at the speed it is going, or having picked up speed on the way
+      // where it will be then: at the speed it is going, or having picked up speed on the way, and how high
+      // (a dog already in the air, off a kicker ramp, is over what it is going to clear: no braking for that)
       const quicker = Math.min(top, speed + acceleration * ahead);
+      const up = jumping ? Math.max(0, jumpHeight + jumpSpeed * ahead - jumpGravity * ahead * ahead / 2) : 0;
       for (const [reach, side] of [[speed * ahead, 0], [(speed + quicker) / 2 * ahead, 0], [speed * ahead, 0.9], [speed * ahead, -0.9]]) {
         const there = route.pointAt(s + reach, lateral + side);       // (and a little to either side: nothing is cut fine)
-        const hazard = route.hazardHit([there.x, there.y - below(), there.z], world.raceSeconds + ahead);
-        if (!hazard) continue;
+        const hazard = route.hazardHit([there.x, there.y - below() + up, there.z], world.raceSeconds + ahead);
+        // (something already planned as a jump (the fallen log): left to that, which waits for the kicker ramp in front of it.
+        // Jumping on first sight, up to 0.6 s off, went up 10 m early, missed the ramp and came down on the log)
+        if (!hazard || plannedJump.has(hazard.kind)) continue;
         // a sheep or a pig: over it, if there is time to get up (the jump is highest 0.2 to 0.65 s in)
         if (hazard.height <= 1.3 && ahead >= 0.2) return { cap: top, jump: ahead <= 0.6 };
+        // ...and one right in front of a dog going slowly (or standing still, after a knock): braking cannot get it
+        // past, so it jumps now
+        if (hazard.height <= 1.3 && !jumping && speed < 6) return { cap: top, jump: true };
         // something that cannot be jumped (or not in time): step out of its way if there is a clear line beside it,
         // and slow down only if there is not.  (An easier dog thinks of this less often.)
         if (decide(`dodge-${hazard.id}-${Math.floor(world.raceSeconds / 4)}`, L.pace >= 0.9 ? 0.9 : 0.55)) {

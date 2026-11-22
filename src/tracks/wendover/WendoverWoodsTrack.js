@@ -32,6 +32,11 @@ export const createWendoverWoods = () => createKitWorld(T, {
     const r = rng(1466), field = new THREE.Color();
     const ground = terrain({ size: 1100, cell: 7, centre: [10, -223], height: woodsHill, blend: 34,
       color: (x, z) => { const n = 0.5 + 0.5 * Math.sin(x * 0.09) * Math.cos(z * 0.11); return field.setRGB(0.2 + 0.05 * n, 0.33 + 0.07 * n, 0.15 + 0.03 * n); } });
+    // (the Treetop Walk runs 20 m off the road, through the wood: no tree within WALK_CLEAR of its edge, or the dogs up
+    // there cannot see where they are going (Tom, 2026-11-22).  Its own trunks, holding it up, are built below)
+    const WALK_CLEAR = 6, walk = [];
+    for (let s = T.treetop.sStart; s <= T.treetop.sEnd; s += 2) { const br = T.branchAt(s); if (br) { const p = T.pointAt(s, br.side * br.centre); walk.push([p.x, p.z, br.half + WALK_CLEAR]); } }
+    const offWalk = (x, z) => walk.every(([wx, wz, keep]) => (x - wx) ** 2 + (z - wz) ** 2 > keep * keep);
     const scatter = (count, margin, far, make, keepIf = () => true) => { const list = []; let tries = 0; while (list.length < count && tries++ < count * 25) { const x = 10 - far + r() * far * 2, z = -223 - far + r() * far * 2; if (clear(x, z, margin) && keepIf(x, z)) list.push(make(x, ground(x, z), z)); } return list; };
 
     // ---------- the wood: oaks, beeches, birches and pines, thick right up to the path
@@ -39,9 +44,9 @@ export const createWendoverWoods = () => createKitWorld(T, {
     const beech = merge([cyl(0.45, 0.6, 7, 7, 0x8a8478, 0, 3.5, 0), ball(3.0, 1, 0x5f9a3a, 0, 9, 0, 1, 1.2, 1), ball(2.2, 1, 0x6aa842, 0.6, 11, 0.4)]);
     const birch = merge([cyl(0.22, 0.3, 8, 6, 0xeeeee6, 0, 4, 0), ...[1.5, 3, 4.6, 6].map(y => box(0.5, 0.12, 0.46, 0x2a2a2a, 0, y, 0)), ball(1.9, 1, 0x8cc455, 0, 8.6, 0, 1, 1.4, 1)]);
     const pine = merge([cyl(0.3, 0.45, 3, 6, 0x5d3f26, 0, 1.5, 0), cone(2.6, 5, 7, 0x24452c, 0, 4.6, 0), cone(2.0, 4.2, 7, 0x2b5234, 0, 7, 0), cone(1.3, 3.4, 7, 0x326040, 0, 9.2, 0)]);
-    const near = (count, kind, margin, far, scale) => herd(kind.name, kind.geo, scatter(count, margin, far, (x, y, z) => [x, y - 0.2, z, r() * 6.28, scale()]));
+    const near = (count, kind, margin, far, scale) => herd(kind.name, kind.geo, scatter(count, margin, far, (x, y, z) => [x, y - 0.2, z, r() * 6.28, scale()], offWalk));
     // (thickest near the path: a ring of trees close in all the way round, then the wood out to the hills)
-    const edge = (count, kind, scale) => { const list = []; let tries = 0; while (list.length < count && tries++ < count * 20) { const s = r() * T.length, side = r() < 0.5 ? -1 : 1, [x, , z] = beside(s, side, 4 + r() * r() * 34); if (clear(x, z, 3.5) && !list.some(q => Math.abs(q[0] - x) + Math.abs(q[2] - z) < 4)) list.push([x, ground(x, z) - 0.2, z, r() * 6.28, scale()]); } return herd(kind.name, kind.geo, list); };
+    const edge = (count, kind, scale) => { const list = []; let tries = 0; while (list.length < count && tries++ < count * 20) { const s = r() * T.length, side = r() < 0.5 ? -1 : 1, [x, , z] = beside(s, side, 4 + r() * r() * 34); if (clear(x, z, 3.5) && offWalk(x, z) && !list.some(q => Math.abs(q[0] - x) + Math.abs(q[2] - z) < 4)) list.push([x, ground(x, z) - 0.2, z, r() * 6.28, scale()]); } return herd(kind.name, kind.geo, list); };
     edge(420, { name: 'Woods_Edge_Oaks', geo: oak }, () => 0.75 + r() * 0.6);
     edge(320, { name: 'Woods_Edge_Beeches', geo: beech }, () => 0.8 + r() * 0.5);
     edge(300, { name: 'Woods_Edge_Birches', geo: birch }, () => 0.8 + r() * 0.5);
@@ -94,8 +99,12 @@ export const createWendoverWoods = () => createKitWorld(T, {
       herd('Old_Oak', merge([cyl(2.2, 3.4, 12, 10, 0x4a3220, 0, 6, 0), ball(9, 1, 0x356b28, 0, 16, 0, 1.2, 0.8, 1.2), ball(6.5, 1, 0x3f7a2e, 6, 18, 3), ball(6, 1, 0x2f6224, -5, 17, -4), ...[0, 1, 2, 3, 4].map(k => cyl(0.4, 1.2, 6, 6, 0x4a3220, Math.cos(k * 1.26) * 3.5, 0.6, Math.sin(k * 1.26) * 3.5, 0, Math.PI / 2.6))]), [[cx, y - 0.3, cz, 0, 1]]); }
 
     // ---------- the Treetop Walk: trunks holding it up, and lanterns along it
-    { const W = T.treetop, posts = [], lamps = [];
-      for (let s = W.sStart + 8; s < W.sEnd - 8; s += 7) { const br = T.branchAt(s); if (!br || !br.open) continue; for (const edge of [-1, 1]) { const p = T.pointAt(s, br.side * (br.centre + edge * (br.half + 0.3))); posts.push([p.x, p.y + br.lift, p.z, 0, 1]); } const l = T.pointAt(s, br.side * br.centre); lamps.push([l.x, l.y + br.lift + 2.6, l.z, 0, 1]); }
+    { const W = T.treetop, posts = [], lamps = [], POST_ABOVE = 1.2;
+      // (a place on the Walk is already at its height: its lift is not added again.  It was, and the trunks stood 5 m
+      // above the deck either side, every 7 m, a wall nobody could see past (Tom, 2026-11-22).  Now they end a
+      // railing's height above it, and the lanterns sit on every other pair instead of hanging over the middle)
+      let pair = 0;
+      for (let s = W.sStart + 8; s < W.sEnd - 8; s += 7) { const br = T.branchAt(s); if (!br || !br.open) continue; pair += 1; for (const edge of [-1, 1]) { const p = T.pointAt(s, br.side * (br.centre + edge * (br.half + 0.3))), top = p.y + POST_ABOVE; posts.push([p.x, top, p.z, 0, 1]); if (pair % 2) lamps.push([p.x, top + 0.25, p.z, 0, 1]); } }
       herd('Treetop_Posts', cyl(0.35, 0.45, 1, 6, 0x5d4027, 0, -0.5, 0), posts.map(([x, y, z]) => [x, y, z, 0, 1])).scale?.set?.(1, 1, 1);
       const trunks = posts.map(([x, y, z]) => { const g = ground(x, z); return [x, g, z, 0, 1, y - g]; });
       const trunkG = cyl(0.5, 0.7, 1, 7, 0x5d4027, 0, 0.5, 0); D.push(trunkG);

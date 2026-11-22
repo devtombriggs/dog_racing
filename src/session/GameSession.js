@@ -5,6 +5,7 @@ import { SERVER_URL, VOICE_CHAT } from '../config/env.js';
 import { gameAudio } from '../audio/GameAudio.js';
 import { createVoiceChat } from '../voiceChat.js';
 import { account } from './account.js';
+import { createConnectionWatch } from './connectionWatch.js';
 
 const ACCESSIBILITY_KEY = 'dogRacing.accessibilityMode.v2';
 
@@ -102,6 +103,7 @@ export class GameSession {
   #listeners = new Set();
   #joinRequest = 0;
   #events = null;
+  #watch = null;
   #muteKeyOn = false;
   // the race connection has been told who is signed in (src/session/account.js): hosting and joining wait for it
   #accountTold = Promise.resolve();
@@ -268,6 +270,9 @@ export class GameSession {
   connect() {
     const socket = io(SERVER_URL);
     this.socket = socket;
+    // (what the browser was doing when a connection dropped: told to the server, for its log, once back)
+    this.#watch?.dispose();
+    const watch = this.#watch = createConnectionWatch();
     if (!this.guest) { this.#stopAccount?.(); this.#stopAccount = account.onChange(() => this.#tellAccount()); }
 
     // Voice chat (src/voiceChat.js): the browsers talk to each other; the server passes their messages on
@@ -286,13 +291,16 @@ export class GameSession {
         console.log('Connected:', socket.id);
         // (socketId is this player's id: the connection's own, unless the server gives back an earlier seat)
         this.set({ connected: true, socketId: socket.id });
+        const report = watch.report();
+        if (report) socket.emit('connectionReport', report);
         // Say who this browser is.  After a refresh, or a dropped connection, the server may still be
         // holding this player's seat: then they are straight back in their room, on the same dog.
         if (!this.guest) socket.emit('resume', { token: seatToken() }, response => this.#resumed(response));
         if (!this.guest) this.#tellAccount();
       },
 
-      disconnect: () => {
+      disconnect: (reason) => {
+        watch.dropped(reason, this.state.screen);
         this.#joinRequest += 1;
         this.set({ connected: false, socketId: null, availableLobbies: null, lobbyListError: '', joiningRoom: null });
       },
@@ -410,6 +418,7 @@ export class GameSession {
     const socket = this.socket;
     if (!socket) return;
     for (const [event, handler] of Object.entries(this.#events)) socket.off(event, handler);
+    this.#watch?.dispose(); this.#watch = null;
     this.voice?.dispose();
     this.voice = null;
     this.#listenForMuteKey(false);

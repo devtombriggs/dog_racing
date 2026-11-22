@@ -35,10 +35,12 @@ const httpServer = createServer((req, res) => {
 });
 
 const io = new Server(httpServer, {
-  // (ask each game every 5 s whether it is still there, and give up on one that has not answered in 5:
-  // a dead connection is noticed in about ten seconds; socket.io's own settings take up to 45)
+  // (ask each game every 5 s whether it is still there, and give up on one that has not answered in 20.
+  // It was 5, and players were dropped two or three times a race (Tom, 2026-11-22): a browser busy loading a
+  // map, a tab in the background or a Wi-Fi blip goes quiet for longer than that.  A connection that has
+  // really died is now noticed in about 25 s; socket.io's own settings take up to 45)
   pingInterval: 5000,
-  pingTimeout: 5000,
+  pingTimeout: 20000,
   cors: {
     origin: true,
     methods: ['GET', 'POST']
@@ -1861,8 +1863,19 @@ function leaveRoom(socket, id = id) {
   updateLobby(room);
 }
 
+// One line in the server's log (docker logs dog-racing-backend) for each connection coming and going, with
+// the time, so that a player dropped in a race can be looked up afterwards: who, where and why
+const connectionLog = (what, details) => console.log(`[${new Date().toISOString()}] ${what} ${Object.entries(details)
+  .filter(([, value]) => value != null && value !== '').map(([key, value]) => `${key}=${typeof value === 'string' && /\s/.test(value) ? JSON.stringify(value) : value}`).join(' ')}`);
+// (where a player is: their name, room, map and what the room is doing)
+function whereIs(playerId) {
+  const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);
+  return { name: player?.name, room: room?.code, map: room?.mapId, status: room?.status, lap: room?.status === 'racing' ? player?.lap : null };
+}
+
 io.on('connection', (socket) => {
-  console.log('Player connected:', socket.id);
+  const connectedAt = Date.now();
+  connectionLog('Player connected:', { id: socket.id, address: socket.handshake?.headers?.['x-forwarded-for'] ?? socket.handshake?.address, transport: socket.conn?.transport?.name });
   // Who this connection is.  Usually itself; a browser that has come back after a refresh takes up the
   // seat (and the id) it had before.  seatToken is the secret that browser proves it with.
   let playerId = socket.id, seatToken = null, superseded = false;
@@ -2400,8 +2413,21 @@ io.on('connection', (socket) => {
 
   // DISCONNECT
 
-  socket.on('disconnect', () => {
-    console.log('Player disconnected:', playerId);
+  // The game's own account of a connection it lost, sent once it is back: whether its tab was in the background,
+  // or the page was stuck (loading a map), tells a dropped Wi-Fi from a busy browser
+  socket.on('connectionReport', (data) => {
+    const text = (value, max = 40) => typeof value === 'string' ? value.slice(0, max).replace(/[^\w .:-]/g, '') : null;
+    const number = value => Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
+    connectionLog('Player reports a dropped connection:', { player: playerId, ...whereIs(playerId), reason: text(data?.reason), screen: text(data?.screen, 20),
+      offlineSeconds: number(data?.offlineSeconds), tabHiddenSeconds: number(data?.hiddenSeconds), longestStallSeconds: number(data?.longestStallSeconds), online: data?.online === false ? 'no' : null });
+  });
+
+  socket.on('disconnect', (reason) => {
+    // (reason, from socket.io: 'ping timeout' = the game stopped answering (a stuck or background tab, or a
+    // connection gone quiet); 'transport close' / 'transport error' = the connection itself was cut;
+    // 'client namespace disconnect' = the game left on purpose; 'server namespace disconnect' = we closed it)
+    connectionLog('Player disconnected:', { player: playerId, ...whereIs(playerId), reason, superseded: superseded ? 'yes (same browser connected again)' : null,
+      connectedFor: `${Math.round((Date.now() - connectedAt) / 1000)}s` });
     if (superseded) return;                      // (the same browser has already taken this seat over on a new connection)
     if (seatToken && liveSeats.get(seatToken)?.socket === socket) liveSeats.delete(seatToken);
     const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);

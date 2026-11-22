@@ -203,3 +203,22 @@ test('in a special a dog can still jump (Tom, 2026-11-21: it could not get over 
     assert.ok(jumped, `${dog} jumps it in its special`);
   }
 });
+
+// Tom, 2026-11-22: on Wendover Woods the computer dogs got stuck at the fallen log near the end.  They jumped it
+// only on first sight, 0.6 s off (10 m early at full speed: over the kicker ramp and down on to the log), and a
+// dog that came to it slowly braked in front of it for ever.
+test('Wendover Woods: every level gets over the fallen log, from a run-up, from slow and from a standstill', async () => {
+  const { PROCEDURAL_TRACKS } = await import('../shared/maps.js');
+  const T = PROCEDURAL_TRACKS.wendover, logS = T.fallenLog.s;
+  for (const level of BOT_LEVEL_IDS) for (const dog of ['gsp', 'ralph', 'jazz']) for (const back of [80, 12, 2.2]) {
+    let hits = 0, immuneUntil = -1, over = false;
+    run({ mapId: 'wendover', dog, level, from: logS - back, seconds: 20, world: { raceSeconds: 30 }, watch: (move, state, route) => {
+      if (over) return;
+      const hazard = T.hazardHit(move.position, 30);
+      if (hazard?.kind === 'log' && state.travelled > immuneUntil) { hits += 1; immuneUntil = state.travelled + 3; }
+      if (route.ahead(state.s, logS) > 6) over = true;
+    } });
+    assert.ok(over, `${level} ${dog} from ${back} m: stuck at the log`);
+    if (back === 80) assert.equal(hits, 0, `${level} ${dog}: hit the log from a run-up`);
+  }
+});
