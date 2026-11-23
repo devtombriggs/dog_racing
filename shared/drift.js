@@ -1,9 +1,10 @@
 // Drifting: hold the drift button through a corner and the dog hops into a skid and slides round it,
 // back end out, losing none of the speed a hard turn costs.  At first there is only dust.  Hold the skid
-// and sparks come at its paws: blue, then orange, then purple.  Letting go once there are sparks kicks it
-// out of the corner with a boost, longer for each colour; letting go before them gives nothing.
-// A slow dog is the better drifter (its Drift stat, shared/dogStats.js): its sparks come sooner and its
-// boost lasts longer.
+// and blue sparks come at its paws; letting go once they are there kicks it out of the corner with a Golden
+// Bone's boost, and letting go before them gives nothing.  (Tom, 2026-11-23: blue only, no other colour, a
+// bone's boost, and half the old wait for it.)
+// A slow dog is the better drifter (its Drift stat, shared/dogStats.js): its sparks come sooner.  The four
+// slowest (DRIFT_PERKS) find it easier still and get a super boost.
 //
 // How a drift steers (Tom, 2026-11-21: "like Mario Kart"): the drift is a curve of its own.  Let go of the arrows and
 // the dog carries on round a medium curve; the arrow into the corner eases it tighter, the arrow out of it eases it
@@ -21,18 +22,12 @@ export const DRIFT = {
   // The sparks.  `charge` builds by a second a second steering into the skid, more slowly holding it
   // straight and slowly steering out of it (so weaving down a straight earns next to nothing)
   chargeOut: 0.3, chargeHeld: 0.65, chargeIn: 1,
-  tiers: [0.8, 1.8, 3.0],   // charge at which the sparks come (blue), then turn orange, then purple (a dog of Drift 7)
-  boostSeconds: [0.6, 1.2, 1.8],   // the boost each is worth (Drift 7)
+  tiers: [0.4],        // charge at which the blue sparks come (a dog of Drift 7: half a second steering in).  Only one colour
   speed: 1.06,         // top speed as a skid starts (any dog: so that it does not look as if it slows to drift)...
   speedGain: 0.09,     // ...and this much more by the time it has been held `speedSeconds` (it pulls away from a dog not drifting)
-  speedSeconds: 3,     //    (when the sparks turn purple, for a dog of Drift 7)
+  speedSeconds: 3,
   speedQuick: 2,       // how much faster speed builds in a skid, so that it keeps up
-  boostSpeed: 1.2,     // top speed in the boost (a Golden Bone is 1.3)
-  boostQuick: 2,       // how much faster speed builds while it lasts
-  boostKick: 0.6,      // share of the extra speed given straight away (fed in over DRIFT_ARC.kickSeconds, not in one jump)
-  easeOut: 0.4,        // seconds over which the boost fades at the end
   statCharge: 0.1,     // how much sooner the sparks come per point of Drift over 7
-  statBoost: 0.08,     // how much longer the boost lasts per point
   // How it looks (the game, not the rules)
   swing: 0.38,         // how far the dog is turned into the corner beyond the way it is heading (radians)
   lean: 0.5,           // its lean and the curve of its body, against an ordinary hard turn: it stays upright
@@ -109,21 +104,26 @@ export function driftStep(state, arc, { input = 0, speed, dt, curvature = null }
   return state;
 }
 
-// The dogs that are slow on the straights get more out of a skid than their Drift stat alone gives them:
+// The boost for letting go on blue: a Golden Bone's, for every dog (the same speed, for the same time, arriving as
+// quickly; the boost's first burst is fed in over DRIFT_ARC.kickSeconds, not in one jump).
+export const DRIFT_BOOST = {
+  speed: BONE_BOOST.speedMultiplier, quick: BONE_BOOST.accelerationMultiplier, kick: BONE_BOOST.instantKick,
+  easeOut: BONE_BOOST.easeOut, seconds: BONE_BOOST.duration, super: false,
+};
+// The super boost (Tom, 2026-11-23: the slow dogs "get a super boost whereas the other dogs get the regular bone boost")
+export const SUPER_DRIFT_BOOST = { ...DRIFT_BOOST, speed: 1.4, quick: 2.2, seconds: 2.5, super: true };
+
+// The dogs that are slow on the straights get more out of a skid than their Drift stat alone gives them, and
+// drifting is easier for them (Tom, 2026-11-23):
 //   speed    how much faster than their top speed they go as a skid starts (it builds from there: driftSpeedNow)
 //   control  how much tighter and wider the arrows can take their drift (1 = as any dog): driftArc
-//   charge   how much sooner their sparks come (on top of their Drift stat)
-//   boost    what letting go is worth to them.  As soon as their sparks are blue it is a Golden Bone's boost
-//            (the same speed, for the same time, arriving as quickly), and longer still for orange and purple
+//   charge   how much sooner their sparks come (on top of their Drift stat): blue almost as soon as the skid is down
+//   boost    what letting go on blue is worth to them: the super boost
 // Each of them has a skid of its own to go with it (src/config/dogs.js `skid`): Enzo glides round on his belly,
-// Ralph hops on a skateboard, and one of the pug twins jumps on the other's back.
-const BONE = {
-  speed: BONE_BOOST.speedMultiplier, quick: BONE_BOOST.accelerationMultiplier, kick: BONE_BOOST.instantKick, easeOut: BONE_BOOST.easeOut,
-  seconds: [BONE_BOOST.duration, BONE_BOOST.duration + 0.5, BONE_BOOST.duration + 1],
-};
-const PERK = { speed: 1.12, control: 1.4, charge: 1.6, boost: BONE };
+// Ralph hops on a skateboard, one of the pug twins jumps on the other's back, and Jimmy's cart skids.
+const PERK = { speed: 1.12, control: 1.4, charge: 2, boost: SUPER_DRIFT_BOOST };
 export const DRIFT_PERKS = { enzo: PERK, ralph: PERK, baz_naz: PERK, jimmy: PERK };
-const NO_PERKS = { speed: DRIFT.speed, control: 1, charge: 1, boost: null };
+const NO_PERKS = { speed: DRIFT.speed, control: 1, charge: 1, boost: DRIFT_BOOST };
 export const driftPerks = dogId => DRIFT_PERKS[dogId] ?? NO_PERKS;
 
 // Accessibility mode has four keys (left, right, jump, item) and no drift button: there the dog drifts by itself.
@@ -175,25 +175,18 @@ export function driftChargeRate(drift, into, charge = 1) {
   return lerp3(DRIFT.chargeOut, DRIFT.chargeHeld, DRIFT.chargeIn, Math.max(-1, Math.min(1, into))) * statScale(drift, DRIFT.statCharge) * charge;
 }
 
-/** Which sparks the dog has: 0 none yet, 1 blue, 2 orange, 3 purple */
+/** Which sparks the dog has: 0 none yet, 1 blue (the only colour) */
 export function driftTier(charge) {
   return DRIFT.tiers.reduce((tier, at, i) => (charge >= at ? i + 1 : tier), 0);
 }
 
-/** Seconds of boost for letting go at this tier (0 for none) */
-export function driftBoostSeconds(drift, tier) {
-  return tier > 0 ? DRIFT.boostSeconds[tier - 1] * statScale(drift, DRIFT.statBoost) : 0;
-}
-
 /**
- * The boost a dog gets for letting go of a skid at this tier, or null for none:
+ * The boost a dog gets for letting go of a skid at this tier, or null for none (no sparks yet):
  * { seconds, speed (top speed multiplier), quick (how much faster speed builds), kick (share of the extra
- * speed given at once), easeOut (seconds it fades over at the end) }.  perks: the dog's (driftPerks)
+ * speed given at once), easeOut (seconds it fades over at the end), super }.  perks: the dog's (driftPerks)
  */
-export function driftBoost(drift, tier, perks = NO_PERKS) {
-  if (tier <= 0) return null;
-  if (perks.boost) { const { seconds, ...rest } = perks.boost; return { ...rest, seconds: seconds[tier - 1] }; }
-  return { seconds: driftBoostSeconds(drift, tier), speed: DRIFT.boostSpeed, quick: DRIFT.boostQuick, kick: DRIFT.boostKick, easeOut: DRIFT.easeOut };
+export function driftBoost(tier, perks = NO_PERKS) {
+  return tier > 0 ? { ...perks.boost } : null;
 }
 
 /** Top speed multiplier `held` seconds into a skid (perks: the dog's, driftPerks): it builds the longer it is held */
@@ -202,6 +195,6 @@ export function driftSpeedNow(held, perks = NO_PERKS) {
 }
 
 /** Top speed multiplier with `left` seconds of the boost still to run (it fades over the last of them) */
-export function driftBoostNow(left, speed = DRIFT.boostSpeed, easeOut = DRIFT.easeOut) {
+export function driftBoostNow(left, speed = DRIFT_BOOST.speed, easeOut = DRIFT_BOOST.easeOut) {
   return left > 0 ? 1 + (speed - 1) * Math.min(1, left / easeOut) : 1;
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { botRoute, createBot } from '../server/bots.js';
-import { DRIFT } from '../shared/drift.js';
+import { DRIFT, driftPerks } from '../shared/drift.js';
 import { BOT_LEVELS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
@@ -56,7 +56,7 @@ test('a computer dog runs at its own dog\'s speed, never faster but in a skid an
           assert.ok(Math.abs(state.lateral) <= route.pointAt(state.s).halfWidth, `${mapId}: ${dog} is off the road at ${state.s}`);
           // (1.08: the most a downhill gives; in a skid, the most a skid gives, and out of one, the skid's boost on top of it: shared/drift.js)
           const skid = state.skid ? DRIFT.speed + DRIFT.speedGain : 1;
-          assert.ok(state.speed <= bot_top(dog) * 1.09 * (state.boosting ? DRIFT.boostSpeed : skid), `${mapId}: ${dog} at ${state.speed} m/s`);
+          assert.ok(state.speed <= bot_top(dog) * 1.09 * (state.boosting ? driftPerks(dog).boost.speed : skid), `${mapId}: ${dog} at ${state.speed} m/s`);
           assert.ok(move.position.every(Number.isFinite) && Number.isFinite(move.rotation));
         },
       });
@@ -176,16 +176,16 @@ test('computer dogs drift: at some bends, not for long, into the turn, with a bo
     assert.ok(seen.longest <= BOT_LEVELS[id].drift.seconds + 0.11, `${id}: never for long (${seen.longest.toFixed(2)} s)`);
     // (now and then it is moving across the road the other way for a step: the skid is still the bend's way)
     assert.ok(seen.rightWay > 3 * seen.wrongWay, `${id}: into the bend (${seen.rightWay} steps to ${seen.wrongWay})`);
-    assert.ok(!seen.tiers.has(3), `${id}: never as far as purple sparks`);
+    assert.ok([...seen.tiers].every(tier => tier <= 1), `${id}: blue sparks are the only ones`);
     assert.ok(seen.boosts + seen.walls <= seen.skids, id);
   }
   assert.ok(hard.skids > easy.skids, `a hard dog drifts more (${hard.skids} to ${easy.skids})`);
   assert.ok(hard.boosts > 0, 'and gets boosts from it');
   assert.ok(easy.walls + hard.walls > 0, 'some of them hit the wall');
-  // Ralph gets a bone's boost from his, as a player's Ralph does
-  const ralph = [1, 2, 3].map(seed => watch('ralph', 'hard', seed));
-  assert.ok(ralph.some(r => r.boosts > 0 && r.fastest > 1.2), `Ralph: ${ralph.map(r => r.fastest.toFixed(2))}`);
-  assert.ok(ralph.every(r => r.fastest <= 1.31), `never more than a bone gives: ${ralph.map(r => r.fastest.toFixed(2))}`);
+  // Ralph gets the super boost from his, as a player's Ralph does
+  const ralph = [1, 2, 3].map(seed => watch('ralph', 'hard', seed)), most = driftPerks('ralph').boost.speed;
+  assert.ok(ralph.some(r => r.boosts > 0 && r.fastest > 1.3), `Ralph: ${ralph.map(r => r.fastest.toFixed(2))}`);
+  assert.ok(ralph.every(r => r.fastest <= most + 0.01), `never more than the super boost gives: ${ralph.map(r => r.fastest.toFixed(2))}`);
   assert.ok(DRIFT_PERKS.ralph);
 });
 

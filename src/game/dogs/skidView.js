@@ -112,10 +112,16 @@ export class SkidView {
     this.effects?.update(delta);
   }
 
-  // Letting go into a boost: a burst of sparks
-  burst(tier) {
+  // Letting go into a boost: a burst of sparks.  big: the super boost
+  burst(tier, big = false) {
     this.effects ??= createDriftEffects(this.scene);
-    this.effects.burst({ group: this.avatar.group, size: this.avatar.config.scale, tier });
+    this.effects.burst({ group: this.avatar.group, size: this.avatar.config.scale, tier, big });
+  }
+
+  // While the boost lasts: a blue trail.  share: how much of it is left (0 to 1).  big: the super boost
+  trail(delta, share, big = false) {
+    this.effects ??= createDriftEffects(this.scene);
+    this.effects.trail(delta, { group: this.avatar.group, size: this.avatar.config.scale, big, share });
   }
 
   // In the slide: sat back a little, and let down until its paws are on the ground (folded legs are shorter),

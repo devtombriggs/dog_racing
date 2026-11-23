@@ -95,8 +95,7 @@ export class LocalDog extends DogAvatar {
     this.kick = null;               // a boost's first burst of speed, being fed in: { left (m/s still to give), rate (m/s a second) }
     this.yawRate = 0;               // how fast the dog is turning (radians a second, + left)
     this.driftBoostUntil = 0;       // the boost for letting go of a skid with sparks, until then
-    this.driftBoostTier = 0;
-    this.driftBoost = null;         // that boost: { speed, quick, easeOut } (shared/drift.js driftBoost)
+    this.driftBoost = null;         // that boost: { speed, quick, easeOut, seconds, super } (shared/drift.js driftBoost)
     this.wallAt = -1e9;             // when it last ran into a wall (shared/handling.js WALL)
     this.arrowHeld = { side: 0, seconds: 0 };   // which way the steering is held, and for how long (accessibility mode's own skid)
     this.skid = new SkidView(this, race.stage.scene);     // how a skid looks (and what the pug twins take their stack from)
@@ -371,10 +370,9 @@ export class LocalDog extends DogAvatar {
     if (drift) this.driftExitUntil = performance.now() + DRIFT_ARC.exitSeconds * 1000;      // EXITING: the steering comes back gently
     if (wipe) { this.driftBoostUntil = 0; this.kick = null; }
     if (!drift || !boost) return;
-    const tier = driftTier(drift.charge), earned = driftBoost(this.stats.drift, tier, this.driftPerks);
+    const tier = driftTier(drift.charge), earned = driftBoost(tier, this.driftPerks);
     if (!earned) return;
     this.driftBoostUntil = performance.now() + (earned.seconds + earned.easeOut) * 1000;
-    this.driftBoostTier = tier;
     this.driftBoost = earned;
     // (a Golden Bone's boost and a skid's do not add up: no kick on top of a bone)
     const boosted = this.sprintSpeed * earned.speed;
@@ -383,7 +381,7 @@ export class LocalDog extends DogAvatar {
       const give = Math.min(boosted - this.currentSpeed, this.sprintSpeed * (earned.speed - 1) * earned.kick);
       this.kick = { left: give, rate: give / DRIFT_ARC.kickSeconds, upTo: boosted };
     }
-    this.skid.burst(tier);
+    this.skid.burst(tier, earned.super);
   }
 
   // Run into a wall (shared/handling.js WALL).  into: metres it had gone into it this step.  ground: the share of
@@ -485,7 +483,7 @@ export class LocalDog extends DogAvatar {
     return this.launchFlight ? 94
       : this.padKick && performance.now() < this.padKick.until ? (this.padKick.mega ? 92 : 86)
       : performance.now() < this.launchBoostUntil || goldenBones.isBoosting() || specials.physics(this.id)?.speed ? 84
-      : performance.now() < this.driftBoostUntil ? 81 : 75;
+      : performance.now() < this.driftBoostUntil ? (this.driftBoost?.super ? 86 : 84) : 75;      // (a drift's boost: as a bone's, wider still for a super one)
   }
 
   update(delta) {
@@ -1097,6 +1095,11 @@ export class LocalDog extends DogAvatar {
         steer: this.steer * steeringFactor / Math.max(1, Math.abs(this.steer)), effort,
         tier: this.drift ? driftTier(this.drift.charge) : 0, speed: this.currentSpeed, spinning: performance.now() < this.stunUntil,
       });
+      // the boost out of a skid: a blue trail behind the dog while it lasts (a Golden Bone's is gold)
+      const boostLeft = (this.driftBoostUntil - performance.now()) / 1000;
+      if (boostLeft > 0 && this.driftBoost && !this.race.goldenBones.isBoosting()) {
+        this.skid.trail(delta, Math.min(1, boostLeft / this.driftBoost.easeOut), this.driftBoost.super);
+      }
 
       // Nose up the hills and down the far side (not while in the air)
       if (this.model) {
@@ -1167,9 +1170,9 @@ export class LocalDog extends DogAvatar {
     }
     if (this.drift) {
       const tier = driftTier(this.drift.charge);
-      hud.setSurface(['DRIFTING — HOLD IT…', 'DRIFT — BOOST READY!', 'DRIFT — SUPER BOOST READY!', 'DRIFT — ULTRA BOOST READY!'][tier], DRIFT_HUD_COLOURS[tier]);
+      hud.setSurface(tier ? (this.driftPerks.boost.super ? 'SUPER BOOST READY — LET GO!' : 'BOOST READY — LET GO!') : 'DRIFTING…', DRIFT_HUD_COLOURS[tier]);
     } else if (now < this.driftBoostUntil && !goldenBones.isBoosting()) {
-      hud.setSurface(['', 'DRIFT BOOST!', 'SUPER DRIFT BOOST!', 'ULTRA DRIFT BOOST!'][this.driftBoostTier], DRIFT_HUD_COLOURS[this.driftBoostTier]);
+      hud.setSurface(this.driftBoost?.super ? 'SUPER DRIFT BOOST!' : 'DRIFT BOOST!', DRIFT_HUD_COLOURS[1]);
     }
     if (!this.drift && !this.offTrack && downhillSpeed(this.stats, this.slope) > 1.08) hud.setSurface('DOWNHILL — WHEELS AWAY!', '#62ffe6');      // (Jimmy)
     if (!special && now - this.wallAt < 700) hud.setSurface('HIT THE WALL!', '#ff8a6a');

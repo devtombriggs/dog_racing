@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DRIFT, DRIFT_ARC, AUTO_DRIFT, autoDriftHeld, autoDriftCurvature, DRIFT_PERKS, driftPerks, driftCanStart, driftArc, driftCurvature, driftSteering, driftStep, driftChargeRate, driftTier, driftBoostSeconds, driftBoost, driftBoostNow, driftSpeedNow } from '../shared/drift.js';
+import { DRIFT, DRIFT_ARC, AUTO_DRIFT, autoDriftHeld, autoDriftCurvature, DRIFT_PERKS, driftPerks, driftCanStart, driftArc, driftCurvature, driftSteering, driftStep, driftChargeRate, driftTier, driftBoost, DRIFT_BOOST, SUPER_DRIFT_BOOST, driftBoostNow, driftSpeedNow } from '../shared/drift.js';
 import { DOG_STATS } from '../shared/dogStats.js';
 import { BONE_BOOST } from '../shared/items.js';
 
@@ -131,26 +131,26 @@ test('drift: steering into the drift charges the sparks faster; steering out cha
   assert.equal(driftChargeRate(7, 1), 1);
 });
 
-test('drift: no sparks at first, then three colours of them, and a longer boost for each', () => {
-  assert.deepEqual([0, 0.79, 0.8, 1.79, 1.8, 2.99, 3, 9].map(driftTier), [0, 0, 1, 1, 2, 2, 3, 3]);
-  assert.equal(driftBoostSeconds(7, 0), 0, 'let go too soon: nothing');
-  assert.equal(driftBoostSeconds(7, 1), DRIFT.boostSeconds[0]);
-  assert.equal(driftBoostSeconds(7, 2), DRIFT.boostSeconds[1]);
-  assert.equal(driftBoostSeconds(7, 3), DRIFT.boostSeconds[2]);
-  assert.ok(DRIFT.boostSeconds[0] < DRIFT.boostSeconds[1] && DRIFT.boostSeconds[1] < DRIFT.boostSeconds[2]);
-  assert.equal(driftBoostNow(1), DRIFT.boostSpeed);
+test('drift: no sparks at first, then blue (the only colour), and letting go on blue is a Golden Bone\'s boost', () => {
+  assert.deepEqual([0, 0.39, 0.4, 3, 9].map(driftTier), [0, 0, 1, 1, 1]);
+  assert.equal(driftBoost(0), null, 'let go too soon: nothing');
+  const blue = driftBoost(1);
+  assert.deepEqual([blue.speed, blue.seconds, blue.quick, blue.kick, blue.easeOut, blue.super],
+    [BONE_BOOST.speedMultiplier, BONE_BOOST.duration, BONE_BOOST.accelerationMultiplier, BONE_BOOST.instantKick, BONE_BOOST.easeOut, false]);
+  assert.equal(driftBoostNow(1), BONE_BOOST.speedMultiplier);
   assert.equal(driftBoostNow(0), 1);
-  assert.ok(driftBoostNow(DRIFT.easeOut / 2) > 1 && driftBoostNow(DRIFT.easeOut / 2) < DRIFT.boostSpeed, 'it fades out');
-  assert.ok(DRIFT.boostSpeed < BONE_BOOST.speedMultiplier && DRIFT.boostSeconds[2] < BONE_BOOST.duration, 'weaker than a Golden Bone');
+  assert.ok(driftBoostNow(BONE_BOOST.easeOut / 2) > 1 && driftBoostNow(BONE_BOOST.easeOut / 2) < BONE_BOOST.speedMultiplier, 'it fades out');
+  // blue in about half a second for a dog of Drift 7 steering into the skid (it was about a second)
+  assert.ok(DRIFT.tiers[0] / driftChargeRate(7, 1) <= 0.5);
 });
 
 test('drift: every dog has a Drift rating, and no faster dog is a better drifter than a slower one', () => {
   const dogs = Object.entries(DOG_STATS);
   for (const [id, stats] of dogs) assert.ok(stats.drift >= 1 && stats.drift <= 10, id);
   for (const [a, x] of dogs) for (const [b, y] of dogs) if (x.speed > y.speed) assert.ok(x.drift <= y.drift, `${a} is faster than ${b}`);
-  // Ralph, the slowest, gets his sparks soonest and the longest boost; Meela, the fastest, the reverse
+  // Ralph, the slowest, gets his sparks soonest; Meela, the fastest, latest
   const { ralph, second_dog: meela } = DOG_STATS;
-  assert.ok(driftChargeRate(ralph.drift, 1) > 1.25 * driftChargeRate(meela.drift, 1) && driftBoostSeconds(ralph.drift, 3) > 1.4 * driftBoostSeconds(meela.drift, 3));
+  assert.ok(driftChargeRate(ralph.drift, 1) > 1.25 * driftChargeRate(meela.drift, 1));
 });
 
 test('drift: in the slide the tail wags and the head moves, and neither winds up over time', async () => {
@@ -174,9 +174,9 @@ test('drift: in the slide the tail wags and the head moves, and neither winds up
   assert.deepEqual(skidSway(1.23, 0, life).tail1.map(Math.abs), [0, 0]);
 });
 
-test('drift: Enzo, Ralph and the pug twins get more from a skid: a little faster, tighter and wider steering, sparks sooner', async () => {
+test('drift: Enzo, Ralph, the pug twins and Jimmy get more from a skid: a little faster, tighter and wider steering, sparks sooner', async () => {
   assert.deepEqual(Object.keys(DRIFT_PERKS).sort(), ['baz_naz', 'enzo', 'jimmy', 'ralph']);
-  assert.deepEqual(driftPerks('gsp'), { speed: DRIFT.speed, control: 1, charge: 1, boost: null });
+  assert.deepEqual(driftPerks('gsp'), { speed: DRIFT.speed, control: 1, charge: 1, boost: DRIFT_BOOST });
   for (const dog of Object.keys(DRIFT_PERKS)) {
     const perk = driftPerks(dog);
     assert.ok(perk.speed > DRIFT.speed && perk.speed <= 1.15, `${dog}: slightly faster than any dog in a skid, no more`);
@@ -195,21 +195,17 @@ test('drift: Enzo, Ralph and the pug twins get more from a skid: a little faster
   for (const id of ['gsp', 'second_dog', 'black_lab', 'pablo', 'rocky', 'kombu', 'jazz', 'casper']) assert.ok(DOGS[id].skid.bend && !DOGS[id].skid.board && !DOGS[id].skid.stack && !DOGS[id].skid.drop, `${id}: the crouch`);
 });
 
-test('drift: for Enzo, Ralph and the twins, letting go on blue sparks is a Golden Bone\'s boost; the other dogs get the short one', () => {
+test('drift: for Enzo, Ralph, the twins and Jimmy, blue comes almost at once and letting go is a super boost; the other dogs get a bone\'s', () => {
   for (const dog of Object.keys(DRIFT_PERKS)) {
     const perks = driftPerks(dog), stat = DOG_STATS[dog].drift;
-    assert.equal(driftBoost(stat, 0, perks), null, 'nothing before the sparks');
-    const blue = driftBoost(stat, 1, perks);
-    assert.deepEqual([blue.speed, blue.seconds, blue.quick, blue.kick, blue.easeOut],
-      [BONE_BOOST.speedMultiplier, BONE_BOOST.duration, BONE_BOOST.accelerationMultiplier, BONE_BOOST.instantKick, BONE_BOOST.easeOut], `${dog}: a bone's boost`);
-    assert.ok(driftBoost(stat, 2, perks).seconds > blue.seconds && driftBoost(stat, 3, perks).seconds > driftBoost(stat, 2, perks).seconds, 'longer for orange and purple');
-    assert.equal(driftBoostNow(1, blue.speed, blue.easeOut), BONE_BOOST.speedMultiplier);
-    // and their sparks are blue in well under a second, steering into the skid
-    assert.ok(DRIFT.tiers[0] / driftChargeRate(stat, 1, perks.charge) < 0.5, `${dog}: blue in ${(DRIFT.tiers[0] / driftChargeRate(stat, 1, perks.charge)).toFixed(2)} s`);
+    assert.equal(driftBoost(0, perks), null, 'nothing before the sparks');
+    const blue = driftBoost(1, perks);
+    assert.ok(blue.super && blue.speed > BONE_BOOST.speedMultiplier && blue.seconds > BONE_BOOST.duration, `${dog}: more than a bone`);
+    assert.equal(driftBoostNow(1, blue.speed, blue.easeOut), blue.speed);
+    const wait = DRIFT.tiers[0] / driftChargeRate(stat, 1, perks.charge);
+    assert.ok(wait < 0.2, `${dog}: blue in ${wait.toFixed(2)} s`);
   }
-  const pippa = driftBoost(DOG_STATS.gsp.drift, 1, driftPerks('gsp'));
-  assert.deepEqual([pippa.speed, pippa.seconds], [DRIFT.boostSpeed, driftBoostSeconds(DOG_STATS.gsp.drift, 1)]);
-  assert.ok(pippa.speed < BONE_BOOST.speedMultiplier && pippa.seconds < BONE_BOOST.duration);
+  for (const dog of ['gsp', 'second_dog', 'casper']) assert.deepEqual(driftBoost(1, driftPerks(dog)), DRIFT_BOOST, `${dog}: a bone's boost`);
 });
 
 test('hitting a wall costs speed: a fifth of it for a brush, three quarters straight in, and a dog against one is held under its pace', async () => {
@@ -257,6 +253,6 @@ test('drift: a skid is a little faster than flat out from the start, and builds 
   assert.equal(driftSpeedNow(0), DRIFT.speed);
   assert.ok(driftSpeedNow(1.5) > driftSpeedNow(0.5) && driftSpeedNow(0.5) > driftSpeedNow(0), 'builds');
   assert.equal(driftSpeedNow(DRIFT.speedSeconds), driftSpeedNow(10), 'then holds');
-  assert.ok(driftSpeedNow(10) < DRIFT.boostSpeed, 'never as fast as the boost out of it');
+  assert.ok(driftSpeedNow(10) < DRIFT_BOOST.speed && driftSpeedNow(10, slow) < SUPER_DRIFT_BOOST.speed, 'never as fast as the boost out of it');
   assert.ok(driftSpeedNow(1, slow) > driftSpeedNow(1, plain), 'a slow dog stays ahead of the rest');
 });

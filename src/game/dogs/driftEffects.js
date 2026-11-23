@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 
-// What a skid throws up: the dust it kicks out, sparks at the dog's back paws once the skid is worth
-// a boost (blue, then orange, then purple), and a burst of both when it lets go into that boost.
+// What a skid throws up: the dust it kicks out, blue sparks at the dog's back paws once the skid is worth
+// a boost (the only colour: Tom, 2026-11-23), a burst of both when it lets go into that boost, and a blue
+// trail behind the dog while the boost lasts (as a Golden Bone's golden one).
 
-const SPARKS = 160, DUST = 70;
-export const DRIFT_COLOURS = [0xfff3c4, 0x58b8ff, 0xff9a2e, 0xc070ff];     // by tier: none yet, blue, orange, purple
-export const DRIFT_HUD_COLOURS = ['#e8e2d0', '#7cc8ff', '#ffb055', '#d39bff'];
+const SPARKS = 320, DUST = 70;
+export const DRIFT_COLOURS = [0xfff3c4, 0x3fa9ff];     // by tier: none yet, blue
+export const DRIFT_HUD_COLOURS = ['#e8e2d0', '#6cc4ff'];
+const SUPER_COLOUR = 0x8fd8ff;                          // (the super boost's trail: a paler, brighter blue among the blue)
 
 // Round dots that fly, fall and fade, each with its own colour, size and opacity.
 // glow: drawn as light (sparks); otherwise as kicked-up dirt.  grow: how much bigger a dot is at the end of its life
@@ -82,10 +84,10 @@ export function pool(scene, count, material, { gravity, drag }) {
 }
 
 export function createDriftEffects(scene) {
-  const sparks = pool(scene, SPARKS, dotMaterial({ size: 0.2, glow: true, grow: -0.5, opacity: 1 }), { gravity: 9, drag: 1.2 });
+  const sparks = pool(scene, SPARKS, dotMaterial({ size: 0.26, glow: true, grow: -0.5, opacity: 1 }), { gravity: 9, drag: 1.2 });
   const dust = pool(scene, DUST, dotMaterial({ size: 0.55, glow: false, grow: 2.2, opacity: 0.4 }), { gravity: -0.5, drag: 2.5 });
   const at = new THREE.Vector3(), speed = new THREE.Vector3();
-  let owedSparks = 0, owedDust = 0;
+  let owedSparks = 0, owedDust = 0, owedTrail = 0;
   const rnd = spread => (Math.random() - 0.5) * 2 * spread;
 
   // Where the back paws are: behind the dog's middle and out to the side its back end has swung to
@@ -97,10 +99,10 @@ export function createDriftEffects(scene) {
   }
 
   return {
-    // Every frame of a skid.  tier: 0 (dust only) to 3.  pace: the dog's speed (m/s)
+    // Every frame of a skid.  tier: 0 (dust only) or 1 (blue: the boost is ready).  pace: the dog's speed (m/s)
     skid(delta, { group, side, size, tier, pace }) {
       const yaw = group.rotation.y, lx = Math.cos(yaw), lz = -Math.sin(yaw), fx = Math.sin(yaw), fz = Math.cos(yaw);
-      owedSparks = tier === 0 ? 0 : owedSparks + delta * (30 + tier * 30);
+      owedSparks = tier === 0 ? 0 : owedSparks + delta * 120;
       owedDust += delta * 22;
       for (; owedSparks >= 1; owedSparks--) {
         paws(group, side, size, Math.random() < 0.5 ? -1 : 1);
@@ -115,18 +117,29 @@ export function createDriftEffects(scene) {
         dust.emit(at, speed, 0.5 + Math.random() * 0.4, 0xb8a78c);
       }
     },
-    // Letting go into a boost: a ring of sparks out from under the dog
-    burst({ group, size, tier }) {
-      for (let i = 0; i < 26 + tier * 14; i++) {
+    // Letting go into a boost: a ring of sparks out from under the dog (more for the super boost)
+    burst({ group, size, tier, big = false }) {
+      for (let i = 0; i < (big ? 110 : 70); i++) {
         const angle = Math.random() * Math.PI * 2, push = 3 + Math.random() * 4;
         at.set(group.position.x, group.position.y + 0.1, group.position.z);
         speed.set(Math.cos(angle) * push, 1.5 + Math.random() * 3, Math.sin(angle) * push);
-        sparks.emit(at, speed, 0.3 + Math.random() * 0.35, DRIFT_COLOURS[tier]);
+        sparks.emit(at, speed, 0.3 + Math.random() * 0.35, big && i % 3 === 0 ? SUPER_COLOUR : DRIFT_COLOURS[tier]);
       }
       for (let i = 0; i < 10; i++) {
         at.set(group.position.x + rnd(0.3 * size), group.position.y + 0.1, group.position.z + rnd(0.3 * size));
         speed.set(rnd(2), 0.8 + Math.random(), rnd(2));
         dust.emit(at, speed, 0.7, 0xb8a78c);
+      }
+    },
+    // Every frame of the boost: blue sparks streaming off behind the dog.  share: how much of the boost is left (0 to 1)
+    trail(delta, { group, size, big = false, share = 1 }) {
+      owedTrail += delta * (big ? 90 : 60) * share;
+      const yaw = group.rotation.y, fx = Math.sin(yaw), fz = Math.cos(yaw);
+      for (; owedTrail >= 1; owedTrail--) {
+        const back = -(0.15 + Math.random() * 0.3) * size;
+        at.set(group.position.x + fx * back + rnd(0.15 * size), group.position.y + (0.05 + Math.random() * 0.35) * size, group.position.z + fz * back + rnd(0.15 * size));
+        speed.set(-fx * 2 + rnd(0.7), 0.4 + Math.random() * 1.2, -fz * 2 + rnd(0.7));
+        sparks.emit(at, speed, 0.25 + Math.random() * 0.25, big && Math.random() < 0.4 ? SUPER_COLOUR : DRIFT_COLOURS[1]);
       }
     },
     update(delta) { sparks.update(delta); dust.update(delta); },

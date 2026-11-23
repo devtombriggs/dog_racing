@@ -351,7 +351,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
         skid = skidBoost = null;
       } else if (Math.abs(bend) < BEND * 0.6 || time >= skid.until) {
         // out of the bend (or it has held it as long as it dares): let go
-        const earned = driftBoost(stats.drift, driftTier(skid.charge), perks);
+        const earned = driftBoost(driftTier(skid.charge), perks);
         if (earned && boneUntil <= time) {                 // (a Golden Bone's boost and a skid's do not add up)
           skidBoost = { ...earned, until: time + earned.seconds + earned.easeOut };
           if (speed > 0 && speed < sprintSpeed * earned.speed) speed = Math.min(sprintSpeed * earned.speed, speed + sprintSpeed * (earned.speed - 1) * earned.kick);
