@@ -1,4 +1,4 @@
-# Dog Racing (Zoomies Racing)
+# Dog Racing (Zoomie Racers)
 
 Choose **Wendover Woods**, **Frostpeak Alpine Circuit**, **Treat Road** or **Modbury Heights** from the main menu, then start Single Player or Host Game. Multiplayer guests use the host's map. The host can change maps in the lobby; chosen dogs stay ready.
 
@@ -313,11 +313,11 @@ New in the builder for these:
 
 Tests: `tests/grand-prix-4.test.js`. Map cards: `public/maps/<id>.jpg`. These four have no music of their own yet: each borrows another map's (`src/audio/GameAudio.js`).
 
-## Menus (the Zoomies Racing look)
+## Menus (the Zoomie Racers look)
 
 The home screen, dog select, map select and vote, join and split-screen join share one look (`src/ui/menu.css`): blue sky, Lilita One lettering (`public/fonts/`, SIL Open Font License) and glossy yellow and blue buttons drawn in CSS (`.zr-btn`).
 
-- **Home** (`MenuScreen.jsx`): the picture is `public/ui/home.webp`, made from `../Zoomies Racing Main Menu.png`. That picture has its buttons painted in, so the real name box and buttons are placed in parts of the picture's width (`cqw`) to sit exactly over the painted ones; the painted corner buttons and server pill are painted out by the script below. **A clean picture with no buttons would replace `home.webp` and needs no other change.** Single Player and Multiplayer only for now (the painted Grand Prix and Maps buttons are painted out too; `startSinglePlayer('maps')` still opens the map screen on the Maps tab if a button for it comes back). The gear is full screen and accessibility mode; the controller lists the controls.
+- **Home** (`MenuScreen.jsx`): the picture is `public/ui/home.webp`, made from `../Zoomie Racers_ Paws in Motion.png` (logo and dogs, no buttons painted in); the name box and buttons are drawn over it, placed in parts of the picture's width (`cqw`). The round logo (`../Zoomie Racers Logo with Happy Pointer-2.png`, its painted checkerboard cut away) becomes `public/ui/logo.webp` and the tab icons `favicon-32.png`, `favicon-192.png` and `apple-touch-icon.png`. Single Player and Multiplayer only for now (the painted Grand Prix and Maps buttons are painted out too; `startSinglePlayer('maps')` still opens the map screen on the Maps tab if a button for it comes back). The gear is full screen and accessibility mode; the controller lists the controls.
 - **Dog select** (`DogSelectScreen.jsx`): a box of square portraits and a Random tile; the dog highlighted is shown beside it with its stats and special (`SPECIAL_WORDS` in that file: add a line for a new dog).
 - **Map screen** (`MapScreen.jsx`): two tabs. Maps is a box of the square icons (`public/maps/icons/<id>.webp`); Grand Prix is four boxes, each holding its four maps' icons. The side box describes whatever is highlighted.
 - **Highlight and choose** (`tileGrid.js`): pointing with a mouse highlights and a click chooses; on a touch screen the first tap highlights and a second tap, or the button in the side box, chooses; arrow keys move, Enter chooses.

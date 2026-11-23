@@ -5,7 +5,7 @@ import { env } from 'node:process';
 import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { SLALOM, slalomHits } from '../shared/slalom.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
-import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, COLLAR, ITEM_IDS } from '../shared/items.js';
+import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
 import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, quakeSeconds, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
@@ -365,11 +365,25 @@ function grantItem(room, player) {
   const place = standings.find((entry) => entry.playerId === player.id)?.place ?? 1;
   // the dog's own special: never for the leader, more likely the further back (shared/specials.js)
   const special = specialFor(player.dog) && (ALWAYS_SPECIAL || Math.random() < specialChance(place, standings.length));
-  player.item = FORCE_ITEM ?? (special ? SPECIAL_ITEM : rollItem(place, standings.length));
+  player.item = FORCE_ITEM ?? (special ? SPECIAL_ITEM : rollItem(place, standings.length, Math.random, { noFirework: !fireworkAllowed(room) }));
+  if (player.item === 'firework' && !FORCE_ITEM) room.fireworksGiven = (room.fireworksGiven ?? 0) + 1, room.fireworkGivenAt = Date.now();
   io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item });
 }
 
+// May a Treat Box give a firework just now?  (shared/items.js FIREWORK_LIMIT: once or twice a race, like Mario Kart's blue shell)
+function fireworkAllowed(room) {
+  const now = Date.now();
+  if (!room.startedAt || now - room.startedAt < FIREWORK_LIMIT.notBeforeMs) return false;
+  if ((room.fireworksGiven ?? 0) >= FIREWORK_LIMIT.perRace) return false;
+  if (room.fireworkGivenAt && now - room.fireworkGivenAt < FIREWORK_LIMIT.cooldownMs) return false;
+  for (const p of room.players.values()) if (p.item === 'firework') return false;
+  for (const f of room.fireworks?.values() ?? []) if (f.fromBox) return false;
+  return true;
+}
+
 function resetItems(room) {
+  room.fireworksGiven = 0;
+  room.fireworkGivenAt = null;
   stopFrisbees(room);
   stopFireworks(room);
   stopSheep(room);
@@ -434,7 +448,7 @@ function useItem(room, player) {
     throwFrisbee(room, player);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
   } else if (item === 'firework') {
-    launchFirework(room, player);
+    launchFirework(room, player, { fromBox: true });
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
   } else if (item === 'collar') {
     // the golden shield: see hitPlayer for what it stops
@@ -768,14 +782,15 @@ function fireworkTarget(room, ownerId, orBehind = false) {
 const fireworkTurnsBack = (room, f) => Boolean(f.orBehind && raceStandings(room).find(entry => !entry.finished)?.playerId === f.owner);
 
 // look: what it is drawn as, where that is not a rocket ('rugby': the ball Casper passes at the end of his Try Time)
-function launchFirework(room, player, { orBehind = false, look = null } = {}) {
+// fromBox: lit from a Treat Box (not Jimmy's or Casper's), so it counts towards FIREWORK_LIMIT's one at a time
+function launchFirework(room, player, { orBehind = false, look = null, fromBox = false } = {}) {
   const route = fireworkRoute(room.mapId);
   if (!route) return;
   const forward = forwardOf(player.rotation);
   const [x, y, z] = player.position;
   const firework = {
     id: `firework-${room.nextItemId++}`, owner: player.id, target: fireworkTarget(room, player.id, orBehind), firedAt: Date.now(), orBehind,
-    s: route.sAt(player.position) + FIREWORK.launchAhead, homing: false, passed: new Set(), look,
+    s: route.sAt(player.position) + FIREWORK.launchAhead, homing: false, passed: new Set(), look, fromBox,
     position: [x + forward[0] * FIREWORK.launchAhead, y + FIREWORK.height, z + forward[2] * FIREWORK.launchAhead], yaw: player.rotation
   };
   firework.homing = fireworkTurnsBack(room, firework);

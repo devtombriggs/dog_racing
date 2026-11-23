@@ -10,7 +10,7 @@ import { account } from '../session/account.js';
 //   Single Player   (Tom, 2026-11-19: no Grand Prix or Maps buttons here for now)
 //   Multiplayer  ->  sign in or give a guest name; then host a game, join one, or split screen
 //   Leaderboards
-// The picture behind (public/ui/home.webp) has the buttons painted into it; the real ones sit exactly over them.
+// The picture behind (public/ui/home.webp) has the logo and dogs but no buttons; the buttons here are drawn over it.
 const ICONS = {
   flags: <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#fff" stroke="#14224f" strokeWidth="2.500" strokeLinejoin="round" d="M6 8l16 4-3 14-16-4zM42 8l-16 4 3 14 16-4z" /><path fill="#14224f" d="M9 10.500l5 1.200-1 4.600-5-1.200zm9 6.800l-1 4.600-5-1.200 1-4.600zM39 10.500l-5 1.200 1 4.600 5-1.200zm-9 6.800l1 4.600 5-1.200-1-4.600z" /><path stroke="#14224f" strokeWidth="3" strokeLinecap="round" d="M20 26l8 16M28 26l-8 16" /></svg>,
   people: <svg viewBox="0 0 48 48" aria-hidden="true"><g fill="#fff" stroke="#14224f" strokeWidth="2.500" strokeLinejoin="round"><circle cx="11" cy="17" r="5" /><circle cx="37" cy="17" r="5" /><path d="M2 36c0-6 4-10 9-10s9 4 9 10zM28 36c0-6 4-10 9-10s9 4 9 10z" /><circle cx="24" cy="15" r="7" /><path d="M11 40c0-8 6-13 13-13s13 5 13 13z" /></g></svg>,
@@ -105,7 +105,7 @@ export function MenuScreen({ session, state }) {
     <main className="zr-home">
       <div className="zr-home__blur" aria-hidden="true" />
       <div className="zr-home__stage">
-        <h1 style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}>Zoomies Racing</h1>
+        <h1 style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}>Zoomie Racers</h1>
         {error && <p className="zr-home__error" role="alert">{error}</p>}
 
         {!multiplayer ? (
@@ -116,22 +116,18 @@ export function MenuScreen({ session, state }) {
           </div>
         ) : (
           <>
-            <div className="zr-home__who">
-              {user ? (
-                <p className="zr-home__as">{ICONS.person}<span>Welcome, <b>{user.username}</b></span></p>
-              ) : (
-                <>
-                  <label className="zr-home__name">
-                    {ICONS.person}
-                    <input ref={nameBox} value={guestName} onChange={event => { account.setGuestName(event.target.value); setNameProblem(''); }}
-                      maxLength={24} placeholder="Enter a guest name..." aria-label="Guest name" autoComplete="nickname" />
-                  </label>
-                  <span className="zr-home__or">or</span>
-                  <button className="zr-btn zr-btn--purple zr-home__signin" onClick={() => openAccount('signin')}>Sign In</button>
-                </>
-              )}
-              {nameProblem && <p className="zr-home__problem" role="alert">{nameProblem}</p>}
-            </div>
+            {!user && (
+              <div className="zr-home__who">
+                <label className="zr-home__name">
+                  {ICONS.person}
+                  <input ref={nameBox} value={guestName} onChange={event => { account.setGuestName(event.target.value); setNameProblem(''); }}
+                    maxLength={24} placeholder="Enter a guest name..." aria-label="Guest name" autoComplete="nickname" />
+                </label>
+                <span className="zr-home__or">or</span>
+                <button className="zr-btn zr-btn--purple zr-home__signin" onClick={() => openAccount('signin')}>Sign In</button>
+                {nameProblem && <p className="zr-home__problem" role="alert">{nameProblem}</p>}
+              </div>
+            )}
             <div className="zr-home__menu">
               <button className="zr-btn zr-btn--yellow" data-pad-first="" disabled={!connected} onClick={named(session.hostGame)}>Host Game</button>
               <button className="zr-btn" disabled={!connected} onClick={named(session.openJoinScreen)}>Join Game</button>

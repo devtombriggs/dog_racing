@@ -56,11 +56,11 @@ export const SPECIALS = {
   // (shared/firework.js), so it knocks over any dog it passes on the way.  If Casper is leading, it has nobody to go for
   casper: { kind: 'rugby', name: 'Try Time', durationMs: 6000, speed: 1.5, hitRadius: 2.0, reach: 1.5, pass: true },
   // (steerLocked: the special steers the dog up the road by itself, weaving `wander` of the half width to each side)
-  // Jimmy: a dragon for `durationMs` from last place (far enough at this speed to cover what Poppy's wave covers), and
-  // `lessPerPlaceMs` less for every place nearer the front; `fireworks`: how many he sends after the leader from last
-  // place, how far apart, and how many fewer for each place nearer the front (dragonFireworks below).  They are the
+  // Jimmy: a dragon for `durationMs` from last place (at this speed a bit further than Poppy's wave goes), and
+  // `lessPerPlaceMs` less for every place nearer the front; `fireworks`: how many he sends after the leader from the
+  // back half of the field, how far apart, and `front` from the front half (dragonFireworks below).  They are the
   // Treat Box firework (shared/firework.js, FIREWORK in shared/items.js) in every way but who lights them
-  jimmy: { kind: 'dragon', name: 'Dragon Dance', durationMs: 7000, lessPerPlaceMs: 1000, speed: 1.6, fireworks: { count: 5, everyMs: 2000, lessPerPlace: 1 } },
+  jimmy: { kind: 'dragon', name: 'Dragon Dance', durationMs: 7000, lessPerPlaceMs: 1000, speed: 1.8, fireworks: { count: 2, front: 1, everyMs: 2000 } },
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true, wander: 0.5 },
 };
 
@@ -173,9 +173,10 @@ export function specialDurationMs(spec, place, racers) {
   return spec.lessPerPlaceMs ? Math.max(3000, spec.durationMs - spec.lessPerPlaceMs * Math.max(0, racers - place)) : spec.durationMs;
 }
 
-/** How many fireworks Jimmy's Dragon Dance sends, used from this place (1 = leading) in a race of this many dogs: never fewer than one */
+/** How many fireworks Jimmy's Dragon Dance sends, used from this place (1 = leading) in a race of this many dogs: `count` from the back half, `front` nearer the front */
 export function dragonFireworks(spec, place, racers) {
-  return spec?.fireworks ? Math.max(1, spec.fireworks.count - spec.fireworks.lessPerPlace * Math.max(0, racers - place)) : 0;
+  if (!spec?.fireworks) return 0;
+  return place > racers / 2 ? spec.fireworks.count : spec.fireworks.front;
 }
 
 export function specialFor(dog) {

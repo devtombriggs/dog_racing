@@ -23,8 +23,13 @@ test('fireworks and golden collars: never for the leader; a firework is likelier
   }
   const fireworks = [2, 3, 4, 5].map(p => itemOdds(p, 5).firework);
   assert.ok(fireworks.every((f, i) => i === 0 || f > fireworks[i - 1]), `rising with place: ${fireworks}`);
-  assert.ok(Math.abs(fireworks[0] - 0.04) < 1e-9 && Math.abs(fireworks[3] - 0.12) < 1e-9, '4 % in 2nd, 12 % in last');
-  assert.ok(Math.abs(itemOdds(2, 2).firework - 0.12) < 1e-9, '2nd of two is last');
+  assert.ok(Math.abs(fireworks[0] - 0.02) < 1e-9 && Math.abs(fireworks[3] - 0.06) < 1e-9, '2 % in 2nd, 6 % in last');
+  assert.ok(Math.abs(itemOdds(2, 2).firework - 0.06) < 1e-9, '2nd of two is last');
+  // while a firework is not allowed (FIREWORK_LIMIT), a box never gives one and still gives something
+  for (let i = 0; i < 200; i++) {
+    const item = rollItem(5, 5, () => i / 200, { noFirework: true });
+    assert.ok(item && item !== 'firework', item);
+  }
   for (const p of [2, 3, 5]) assert.ok(Math.abs(itemOdds(p, 5).collar - 0.1) < 1e-9, 'a collar is 10 % for everyone behind the leader');
 });
 
@@ -242,15 +247,15 @@ test('Jimmy: under Ralph all round, Meela\'s speed downhill; his Dragon Dance sc
   const part = downhillSpeed(jimmy, -(DOWNHILL.from + DOWNHILL.full) / 2);
   assert.ok(part > 1 && part < downhillSpeed(jimmy, -DOWNHILL.full));
   for (const [id, dog] of Object.entries(DOG_STATS)) if (id !== 'jimmy') assert.equal(downhillSpeed(dog, -0.3), 1, `${id} has no such thing`);
-  // the dragon: seven seconds and five fireworks from last, a second and a firework less for each place nearer the front
+  // the dragon: seven seconds from last and a second less for each place nearer the front; two fireworks from the back half, one from the front
   const dragon = SPECIALS.jimmy;
   assert.equal(dragon.kind, 'dragon');
   assert.deepEqual([6, 5, 4, 3, 2].map(place => specialDurationMs(dragon, place, 6)), [7000, 6000, 5000, 4000, 3000]);
-  assert.deepEqual([6, 5, 4, 3, 2, 1].map(place => dragonFireworks(dragon, place, 6)), [5, 4, 3, 2, 1, 1]);
-  assert.deepEqual([specialDurationMs(dragon, 2, 2), dragonFireworks(dragon, 2, 2)], [7000, 5], 'last of two is last');
+  assert.deepEqual([6, 5, 4, 3, 2, 1].map(place => dragonFireworks(dragon, place, 6)), [2, 2, 2, 1, 1, 1]);
+  assert.deepEqual([specialDurationMs(dragon, 2, 2), dragonFireworks(dragon, 2, 2)], [7000, 2], 'last of two is last');
   assert.equal(dragon.fireworks.everyMs, 2000);
   assert.equal(dragonFireworks(SPECIALS.ralph, 6, 6), 0);
-  // ...and from last place it carries him about as far as Poppy's wave carries her
+  // ...and from last place it carries him a bit further than Poppy's wave carries her
   const metres = top(jimmy) * dragon.speed * dragon.durationMs / 1000;
-  assert.ok(Math.abs(metres - KELP.distance) < 5, `${metres} m against Poppy's ${KELP.distance}`);
+  assert.ok(metres > KELP.distance && metres < KELP.distance * 1.25, `${metres} m against Poppy's ${KELP.distance}`);
 });

@@ -1,5 +1,5 @@
-// On a TV, in the Fire TV / Android TV app (android/: a full-screen web view of this page, whose user agent says
-// "ZoomiesTV").  The app sends the remote's Back and Menu buttons here (window.zoomiesTv); the remote's arrows move
+// On a TV, in a TV app showing this page in a full-screen web view whose user agent says "ZoomiesTV" (the Fire TV
+// app was taken out 2026-11-23; it is in git history).  The app sends the remote's Back and Menu buttons here (window.zoomiesTv); the remote's arrows move
 // round the menus as a controller's D-pad does (ui/menuPad.js), and the middle button presses what is highlighted.
 // The frame rate shows at the top (also anywhere with ?fps=1 in the address).  ?tv=1 tries all this on a computer.
 import { menuMove } from './ui/menuPad.js';

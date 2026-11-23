@@ -6,7 +6,8 @@ services:
       dockerfile: Dockerfile
     container_name: dog-racing-frontend
     ports:
-      - "8080:80"
+      # FRONTEND_PORT in .env: on the server 127.0.0.1:8088 (only nginx on the same machine can reach it)
+      - "${FRONTEND_PORT:-8080}:80"
     depends_on:
       - backend
     restart: unless-stopped

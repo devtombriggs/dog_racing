@@ -7,7 +7,7 @@ import { FROSTPEAK_CANNON } from '../shared/frostpeakCannon.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 import { FARMYARD as FARM } from '../shared/farmData.js';
 import { TREAT_BOXES, TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS } from '../shared/treatBoxes.js';
-import { forwardOf } from '../shared/items.js';
+import { forwardOf, FIREWORK_LIMIT } from '../shared/items.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { BURROWS, BURROW_CHECKPOINTS } from '../shared/burrows.js';
 
@@ -842,7 +842,7 @@ test('red frisbee: gives up after its time if it cannot reach its target', conte
   tom.call('startRace'); tom.call('raceLoaded'); berri.call('raceLoaded');
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
   const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
-  context.mock.method(Math, 'random', () => 0.7);          // 2nd of 2 is last: frisbee from 62 % to 78 %
+  context.mock.method(Math, 'random', () => 0.75);         // 2nd of 2 is last, and no firework this early: frisbee from 71 % to 89 %
   { const cp = MAPS.wendover.checkpoints[0]; tom.call('playerMove', { position: [cp.x, cp.y, cp.z], rotation: 0, animation: 'Run' }); }      // (Tom leads)
   berri.call('playerMove', { position: boxes[0].groundPosition, rotation: 0, animation: 'Run' });
   assert.equal(events('itemChanged').at(-1).item, 'frisbee');
@@ -854,6 +854,37 @@ test('red frisbee: gives up after its time if it cannot reach its target', conte
   context.mock.timers.tick(6100);
   assert.deepEqual(events('frisbeeGone').map(e => e.id), [thrown.id], 'it gives up');
   assert.equal(events('frisbeeHit').length, 0);
+  for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+test('firework: once or twice a race, like Mario Kart\'s blue shell: not early, one at a time, a cooldown, two at most', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' });
+  tom.call('startRace'); tom.call('raceLoaded'); berri.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const cp = map.checkpoints[0];
+  berri.call('playerMove', { position: [cp.x, cp.y ?? 0, cp.z], rotation: 0, animation: 'Run' });     // (Berri leads)
+  context.mock.method(Math, 'random', () => 0.87);         // 2nd of 2: a firework whenever one is allowed
+  const box = () => {
+    tom.call('playerMove', { position: boxes[0].groundPosition, rotation: 0, animation: 'Run' });
+    const item = events('itemChanged').filter(e => e.playerId === tom.id).at(-1)?.item;
+    tom.call('useItem');
+    context.mock.timers.tick(TREAT_BOX_RESPAWN_MS + 100);
+    return item;
+  };
+  assert.notEqual(box(), 'firework', 'not in the first 20 s');
+  context.mock.timers.tick(FIREWORK_LIMIT.notBeforeMs);
+  assert.equal(box(), 'firework');
+  assert.notEqual(box(), 'firework', 'not again so soon');
+  context.mock.timers.tick(FIREWORK_LIMIT.cooldownMs);
+  assert.equal(box(), 'firework', 'the second, after the cooldown');
+  context.mock.timers.tick(FIREWORK_LIMIT.cooldownMs);
+  assert.notEqual(box(), 'firework', 'and no third');
   for (const p of [tom, berri]) p.call('leaveGame');
 });
 
@@ -884,7 +915,12 @@ test('firework: flies up the road to the leader, past every other dog, and burst
   roll = 0.999;
   move(berri, boxes[2].groundPosition);
   assert.equal(events('itemChanged').at(-1).item, 'toy', '...and the highest a chew toy');
-  roll = 0.85;                                             // last of 3: frisbee up to 78 %, firework up to 90 %, then the collar
+  roll = 0.85;                                             // last of 3: frisbee up to 84 %, firework up to 90 %, then the collar
+  context.mock.timers.tick(FIREWORK_LIMIT.notBeforeMs);     // (none in the first 20 s)
+  // (this test is about the flight: lift the once-or-twice-a-race limit for it, tested on its own below)
+  const limit = { ...FIREWORK_LIMIT };
+  Object.assign(FIREWORK_LIMIT, { perRace: Infinity, cooldownMs: 0 });
+  context.after?.(() => Object.assign(FIREWORK_LIMIT, limit));
   move(tom, boxes[0].groundPosition);
   assert.equal(events('itemChanged').at(-1).item, 'firework');
 
@@ -2013,7 +2049,7 @@ test('Casper\'s Try Time: six seconds knocking over dogs he runs into, then the 
   for (const p of [c2, other]) p.call('leaveGame');
 });
 
-test('Jimmy\'s Dragon Dance: from last place seven seconds and five fireworks at the leader two seconds apart; leading, they go for the dog behind', context => {
+test('Jimmy\'s Dragon Dance: from last place seven seconds and two fireworks at the leader two seconds apart; leading, they go for the dog behind', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
   const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
   const jimmy = client(), berri = client(), sam = client();
@@ -2035,25 +2071,24 @@ test('Jimmy\'s Dragon Dance: from last place seven seconds and five fireworks at
   assert.deepEqual(events('itemChanged').at(-1), { playerId: jimmy.id, item: 'special' });
   move(jimmy, road(150)); move(sam, road(300, 5)); move(berri, road(420, 4));
   jimmy.call('useItem');
-  assert.deepEqual(events('specialStarted').at(-1), { playerId: jimmy.id, kind: 'dragon', durationMs: 7000, fireworks: 5 });
+  assert.deepEqual(events('specialStarted').at(-1), { playerId: jimmy.id, kind: 'dragon', durationMs: 7000, fireworks: 2 });
   context.mock.timers.tick(1);
   const lit = () => events('fireworkLaunched').filter(e => e.owner === jimmy.id);
   assert.equal(lit().length, 1, 'the first at once');
   assert.equal(lit()[0].target, berri.id, 'at the leader');
-  for (let n = 2; n <= 5; n++) {
-    context.mock.timers.tick(1998);
-    assert.equal(lit().length, n - 1, `not before ${2 * (n - 1)} s`);
-    context.mock.timers.tick(2);
-    assert.equal(lit().length, n, `number ${n} at ${2 * (n - 1)} s`);
-  }
+  context.mock.timers.tick(1998);
+  assert.equal(lit().length, 1, 'not before 2 s');
+  context.mock.timers.tick(2);
+  assert.equal(lit().length, 2, 'the second at 2 s');
   assert.ok(lit().every(e => e.target === berri.id));
-  assert.equal(events('specialEnded').filter(e => e.playerId === jimmy.id).at(-1)?.reason, 'done', 'the dragon went at seven seconds; the fifth firework a second later');
+  context.mock.timers.tick(5000);
+  assert.equal(events('specialEnded').filter(e => e.playerId === jimmy.id).at(-1)?.reason, 'done', 'the dragon went at seven seconds');
   context.mock.timers.tick(20000);
-  assert.equal(lit().length, 5, 'and no more');
+  assert.equal(lit().length, 2, 'and no more');
   assert.ok(events('playerHit').some(e => e.playerId === berri.id && e.item === 'firework' && e.by === jimmy.id), 'they are fireworks like any other');
   for (const p of [jimmy, berri, sam]) p.call('leaveGame');
 
-  // Two dogs: Jimmy takes it from behind (last of two), goes past and uses it in front: 4 fireworks, 6 seconds, at the dog behind
+  // Two dogs: Jimmy takes it from behind (last of two), goes past and uses it in front: 1 firework, 6 seconds, at the dog behind
   const j2 = client(), other = client();
   const room2 = j2.call('hostGame', { mapId: 'wendover', name: 'Jimmy' }).room;
   other.call('joinGame', { roomCode: room2.code, name: 'Other' });
@@ -2068,7 +2103,7 @@ test('Jimmy\'s Dragon Dance: from last place seven seconds and five fireworks at
   move(j2, cp(0)); move(j2, cp(1));
   move(j2, road(400)); move(other, road(380));
   j2.call('useItem');
-  assert.deepEqual(events2('specialStarted').at(-1), { playerId: j2.id, kind: 'dragon', durationMs: 6000, fireworks: 4 });
+  assert.deepEqual(events2('specialStarted').at(-1), { playerId: j2.id, kind: 'dragon', durationMs: 6000, fireworks: 1 });
   context.mock.timers.tick(1);
   assert.equal(events2('fireworkLaunched').at(-1).target, other.id, 'the dog behind him');
   for (let i = 0; i < 40 && !events2('fireworkExploded').length; i++) context.mock.timers.tick(50);

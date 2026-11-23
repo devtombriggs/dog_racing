@@ -24,6 +24,3 @@ dist-ssr
 *.sln
 *.sw?
 
-# the TV app (android/build.sh)
-android/out/
-android/*.keystore

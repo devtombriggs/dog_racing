@@ -63,6 +63,16 @@ export const FIREWORK = {
   tickMs: 50,           // the server moves it (and tells everyone where it is) this often
 };
 
+// How often a Treat Box may give a firework (like Mario Kart's blue shell: once or twice a race).  The server
+// keeps to these (fireworkAllowed in server/server.js); a box that cannot give one gives something else.
+// Jimmy's and Casper's fireworks come with their specials and do not count.
+export const FIREWORK_LIMIT = {
+  notBeforeMs: 20000,   // none in the first 20 s of a race
+  cooldownMs: 40000,    // none for 40 s after one is given
+  perRace: 2,           // and no more than two a race
+  // (and only one held or flying at a time)
+};
+
 export const COLLAR = {
   durationMs: 5000,     // how long the golden shield lasts once the collar is on
 };
@@ -88,15 +98,15 @@ export const HIT = {
  * you are, the better the help).  The leader (or a solo racer) only ever gets a ball or a chew toy:
  * never a bone, a frisbee, a firework or a golden collar.  Last place never gets a chew toy.
  * `behind` runs 0 (2nd) .. 1 (last) for everyone else:
- *   firework 4 % in 2nd, rising to 12 % in last;  golden collar 10 %;
+ *   firework 2 % in 2nd, rising to 6 % in last (and see FIREWORK_LIMIT);  golden collar 10 %;
  *   the rest is shared out as before: bone 40 % of it in 2nd, rising to 70 % in last; frisbee 25 %
  *   (20 % in last); what is left split between ball and chew toy (last place: 10 % ball).
- *   e.g. 5 racers, share of all boxes: firework 0, 4, 7, 9, 12 %; bone 0, 34, 42, 49, 55 %.
+ *   e.g. 5 racers, share of all boxes: firework 0, 2, 3.3, 4.7, 6 %.
  */
 export function itemOdds(place, racers) {
   if (place <= 1 || racers <= 1) return { ball: 0.5, toy: 0.5, bone: 0, frisbee: 0, firework: 0, collar: 0 };   // nobody ahead
   const behind = racers <= 2 ? 1 : (place - 2) / (racers - 2);
-  const firework = 0.04 + 0.08 * behind, collar = 0.1, rest = 1 - firework - collar;
+  const firework = 0.02 + 0.04 * behind, collar = 0.1, rest = 1 - firework - collar;
   const bone = place >= racers ? 0.7 : 0.4 + 0.3 * behind;
   const frisbee = place >= racers ? 0.2 : 0.25;
   const ball = place >= racers ? 0.1 : (1 - bone - frisbee) / 2, toy = place >= racers ? 0 : ball;
@@ -109,15 +119,20 @@ export function itemChoices(place, racers) {
   return ITEM_IDS.filter(id => odds[id] > 0);
 }
 
-export function rollItem(place, racers, random = Math.random) {
+/** A Treat Box item by the odds above; noFirework: a firework is not allowed just now (FIREWORK_LIMIT), share the rest out */
+export function rollItem(place, racers, random = Math.random, { noFirework = false } = {}) {
   const odds = itemOdds(place, racers);
+  if (noFirework && odds.firework > 0) {
+    const rest = 1 - odds.firework;
+    for (const id of ITEM_IDS) odds[id] = id === 'firework' ? 0 : odds[id] / rest;
+  }
   let r = random();
   for (const id of ITEM_IDS) {
     if (odds[id] <= 0) continue;
     if (r < odds[id]) return id;
     r -= odds[id];
   }
-  return itemChoices(place, racers).at(-1);
+  return ITEM_IDS.filter(id => odds[id] > 0).at(-1);
 }
 
 export function forwardOf(rotationY) {

@@ -17,8 +17,8 @@ import { DogAvatar } from './DogAvatar.js';
 
 const OFF_TRACK_SPEED_MULTIPLIER = 0.5;
 const OFF_TRACK_ACCELERATION_MULTIPLIER = 0.6;
-// Ralph's invisible walls while he flies (#keepToRoad): how far in from each edge of the road they stand, and how fast
-// (metres a second) they close in on him if he took off wider than that
+// The invisible walls round a dog in the middle of a special (#keepToRoad): how far in from each edge of the road they
+// stand, and how fast (metres a second) they close in on it if it started wider than that
 const FLY_EDGE = { inset: 0.5, closeIn: 4 };
 const REVERSE_SPEED = 2.5;
 const BRAKING = 22;
@@ -838,11 +838,13 @@ export class LocalDog extends DogAvatar {
     }
   }
 
-  // Ralph flying (his Rocket Paws) is off the ground, so nothing beside the road slows him: an invisible wall at each edge
-  // keeps him on it, or he could cut across a corner and miss a checkpoint (and with it the lap).  He slides along it.
-  // If he takes off wider than that, the wall closes in on him gently rather than snapping him back.
+  // A dog in the middle of a special that carries it along (Ralph flying, Pablo's sled, Meela's zoomies, Enzo's bounce,
+  // Casper's run, Jimmy's dragon...) has an invisible wall at each edge of the road, so it cannot shoot off a road
+  // with no barriers (Treat Road) or cut across a corner and miss a checkpoint (Ralph, flying, would miss the lap).
+  // It slides along the wall and still steers.  If it started wider than that, the wall closes in on it gently
+  // rather than snapping it back.  (Tom, 2026-11-23: on every map, not just Treat Road)
   #keepToRoad(frame) {
-    if (!frame.special?.flyHeight) { this.flyEdge = null; return; }
+    if (!frame.special?.flyHeight && !frame.special?.speed) { this.flyEdge = null; return; }
     const { position } = this, { mapId, rescue } = this.race;
     const line = racingLineAt(mapId, position.x, position.z, rescue.lineS);
     if (!line) return;
