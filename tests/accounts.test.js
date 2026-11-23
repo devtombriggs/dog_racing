@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { openDb, usernameProblem, AccountError } from '../server/db.js';
 import { createAccounts } from '../server/accounts.js';
 
@@ -160,6 +164,21 @@ test('leaderboards: fastest laps and races per map, wins, podiums, win rate, Gra
   const mine = db.playerStats(tom.id);
   assert.deepEqual([mine.races, mine.wins, mine.podiums, mine.grandPrixWins, mine.favouriteDog], [4, 3, 4, 2, 'ralph']);
   assert.deepEqual(mine.bestLaps, { wendover: 5, frostpeak: 20 });
+});
+
+test('leaderboards: a race from before the number of people was kept goes by how it was started (Tom, 2026-11-23)', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'zr-boards-')), 'boards.db'), db = openDb(file);
+  const sam = db.createPasswordUser({ email: 'sam@example.com', username: 'Sam', password: 'longenough' });
+  const old = (singlePlayer, mapId) => ({ userId: sam.id, mapId, dog: 'kombu', place: 1, racers: 6, finished: true, raceSeconds: 90, bestLap: 30, singlePlayer, grandPrix: 'old' });
+  db.recordRace([old(false, 'pet_mall'), old(true, 'farmyard')]);
+  db.recordGrandPrix([{ userId: sam.id, grandPrix: 'old', place: 1, points: 40 }]);
+  const raw = new DatabaseSync(file);           // (as they were written then: no count)
+  raw.exec("UPDATE race_results SET humans = NULL; UPDATE grand_prix_results SET humans = NULL");
+  raw.close();
+  const { multiplayer, singlePlayer } = db.leaderboards();
+  assert.deepEqual(Object.keys(multiplayer.fastestLaps), ['pet_mall'], 'started from Multiplayer: Multiplayer');
+  assert.deepEqual(Object.keys(singlePlayer.fastestLaps), ['farmyard'], 'started from Single Player: Single Player');
+  assert.deepEqual([multiplayer.grandPrixWins.length, singlePlayer.grandPrixWins.length], [1, 0], 'a Grand Prix raced online then');
 });
 
 test('accounts: sessions run out', () => {

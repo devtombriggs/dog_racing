@@ -42,7 +42,7 @@ const SCHEMA = `
     grand_prix TEXT,
     single_player INTEGER NOT NULL,
     raced_at INTEGER NOT NULL,
-    humans INTEGER                           -- people in the race (2 or more: the Multiplayer boards; null, from before: Single Player)
+    humans INTEGER                           -- people in the race (2 or more: the Multiplayer boards; null, from before: by single_player)
   );
   CREATE INDEX IF NOT EXISTS race_results_user ON race_results(user_id);
   CREATE INDEX IF NOT EXISTS race_results_map ON race_results(map_id);
@@ -208,7 +208,13 @@ export function openDb(path = ':memory:', { now = () => Date.now() } = {}) {
       return { multiplayer: this.boards(true), singlePlayer: this.boards(false), winRateMinRaces: WIN_RATE_MIN_RACES };
     },
     boards(multiplayer) {
-      const limit = BOARD_SIZE, mode = `COALESCE(humans, 1) ${multiplayer ? '>=' : '<'} 2`;
+      // (a race from before the count was kept, humans null, goes by how it was started: from Multiplayer, Multiplayer (Tom,
+      // 2026-11-23: his early online races had all gone to Single Player).  A Grand Prix from then goes by its races)
+      const side = multiplayer ? '>=' : '<';
+      const mode = `COALESCE(humans, CASE WHEN single_player = 0 THEN 2 ELSE 1 END) ${side} 2`;
+      const gpMode = `COALESCE(g.humans, CASE WHEN EXISTS (SELECT 1 FROM race_results o WHERE o.user_id = g.user_id AND o.grand_prix = g.grand_prix
+        AND o.humans IS NULL AND o.single_player = 0 AND ABS(o.raced_at - g.raced_at) < 60000) THEN 2 ELSE 1 END) ${side} 2`;
+      const limit = BOARD_SIZE;
       const favourite = q(`SELECT dog FROM race_results WHERE user_id = ? AND ${mode} GROUP BY dog ORDER BY COUNT(*) DESC, MAX(raced_at) DESC LIMIT 1`);
       const withDog = rows => rows.map(row => ({ ...row, userId: Number(row.userId), favouriteDog: favourite.get(row.userId)?.dog ?? null }));
       const byPlayer = (select, having = '', order) => withDog(q(`
@@ -243,7 +249,7 @@ export function openDb(path = ':memory:', { now = () => Date.now() } = {}) {
         winRate: byPlayer('ROUND(100.0 * SUM(r.place = 1) / COUNT(*)) AS value, COUNT(*) AS races', `HAVING races >= ${WIN_RATE_MIN_RACES}`, 'value DESC, races DESC'),
         grandPrixWins: withDog(q(`
           SELECT u.id AS userId, u.username, COUNT(*) AS value
-          FROM grand_prix_results g JOIN users u ON u.id = g.user_id WHERE g.place = 1 AND ${mode}
+          FROM grand_prix_results g JOIN users u ON u.id = g.user_id WHERE g.place = 1 AND ${gpMode}
           GROUP BY u.id ORDER BY value DESC, MIN(g.raced_at) LIMIT ${limit}`).all()),
         popularDogs: q(`SELECT dog, COUNT(*) AS races, SUM(place = 1) AS wins FROM race_results WHERE ${mode} GROUP BY dog ORDER BY races DESC, wins DESC`).all()
           .map(row => ({ dog: row.dog, races: Number(row.races), wins: Number(row.wins) })),
