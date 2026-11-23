@@ -12,7 +12,8 @@ import { fullscreen } from './fullscreen.js';
 
 const asked = typeof location !== 'undefined' && new URLSearchParams(location.search).get('touch') === '1';
 export const onTouch = asked || (typeof window !== 'undefined' && typeof navigator !== 'undefined'
-  && navigator.maxTouchPoints > 0 && window.matchMedia?.('(pointer: coarse)').matches === true);
+  && navigator.maxTouchPoints > 0 && (window.matchMedia?.('(pointer: coarse)').matches === true || window.matchMedia?.('(any-pointer: coarse)').matches === true
+    && window.matchMedia?.('(any-pointer: fine)').matches !== true));
 
 export const touchInput = {
   turn: 0, drift: false, brake: false,

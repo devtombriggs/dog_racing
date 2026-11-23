@@ -1,3 +1,6 @@
+/* The game has its own colours: no browser dark theme over it (Android Chrome's darkened the pictures and stat bars) */
+:root { color-scheme: only light; }
+
 * {
   box-sizing: border-box;
 }
