@@ -1,3 +1,5 @@
+import { onTouch, touchInput } from '../touch.js';
+
 const CONTROL_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD',
   'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight', 'Space', 'KeyE', 'ShiftLeft', 'ShiftRight', 'KeyK', 'KeyC'
@@ -32,7 +34,8 @@ export function readPad(gamepad) {
   };
 }
 
-// The keyboard, mouse wheel and controller during a race: what is held, and when to jump or use an item
+// The keyboard, mouse wheel, controller and (on a phone) the on-screen controls during a race: what is held, and
+// when to jump or use an item.  On a phone the dog runs by itself: going is on unless Brake is held (touch.js)
 export class PlayerInput {
   // element: the race canvas (scrolling down over it jumps)
   // racing(): the race is on and this player has not finished
@@ -50,22 +53,28 @@ export class PlayerInput {
     this.onUseItem = onUseItem;
 
     window.addEventListener('blur', this.clear);
+    // (the on-screen controls: not for a split-screen player, who has a controller or the keyboard)
+    this.touch = onTouch && !device ? touchInput : null;
+    if (this.touch) {
+      this.touch.jump = () => { if (this.racing()) this.onJump(); };
+      this.touch.useItem = () => { if (this.racing()) this.onUseItem(); };
+    }
     if (device?.type === 'pad') return;                 // (a controller's player has no keys)
     element.addEventListener('wheel', this.#onWheel, { passive: false });
     window.addEventListener('keydown', this.#onKeyDown);
     window.addEventListener('keyup', this.#onKeyUp);
   }
 
-  get accelerate() { return Boolean(this.keys.KeyW || this.keys.ArrowUp || this.pad.accelerate); }
-  get brake() { return Boolean(this.keys.KeyS || this.keys.ArrowDown || this.pad.brake); }
+  get accelerate() { return Boolean(this.keys.KeyW || this.keys.ArrowUp || this.pad.accelerate || (this.touch && !this.touch.brake)); }
+  get brake() { return Boolean(this.keys.KeyS || this.keys.ArrowDown || this.pad.brake || this.touch?.brake); }
   // 1 = left, -1 = right (a controller's stick gives anything between)
   get turn() {
     const keys = (this.keys.KeyA || this.keys.ArrowLeft ? 1 : 0) - (this.keys.KeyD || this.keys.ArrowRight ? 1 : 0);
-    return keys || this.pad.turn;
+    return keys || this.pad.turn || this.touch?.turn || 0;
   }
 
   // Held to drift through a corner: K (for a hand on WASD), C (for a hand on the arrows) or the right bumper
-  get drift() { return Boolean(this.keys.KeyK || this.keys.KeyC || this.pad.drift); }
+  get drift() { return Boolean(this.keys.KeyK || this.keys.KeyC || this.pad.drift || this.touch?.drift); }
 
   // Once a frame: read the controller (a browser has to be asked; it sends no events for buttons)
   update() {
@@ -117,6 +126,7 @@ export class PlayerInput {
   };
 
   dispose() {
+    if (this.touch) { this.touch.jump = () => {}; this.touch.useItem = () => {}; this.touch.release(); }
     window.removeEventListener('keydown', this.#onKeyDown);
     window.removeEventListener('keyup', this.#onKeyUp);
     window.removeEventListener('blur', this.clear);

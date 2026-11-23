@@ -11,6 +11,7 @@ import { DogSelectScreen } from './ui/DogSelectScreen.jsx';
 import { MapScreen } from './ui/MapScreen.jsx';
 import { RaceScreen } from './ui/RaceScreen.jsx';
 import { PauseMenu } from './ui/race/PauseMenu.jsx';
+import { onTouch } from './touch.js';
 
 const SCREENS = {
   menu: MenuScreen,
@@ -85,6 +86,14 @@ function App() {
         </div>
       )}
       {state.notice && <div className="connection-notice" role="status">{state.notice}</div>}
+      {/* a phone held upright: turn it (shown only in portrait: index.css) */}
+      {onTouch && (
+        <div className="rotate-prompt" role="alert">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="20" y="6" width="24" height="44" rx="5" /><circle cx="32" cy="43" r="2.5" /></svg>
+          <strong>Turn your phone sideways</strong>
+          <span>Zoomie Racers is played with the phone on its side</span>
+        </div>
+      )}
     </>
   );
 }

@@ -84,6 +84,10 @@ It finds buttons by where they are on the screen, so a new screen needs nothing 
 
 **On screen during the race** (`src/ui/race/HudPanel.jsx`): top right, the lap, the item held and a word when something is up (off the track, fell); bottom right, the speed. No race time, checkpoints or control hints: the controls are behind the controller button on the home screen.
 
+## Phones and tablets
+
+On a touch screen (`src/touch.js`; try it on a computer with `?touch=1`) the game is played sideways: held upright, a "Turn your phone sideways" screen covers it. Android goes full screen and locks sideways at the first tap; an iPhone allows neither from a web page, but **Add to Home Screen** (`public/manifest.webmanifest`) opens it full screen. In a race (`src/ui/race/TouchControls.jsx`) the dog runs by itself; a stick appears under the left thumb and steers, and on the right are Drift (hold), Jump, Item (showing what the dog carries) and Brake (hold: slows, then reverses), with the race menu top right. The screen shows only the race order and a small course map. Split Screen is not offered on a phone.
+
 ## Full screen and the Esc menu
 
 Clicking a map (or voting for one) puts the game in full screen (`src/fullscreen.js`); a browser only allows that from a click, so a player who never clicks a map stays in a window until they use the menu. **Esc** during a race opens a menu (`src/ui/race/PauseMenu.jsx`): Resume, Full screen on/off (remembered between visits), Quit to Main Menu. The race does not pause. In Chrome and Edge Esc opens the menu and the screen stays full; in browsers that keep Esc for themselves, Esc leaves full screen and the menu opens at the same moment.

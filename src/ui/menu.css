@@ -640,3 +640,24 @@ html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scal
 .zr-lb__who small { font-size: 12px; font-weight: 400; color: #c4d3f5; }
 .zr-lb__value { flex: none; font: 400 20px/1 var(--zr-display); color: var(--zr-yellow); letter-spacing: 0.03em; font-variant-numeric: tabular-nums; -webkit-text-stroke: 4px var(--zr-navy); paint-order: stroke fill; }
 .zr-lb__empty { padding: 30px 0; font-weight: 700; }
+
+/* Leaderboards on a short screen (a phone on its side): everything smaller, so the board itself has the room */
+@media (max-height: 500px) {
+  .zr-page:has(.zr-lb) { padding: 6px; }
+  .zr-lb { max-height: calc(100dvh - 12px); padding: 8px 14px 10px; border-radius: 18px; }
+  .zr-lb__title img { height: 34px; }
+  .zr-lb__you { margin: 0 0 6px !important; font-size: 12px; }
+  .zr-lb__tabs { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; margin-bottom: 6px; padding-bottom: 2px; scrollbar-width: none; }
+  .zr-lb__tab { flex: none; padding: 5px 10px; font-size: 12px; border-width: 2px; }
+  .zr-lb__maps { padding: 2px 2px 6px; }
+  .zr-lb__map { width: 58px; font-size: 9px; border-radius: 10px; }
+  .zr-lb__map img { width: 46px; height: 46px; border-radius: 8px; }
+  .zr-lb__heading { margin: 0 0 6px; font-size: 18px; }
+  .zr-lb__body { margin-bottom: 6px; }
+  .zr-lb__rows li { padding: 3px 10px 3px 4px; gap: 8px; }
+  .zr-lb__place { width: 28px; height: 28px; font-size: 14px; }
+  .zr-lb__face { width: 30px; height: 30px; }
+  .zr-lb__who { font-size: 14px; }
+  .zr-lb__value { font-size: 16px; }
+  .zr-lb > .zr-btn { padding-block: 6px; }
+}

@@ -5,6 +5,7 @@ import { VolumeSliders } from './VolumeSliders.jsx';
 import { AccountBadge, AccountSheet } from './AccountSheet.jsx';
 import { useAccount } from './useAccount.js';
 import { account } from '../session/account.js';
+import { onTouch } from '../touch.js';
 
 // The first screen: how you want to play, and who you are (the badge at the top right).
 //   Single Player   (Tom, 2026-11-19: no Grand Prix or Maps buttons here for now)
@@ -131,7 +132,8 @@ export function MenuScreen({ session, state }) {
             <div className="zr-home__menu">
               <button className="zr-btn zr-btn--yellow" data-pad-first="" disabled={!connected} onClick={named(session.hostGame)}>Host Game</button>
               <button className="zr-btn" disabled={!connected} onClick={named(session.openJoinScreen)}>Join Game</button>
-              <button className="zr-btn zr-btn--purple" disabled={!connected} onClick={session.openLocalJoinScreen} title="Two to four players on this screen: a keyboard and controllers">Split Screen</button>
+              {/* (not on a phone: split screen is players sharing one screen with a keyboard and controllers) */}
+              {!onTouch && <button className="zr-btn zr-btn--purple" disabled={!connected} onClick={session.openLocalJoinScreen} title="Two to four players on this screen: a keyboard and controllers">Split Screen</button>}
             </div>
             <button className="zr-btn zr-btn--quiet zr-btn--small zr-home__back" data-pad-back="" onClick={() => { setMultiplayer(false); setNameProblem(''); }}>← Back</button>
           </>

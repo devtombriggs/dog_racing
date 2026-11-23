@@ -44,7 +44,7 @@ export const fullscreen = {
     return on ? fullscreen.enter() : fullscreen.exit();
   },
 
-  enterForRace() { if (wanted()) fullscreen.enter(); },
+  enterForRace() { return wanted() ? fullscreen.enter() : Promise.resolve(); },
 
   onChange(listener) {
     const changed = () => listener(fullscreen.isOn());

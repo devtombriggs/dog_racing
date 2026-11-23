@@ -237,3 +237,77 @@ html, body, #root {
   position: fixed; top: 6px; left: 50%; z-index: 1000; transform: translateX(-50%); pointer-events: none;
   padding: 2px 10px; border-radius: 999px; background: #000a; color: #7dff9a; font: bold 14px/1.4 monospace;
 }
+
+/* ---------- Phones and tablets (src/touch.js: html.touch) ---------- */
+html.touch, html.touch body { overscroll-behavior: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+html.touch .race-screen { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+
+/* The race on a phone: a small course map and the race order, nothing else (Tom, 2026-11-23) */
+html.touch .race-hud, html.touch .race-speed { display: none; }
+html.touch .race-standings { top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left)); transform: scale(0.62); transform-origin: top left; }
+html.touch .race-minimap {
+  left: auto !important; bottom: auto !important;
+  top: max(8px, env(safe-area-inset-top)); right: calc(max(8px, env(safe-area-inset-right)) + 52px);
+  transform: scale(0.55); transform-origin: top right; opacity: 0.9;
+}
+
+/* The controls (ui/race/TouchControls.jsx) */
+.touch-controls { position: absolute; inset: 0; z-index: 20; pointer-events: none; --pad-r: max(14px, env(safe-area-inset-right)); --pad-b: max(14px, env(safe-area-inset-bottom)); }
+.touch-stick { position: absolute; left: 0; top: 25%; bottom: 0; width: 48%; pointer-events: auto; touch-action: none; }
+.touch-stick__hint {
+  position: absolute; left: max(28px, env(safe-area-inset-left)); bottom: var(--pad-b);
+  padding: 10px 16px; border-radius: 999px; background: #0b1c4a66; color: #ffffffcc;
+  font: 700 13px/1 system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.touch-stick__hint span { opacity: 0.8; }
+.touch-stick__base {
+  position: fixed; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 50%;
+  background: #0b1c4a55; border: 3px solid #ffffff99; box-shadow: 0 2px 10px #0006;
+}
+.touch-stick__knob {
+  position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ffffff, #cfd9f0); box-shadow: 0 3px 8px #0008;
+}
+.touch-btn {
+  position: absolute; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none;
+  display: grid; place-items: center; border-radius: 50%; border: 3px solid #ffffffcc; color: #fff;
+  font: 800 14px/1 'Lilita One', system-ui, sans-serif; letter-spacing: 0.04em; text-shadow: 0 1px 2px #0009;
+  box-shadow: 0 4px 0 #00000055, 0 4px 12px #0005; opacity: 0.88; transition: transform 60ms;
+}
+.touch-btn--on { transform: scale(0.92); opacity: 1; box-shadow: 0 1px 0 #00000055, 0 2px 8px #0005; }
+.touch-btn--drift { right: var(--pad-r); bottom: var(--pad-b); width: 104px; height: 104px; font-size: 19px; background: radial-gradient(circle at 40% 30%, #6cc4ff, #1f6fd8); }
+.touch-btn--drift.touch-btn--on { background: radial-gradient(circle at 40% 30%, #9ad8ff, #2f86f0); }
+.touch-btn--jump { right: calc(var(--pad-r) + 120px); bottom: var(--pad-b); width: 76px; height: 76px; background: radial-gradient(circle at 40% 30%, #ffd84d, #e89a12); }
+.touch-btn--item { right: calc(var(--pad-r) + 14px); bottom: calc(var(--pad-b) + 120px); width: 76px; height: 76px; font-size: 34px; background: radial-gradient(circle at 40% 30%, #c08bff, #7333dd); }
+.touch-btn--item img { width: 46px; height: 46px; }
+.touch-btn--empty { font-size: 14px; opacity: 0.45; }
+.touch-btn--brake { right: calc(var(--pad-r) + 128px); bottom: calc(var(--pad-b) + 96px); width: 58px; height: 58px; font-size: 12px; background: radial-gradient(circle at 40% 30%, #ff8a7a, #c9372a); }
+.touch-pause {
+  position: absolute; pointer-events: auto; top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right));
+  width: 44px; height: 44px; border-radius: 12px; border: 2px solid #ffffffaa; background: #0b1c4a99;
+  display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; padding: 0;
+}
+.touch-pause span { display: block; width: 20px; height: 3px; border-radius: 2px; background: #fff; }
+
+/* A phone held upright: turn it (App.jsx) */
+.rotate-prompt { display: none; }
+@media (orientation: portrait) {
+  html.touch .rotate-prompt {
+    position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    padding: 24px; text-align: center; background: #0b1c4a; color: #fff; font: 400 16px/1.4 system-ui, sans-serif;
+  }
+  html.touch .rotate-prompt svg { width: 96px; height: 96px; fill: none; stroke: #ffd22e; stroke-width: 3; animation: rotate-phone 2.2s ease-in-out infinite; }
+  html.touch .rotate-prompt circle { fill: #ffd22e; stroke: none; }
+  html.touch .rotate-prompt strong { font: 400 28px/1.1 'Lilita One', system-ui, sans-serif; letter-spacing: 0.02em; }
+  html.touch .rotate-prompt span { color: #c4d3f5; }
+}
+@keyframes rotate-phone { 0%, 25% { transform: rotate(0deg); } 55%, 85% { transform: rotate(-90deg); } 100% { transform: rotate(0deg); } }
+
+/* The race menu on a phone: wide and short, two buttons a row, scrolls if it still does not fit */
+html.touch .pause-menu__panel {
+  display: grid; grid-template-columns: 1fr 1fr; align-items: center; column-gap: 8px;
+  width: min(560px, 94vw); max-height: calc(100dvh - 16px); overflow-y: auto; padding: 12px 18px;
+}
+html.touch .pause-menu__panel h2, html.touch .pause-volume { grid-column: 1 / -1; }
+html.touch .pause-menu__panel p, html.touch .pause-menu__panel small { display: none; }
+html.touch .pause-menu__panel button { margin: 4px !important; padding: 12px 10px !important; }
