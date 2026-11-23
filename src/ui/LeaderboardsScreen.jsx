@@ -7,7 +7,12 @@ import { useAccount } from './useAccount.js';
 
 // The leaderboards (server/db.js leaderboards): the fastest laps and races on each map, and the players with
 // the most races, wins, podiums and Grand Prix, the best win rate, and which dogs are raced most.  Only
-// signed-in players are on them.
+// signed-in players are on them.  Each board twice (Tom, 2026-11-23): Multiplayer, races between two people or more, and
+// Single Player, against the computer dogs alone (a multiplayer room nobody else joined included)
+const MODES = [
+  { id: 'multiplayer', label: 'Multiplayer', note: 'Races against other people' },
+  { id: 'singlePlayer', label: 'Single Player', note: 'Races against the computer dogs only' },
+];
 
 const BOARDS = [
   { id: 'laps', label: 'Fastest Laps', perMap: 'fastestLaps' },
@@ -56,19 +61,21 @@ function Rows({ rows, me, value, empty }) {
 
 export function LeaderboardsScreen({ session }) {
   const { user, stats } = useAccount();
-  const [boards, setBoards] = useState(null);
+  const [all, setAll] = useState(null);
+  const [mode, setMode] = useState('multiplayer');
   const [problem, setProblem] = useState('');
   const [tab, setTab] = useState('laps');
   const [mapId, setMapId] = useState(MAP_IDS[0]);
 
   useEffect(() => {
     let live = true;
-    account.leaderboards().then(data => { if (live) setBoards(data); }, error => { if (live) setProblem(error.message); });
+    account.leaderboards().then(data => { if (live) setAll(data); }, error => { if (live) setProblem(error.message); });
     account.refresh();                 // (your own numbers, up to date)
     return () => { live = false; };
   }, []);
 
   const board = BOARDS.find(each => each.id === tab);
+  const boards = all?.[mode] ? { ...all[mode], winRateMinRaces: all.winRateMinRaces } : null;
   const me = user?.id;
   let body;
   if (problem) body = <p className="zr-lb__empty">Could not load the leaderboards: {problem}</p>;
@@ -111,9 +118,15 @@ export function LeaderboardsScreen({ session }) {
         ) : (
           <p className="zr-lb__you">Sign in on the home screen to get your races onto the leaderboards.</p>
         )}
+        <div className="zr-lb__modes" role="tablist" aria-label="Single Player or Multiplayer">
+          {MODES.map(each => (
+            <button key={each.id} role="tab" aria-selected={each.id === mode} className={`zr-lb__mode zr-lb__mode--${each.id}`} title={each.note}
+              data-pad-first={each.id === 'multiplayer' ? '' : undefined} onClick={() => setMode(each.id)}>{each.label}</button>
+          ))}
+        </div>
         <div className="zr-lb__tabs" role="tablist" aria-label="Leaderboard">
           {BOARDS.map(each => (
-            <button key={each.id} role="tab" aria-selected={each.id === tab} className="zr-lb__tab" data-pad-first={each.id === 'laps' ? '' : undefined} onClick={() => setTab(each.id)}>{each.label}</button>
+            <button key={each.id} role="tab" aria-selected={each.id === tab} className="zr-lb__tab" onClick={() => setTab(each.id)}>{each.label}</button>
           ))}
         </div>
         <div className="zr-lb__body">{body}</div>

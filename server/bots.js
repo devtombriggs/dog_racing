@@ -702,7 +702,12 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     } else {
       // the road stops and carries on a long way below (or a platform ends under it, over the Undercity): it falls to it
       if ((route.drops || route.undercity) && dropping) { jumpHeight += groundY - ground.y; if (!jumping) jumpSpeed = 0; jumping = true; jumpGravity = DROP.gravity; }
-      groundY = ground.y;
+      // in the air with the ground a whole level higher than it was (a swaying bridge back under it): it stays where it is in the
+      // air, on to the deck if it is above it, still falling if it is below (as LocalDog's #followGround)
+      if (jumping && ground.y - groundY > DROP.from) {
+        const height = groundY + jumpHeight;
+        if (height >= ground.y) { jumpHeight = height - ground.y; groundY = ground.y; }
+      } else groundY = ground.y;
     }
     const next = [point.x, groundY + jumpHeight, point.z];
     const dx = next[0] - position[0], dz = next[2] - position[2];

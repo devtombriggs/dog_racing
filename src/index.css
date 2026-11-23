@@ -262,21 +262,17 @@ html.touch .race-minimap {
 
 /* The controls (ui/race/TouchControls.jsx) */
 .touch-controls { position: absolute; inset: 0; z-index: 20; pointer-events: none; --pad-r: max(14px, env(safe-area-inset-right)); --pad-b: max(14px, env(safe-area-inset-bottom)); }
-.touch-stick { position: absolute; left: 0; top: 25%; bottom: 0; width: 48%; pointer-events: auto; touch-action: none; }
-.touch-stick__hint {
-  position: absolute; left: max(28px, env(safe-area-inset-left)); bottom: var(--pad-b);
-  padding: 10px 16px; border-radius: 999px; background: #0b1c4a66; color: #ffffffcc;
-  font: 700 13px/1 system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase;
+.touch-arrows {
+  position: absolute; left: max(14px, env(safe-area-inset-left)); bottom: var(--pad-b); display: flex; gap: 14px;
+  padding: 10px; margin: -10px; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none;
 }
-.touch-stick__hint span { opacity: 0.8; }
-.touch-stick__base {
-  position: fixed; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 50%;
-  background: #0b1c4a55; border: 3px solid #ffffff99; box-shadow: 0 2px 10px #0006;
+.touch-arrow {
+  width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center;
+  border: 3px solid #ffffffcc; color: #fff; font: 800 34px/1 system-ui, sans-serif; text-shadow: 0 1px 2px #0009;
+  background: radial-gradient(circle at 40% 30%, #5b6f9e, #1d2a52); opacity: 0.85;
+  box-shadow: 0 4px 0 #00000055, 0 4px 12px #0005; transition: transform 60ms;
 }
-.touch-stick__knob {
-  position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%;
-  background: radial-gradient(circle at 40% 35%, #ffffff, #cfd9f0); box-shadow: 0 3px 8px #0008;
-}
+.touch-arrow--on { transform: scale(0.92); opacity: 1; background: radial-gradient(circle at 40% 30%, #8fa6dc, #2f4790); box-shadow: 0 1px 0 #00000055, 0 2px 8px #0005; }
 .touch-btn {
   position: absolute; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none;
   display: grid; place-items: center; border-radius: 50%; border: 3px solid #ffffffcc; color: #fff;

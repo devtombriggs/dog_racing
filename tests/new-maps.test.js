@@ -186,7 +186,7 @@ test('Neon Nexus, the Undercity (Tom, 2026-11-21): every platform a boost; miss 
   // a boost on every platform, wherever it has slid to
   for (const zone of T.platforms) for (const pad of zone.pads) { const p = T.padAt(pad), q = T.query(p.x, p.z, -1, p.y); assert.ok(q.kick?.speed > 1 && !q.gap, pad.id); }
   // over a gap between two platforms, the ground is the Undercity, `depth` metres down: a dog falls to it and races on
-  assert.equal(T.undercity.length, 2);
+  assert.equal(T.undercity.length, T.platforms.length, 'one under each crossing');
   for (const zone of T.platforms) {
     const s = zone.pads[0].s1 + 4, up = T.pointAt(s), q = T.query(up.x, up.z, -1, up.y);
     const u = T.underAt(s);
@@ -204,6 +204,14 @@ test('Neon Nexus, the Undercity (Tom, 2026-11-21): every platform a boost; miss 
     const next = T.launches.filter(l => !l.under && l.padStart > lift.landingS).sort((a, b) => a.padStart - b.padStart)[0];
     assert.ok(next.padStart - lift.landingS > 6, 'room to land before the catapult');
     assert.ok(!T.isGap(lift.takeoffS + 2), 'the road above the lift is whole');
+  }
+  // a fall costs about two seconds (Tom, 2026-11-23): each Undercity ends just past its own crossing, and its floor runs a dog along
+  // as fast as the platforms above do
+  for (const zone of T.platforms) {
+    const u = T.underAt(zone.sStart + 20), lift = T.launches.find(l => l.under === u.id);
+    assert.ok(u.sEnd > zone.sEnd && u.sEnd - zone.sEnd < 30 && lift.landingS - zone.sEnd < 40, `${zone.id}: up again just past it`);
+    const p = T.pointAt(zone.sStart + 20), q = T.query(p.x, p.z, -1, p.y - u.depth + 0.1);
+    assert.ok(q.level === u.id && q.boost >= zone.boost.speed && T.speedFactor(q) > 1.5, `${zone.id}: a fast floor down there`);
   }
   // the robots: down there, too tall to jump; every so often each fires a ring of lightning, with a warning first
   assert.ok(T.robots.length >= 6);
@@ -247,7 +255,7 @@ test('Neon Nexus: the longest lap, three of them and fast; mega pads and three c
   }
   // three catapults, the accelerator the first of them; every one has its own landing gate (and a lift up from each Undercity)
   assert.equal(T.launches.filter(l => !l.under).length, 3);
-  assert.equal(T.launches.filter(l => l.lift && l.under).length, 2);
+  assert.equal(T.launches.filter(l => l.lift && l.under).length, T.undercity.length);
   assert.equal(T.checkpoints.filter(cp => cp.launchLanding).length, 3);
   for (const l of T.launches.filter(each => !each.under)) { const end = T.launchPoint(l.duration, 0, l), land = T.pointAt(l.landingS); assert.ok(Math.hypot(end.x - land.x, end.z - land.z) < 0.01 && l.gapEnd - l.gapStart > 240); }
 

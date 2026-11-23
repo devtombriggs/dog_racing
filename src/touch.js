@@ -1,4 +1,4 @@
-// Phones and tablets (Tom, 2026-11-23): the game is played sideways, with a stick and buttons drawn on the screen
+// Phones and tablets (Tom, 2026-11-23): the game is played sideways, with ◀ ▶ and buttons drawn on the screen
 // (ui/race/TouchControls.jsx) instead of keys.  The dog runs by itself; Brake slows it and, held, reverses.
 //
 //   onTouch        this is a touch screen with no mouse (or ?touch=1 in the address, to try it on a computer)
@@ -14,6 +14,9 @@ const asked = typeof location !== 'undefined' && new URLSearchParams(location.se
 export const onTouch = asked || (typeof window !== 'undefined' && typeof navigator !== 'undefined'
   && navigator.maxTouchPoints > 0 && (window.matchMedia?.('(pointer: coarse)').matches === true || window.matchMedia?.('(any-pointer: coarse)').matches === true
     && window.matchMedia?.('(any-pointer: fine)').matches !== true));
+
+// A dog turns this much sharper on a phone (Tom, 2026-11-23: "too hard on mobile to turn"), steering with the ◀ ▶ buttons
+export const TOUCH_TURN = 1.25;
 
 export const touchInput = {
   turn: 0, drift: false, brake: false,

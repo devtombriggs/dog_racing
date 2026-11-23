@@ -301,3 +301,38 @@ test('a tennis ball thrown at the Speed Bowl\'s barrier bounces back on to the r
     assert.ok(Math.abs(q.lateral) <= q.halfWidth + 3, `still by the road at ${t.toFixed(2)} s`);
   }
 });
+
+test('a tennis ball skims the road, up and down with it, and on the level it was thrown on (Tom, 2026-11-23)', () => {
+  const neon = PROCEDURAL_TRACKS.neon_nexus, query = (x, z, hint, y) => neon.query(x, z, hint, y);
+  neon.setClock(3);
+  const throwAt = (track, s, up = 0, below = 0) => {
+    const p = track.pointAt(s), dir = [Math.sin(p.rotationY), 0, Math.cos(p.rotationY)];
+    const origin = [p.x + dir[0] * BALL.launchAhead, p.y - below + up + BALL.height, p.z + dir[2] * BALL.launchAhead];
+    return { origin, direction: dir, ...ballRoute(origin, dir, (x, z, hint, y) => track.query(x, z, hint, y)) };
+  };
+  // up the climb (the road rises 16 m): it stays BALL.height over the road all the way, not level with where it was thrown
+  const climb = neon.platforms[0].sStart - 220, ball = throwAt(neon, climb);
+  let rose = 0;
+  for (let t = 0.05; t <= Math.min(2, ballSeconds(ball)); t += 0.05) {
+    const p = ballPositionAt(ball, t), q = query(p[0], p[2], -1, p[1] - BALL.height);
+    if (q.gap || q.level) continue;
+    assert.ok(Math.abs(p[1] - BALL.height - q.y) < 0.6, `over the road at ${t.toFixed(2)} s (${(p[1] - q.y).toFixed(2)} m)`);
+    rose = Math.max(rose, p[1] - ball.origin[1]);
+  }
+  assert.ok(rose > 1, `it climbed with the road (${rose.toFixed(1)} m)`);
+  // thrown from the top of a jump, it comes down to the road in a moment
+  const jumped = throwAt(neon, climb, 1.5);
+  assert.ok(ballPositionAt(jumped, 0)[1] - ballPositionAt(ball, 0)[1] > 1.4, 'from the height it was thrown at');
+  assert.ok(Math.abs(ballPositionAt(jumped, 0.4)[1] - ballPositionAt(ball, 0.4)[1]) < 0.01, 'down on the road by 0.4 s');
+  // thrown down in the Undercity, it stays down there, under the platforms
+  const u = neon.undercity[0], under = throwAt(neon, u.sStart + 10, 0, u.depth);
+  for (let t = 0; t <= Math.min(2.5, ballSeconds(under)); t += 0.1) {
+    const p = ballPositionAt(under, t), top = neon.pointAt(neon.query(p[0], p[2]).s).y;
+    if (neon.underAt(neon.query(p[0], p[2]).s)?.id !== u.id) break;
+    assert.ok(p[1] < top - u.depth + 3, `still in the Undercity at ${t.toFixed(1)} s`);
+  }
+  // off the end of a road that drops (the jungle's tree stair): it dives down to the road below, not on out into the sky
+  const jungle = PROCEDURAL_TRACKS.monkey_jungle, drop = jungle.drops[0];
+  const off = throwAt(jungle, drop.s - 6), far = ballPositionAt(off, Math.min(ballSeconds(off), (6 + drop.height / BALL.fallPerMetre + 10) / BALL.speed));
+  assert.ok(off.origin[1] - far[1] > drop.height * 0.8, `came down off the end (${(off.origin[1] - far[1]).toFixed(1)} of ${drop.height.toFixed(1)} m)`);
+});

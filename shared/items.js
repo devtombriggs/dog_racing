@@ -33,6 +33,13 @@ export const BALL = {
   bounces: 3,
   traceStep: 0.5,       // metres between the places its route is checked for a wall
   offWall: 0.3,         // how far out from the wall a bounce starts it again
+  // It skims the road, up and down with it (Tom, 2026-11-23: thrown in a jump it flew on up there, bouncing off walls in
+  // mid-air): its route has the height of the road under it every `heightStep` metres
+  heightStep: 2,
+  fallPerMetre: 0.6,    // off a ledge it dives down to the road below, this many metres for each metre it goes on
+                        // (but across a bridge or the platforms it keeps its level: it does not drop to the river or the Undercity)
+  steepest: 1.2,        // the road rising more than this in one traceStep is a wall to it (out of the river where it ends): it pops
+  dropGravity: 30,      // thrown in a jump, it drops to its skimming height (m/s², so about a third of a second from a jump's top)
 };
 
 export const TOY = {
@@ -152,33 +159,48 @@ export function forwardOf(rotationY) {
  *   index }.  `blocked` means (x, z) is through a wall, and (clampX, clampZ) is the wall's face.  null: no walls
  *   (it flies straight for BALL.duration)
  * Returns { legs: [[x, z, dx, dz, at]] (each straight stretch: where it starts, its heading, and how far along the
- * route that is in metres), length (m), popped (it ended on a wall, not by running out of time) }
+ * route that is in metres), length (m), popped (it ended on a wall, not by running out of time), heights (the road
+ * under it every BALL.heightStep metres along the route: it skims that, on the level of the map it was thrown on) }
  */
 export function ballRoute(origin, direction, query = null) {
   const most = BALL.duration * BALL.speed, flat = Math.hypot(direction[0], direction[2]) || 1;
   let dx = direction[0] / flat, dz = direction[2] / flat;
   const legs = [[origin[0], origin[2], dx, dz, 0]];
   if (!query) return { legs, length: most, popped: false };
-  const feet = origin[1] - BALL.height;          // (which level of the map it is on, where there is one below)
-  let [lx, lz, , , at] = legs[0], hint = -1, bounces = 0;
+  const road = q => (q.inWater ? Math.max(q.y, q.waterY) : q.y);          // (over water it skims the top of it)
+  const feet = origin[1] - BALL.height;                                    // (the thrower's, or above them in a jump)
+  const first = query(origin[0], origin[2], -1, feet);
+  let ground = first?.onTrack !== false && Number.isFinite(first?.y) ? road(first) : feet;
+  const heights = [round2(ground)], every = Math.round(BALL.heightStep / BALL.traceStep);
+  const finish = (length, popped) => ({ legs, length, popped, heights });
+  let [lx, lz, , , at] = legs[0], hint = first?.index ?? -1, bounces = 0, step = 0;
   for (let along = at + BALL.traceStep; along <= most; along += BALL.traceStep) {
     const px = lx + dx * (along - at), pz = lz + dz * (along - at);
-    const q = query(px, pz, hint, feet);
+    // (asked at the ball's own road height, so it stays on its level: under a bridge it is not lifted on to the deck)
+    const q = query(px, pz, hint, ground);
     hint = q?.index ?? -1;
+    if (q && q.onTrack !== false && Number.isFinite(q.y)) {
+      const target = road(q);
+      if (target - ground > BALL.steepest) return finish(along, true);
+      if (target >= ground) ground = target;
+      else if (q.level === first?.level) ground = Math.max(target, ground - BALL.fallPerMetre * BALL.traceStep);
+    }
+    if (++step % every === 0) heights.push(round2(ground));
     if (!q?.blocked) continue;
     // the wall's face points back the way the ball came from it: the way from where it got to, to the face
     let nx = q.clampX - px, nz = q.clampZ - pz;
     const away = Math.hypot(nx, nz);
     if (away < 1e-6) { nx = -dx; nz = -dz; } else { nx /= away; nz /= away; }
-    if (++bounces > BALL.bounces) return { legs, length: along, popped: true };
+    if (++bounces > BALL.bounces) return finish(along, true);
     const into = dx * nx + dz * nz;
     if (into < 0) { dx -= 2 * into * nx; dz -= 2 * into * nz; } else { dx = nx; dz = nz; }
     const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
     lx = q.clampX + nx * BALL.offWall; lz = q.clampZ + nz * BALL.offWall; at = along;
     legs.push([lx, lz, dx, dz, at]);
   }
-  return { legs, length: most, popped: false };
+  return finish(most, false);
 }
+const round2 = v => Math.round(v * 100) / 100;
 
 /** Seconds a ball is in the air: until its route ends (ballRoute), or BALL.duration for a ball with none */
 export const ballSeconds = ball => (ball.length ?? BALL.duration * BALL.speed) / BALL.speed;
@@ -209,6 +231,13 @@ export const ballBouncesAt = (ball, t) => legAt(ball, Math.max(0, Math.min(t, ba
 export function ballPositionAt(ball, t, groundAt = null) {
   const d = Math.max(0, Math.min(t, ballSeconds(ball))) * BALL.speed, { leg } = legAt(ball, d);
   const x = leg[0] + leg[2] * (d - leg[4]), z = leg[1] + leg[3] * (d - leg[4]);
+  if (ball.heights?.length) {
+    // skimming the road (ballRoute), and thrown in a jump, dropping to it first
+    const k = Math.min(d / BALL.heightStep, ball.heights.length - 1), i = Math.floor(k), f = k - i;
+    const road = ball.heights[i] + ((ball.heights[i + 1] ?? ball.heights[i]) - ball.heights[i]) * f;
+    const tt = Math.max(0, t), above = Math.max(0, ball.origin[1] - BALL.height - ball.heights[0] - 0.5 * BALL.dropGravity * tt * tt);
+    return [x, road + BALL.height + above, z];
+  }
   const ground = ball.ground && groundAt ? groundAt(x, z) : null;
   return [x, Number.isFinite(ground) ? ground + BALL.height : ball.origin[1], z];
 }

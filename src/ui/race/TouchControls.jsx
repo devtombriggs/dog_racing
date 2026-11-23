@@ -4,47 +4,38 @@ import { ITEM_NAMES } from '../../../shared/items.js';
 import { SPECIAL_ITEM } from '../../../shared/specials.js';
 
 // The controls on a phone's screen during a race (touch.js):
-//   left half     a stick, which appears where the thumb goes down and steers left and right (a small push for a
-//                 gentle turn, as a controller's stick)
+//   bottom left   ◀ and ▶ (Tom, 2026-11-23: the stick was too hard to turn with): held, a full turn that way, as the arrow
+//                 keys.  A thumb can slide from one to the other without lifting
 //   right side    Drift (big, held), Jump, Item (what the dog is carrying) and Brake (held: slows, then reverses)
 //   top right     the race menu
 // The dog runs by itself.  Every control follows its own finger, so steering and drifting go together.
-const STICK = { reach: 56, dead: 0.12 };          // px the knob goes from the middle; share of that which does nothing
 // Keep this finger's moves and lifting even when it slides off the control (a browser may refuse: carry on without)
 const follow = (event) => { try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* not a live pointer */ } };
 
-function Stick() {
-  const [at, setAt] = useState(null);             // { x, y, dx, dy } while a thumb is on it
-  const finger = useRef(null);
-
-  const move = (event, start) => {
-    const base = start ?? at;
-    let dx = event.clientX - base.x, dy = event.clientY - base.y;
-    const far = Math.hypot(dx, dy);
-    if (far > STICK.reach) { dx *= STICK.reach / far; dy *= STICK.reach / far; }
-    const share = Math.abs(dx) / STICK.reach;
-    touchInput.turn = share <= STICK.dead ? 0 : -Math.sign(dx) * (share - STICK.dead) / (1 - STICK.dead);     // (left is +)
-    setAt({ x: base.x, y: base.y, dx, dy });
+function Arrows() {
+  const fingers = useRef(new Map());              // pointerId -> 1 (left) or -1 (right): which arrow each finger is on
+  const pad = useRef(null);
+  const [turn, setTurn] = useState(0);
+  const apply = () => {
+    let sum = 0;
+    for (const side of fingers.current.values()) sum += side;
+    const now = Math.sign(sum);                   // (both held: straight on, as both keys)
+    touchInput.turn = now; setTurn(now);
   };
-  const down = (event) => {
-    if (finger.current !== null) return;
-    finger.current = event.pointerId;
-    follow(event);
-    move(event, { x: event.clientX, y: event.clientY });
+  // which arrow a finger is over: the left half of the pair or the right
+  const sideOf = (event) => { const box = pad.current.getBoundingClientRect(); return event.clientX < box.left + box.width / 2 ? 1 : -1; };
+  const down = (event) => { follow(event); fingers.current.set(event.pointerId, sideOf(event)); apply(); };
+  const move = (event) => {
+    if (!fingers.current.has(event.pointerId)) return;
+    const side = sideOf(event);
+    if (fingers.current.get(event.pointerId) !== side) { fingers.current.set(event.pointerId, side); apply(); }
   };
-  const up = (event) => {
-    if (event.pointerId !== finger.current) return;
-    finger.current = null; touchInput.turn = 0; setAt(null);
-  };
-
+  const up = (event) => { if (fingers.current.delete(event.pointerId)) apply(); };
   return (
-    <div className="touch-stick" onPointerDown={down} onPointerMove={event => { if (event.pointerId === finger.current) move(event); }}
-      onPointerUp={up} onPointerCancel={up} onLostPointerCapture={up}>
-      {at ? (
-        <div className="touch-stick__base" style={{ left: at.x, top: at.y }}>
-          <div className="touch-stick__knob" style={{ transform: `translate(${at.dx}px, ${at.dy}px)` }} />
-        </div>
-      ) : <div className="touch-stick__hint" aria-hidden="true"><span>◀</span> steer <span>▶</span></div>}
+    <div className="touch-arrows" ref={pad} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+      onLostPointerCapture={up} onContextMenu={event => event.preventDefault()}>
+      <div className={`touch-arrow${turn > 0 ? ' touch-arrow--on' : ''}`} aria-label="Turn left">◀</div>
+      <div className={`touch-arrow${turn < 0 ? ' touch-arrow--on' : ''}`} aria-label="Turn right">▶</div>
     </div>
   );
 }
@@ -79,7 +70,7 @@ export function TouchControls({ heldItem }) {
   const itemName = heldItem === SPECIAL_ITEM ? 'Special' : heldItem ? ITEM_NAMES[heldItem] : 'No item';
   return (
     <div className="touch-controls">
-      <Stick />
+      <Arrows />
       <TouchButton className="touch-btn--drift" label="Drift (hold)" hold={on => { touchInput.drift = on; }}>DRIFT</TouchButton>
       <TouchButton className="touch-btn--jump" label="Jump" tap={() => touchInput.jump()}>JUMP</TouchButton>
       <TouchButton className={`touch-btn--item${item ? '' : ' touch-btn--empty'}`} label={`Use item: ${itemName}`} tap={() => touchInput.useItem()}>

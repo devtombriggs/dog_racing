@@ -36,7 +36,10 @@ const PLATFORM_BOOST = { speed: 1.6, hold: 1.2 };
 // a dark road `depth` metres under each crossing.  Miss a jump and you land on it, run its length past the robots, and a lift
 // at the far end takes you back up to the main road, just before the next catapult.  Falling is meant to cost: the main road
 // has the boosts, the Undercity has the robots and the ride up.
-const UNDER = { depth: 14 };
+// Falling costs about two seconds, no more (Tom, 2026-11-23: "we only want like a 2 second punishment"): each crossing has its own
+// Undercity, which ends just past it, and its floor runs you along as fast as the platforms above (`boost`).  What a fall costs is
+// the ride up in the lift, and the mega pad between the two crossings on the climb
+const UNDER = { depth: 14, boost: PLATFORM_BOOST.speed, past: 26 };
 // The robots: each rolls from side to side across the Undercity, and every `every` seconds fires a ring of lightning `zap`
 // metres round it (its eye glows for `warn` seconds first).  Touch one, or be in the ring, and you are stunned.  Too tall to jump
 const ROBOT = { radius: 1.1, height: 2.8, period: 5.5, pause: 0.12, zap: 3.6, every: 3.4, warn: 0.9, on: 0.55 };
@@ -124,13 +127,8 @@ export const NEON = makeTrack({
     }
     bones.push(...trail); trails.push({ id: b.id, onBranch, bones: trail });
   }
-  // the Undercity: one under both crossings on the climb (whichever you fall at, you run the rest of the way underneath),
-  // and one under the crossing on the ramp.  Each ends in a lift that comes up just before the next catapult
-  const catapult = id => launches.find(l => l.id === id);
-  const undercity = [
-    { id: 'undercity-climb', sStart: platforms[0].sStart - 6, sEnd: catapult('catapult-turn').padStart - 22, depth: UNDER.depth },
-    { id: 'undercity-ramp', sStart: platforms[2].sStart - 6, sEnd: catapult('catapult-ramp').padStart - 16, depth: UNDER.depth },
-  ];
+  // the Undercity: one under each crossing, ending in a lift that comes up just past it
+  const undercity = platforms.map(zone => ({ id: `undercity-${zone.id.replace('crossing-', '')}`, sStart: zone.sStart - 6, sEnd: zone.sEnd + UNDER.past, depth: UNDER.depth, boost: UNDER.boost }));
   for (const u of undercity) {
     const takeoffS = u.sEnd - 8;
     launches.push({ id: `lift-${u.id}`, lift: true, under: u.id, padStart: takeoffS - LIFT.run, takeoffS, gapStart: takeoffS, gapEnd: takeoffS + 4, landingS: takeoffS + LIFT.landing,

@@ -318,7 +318,8 @@ test('a signed-in player\'s race goes on the leaderboards with its best lap; a g
     }
     assert.ok(latest(room.code, 'playerFinished'));
     guest.call('leaveGame');           // (the guest leaves: the race ends with the host home)
-    const boards = db.leaderboards();
+    const boards = db.leaderboards().multiplayer;          // (two people started it, though one left)
+    assert.equal(db.leaderboards().singlePlayer.mostRaces.length, 0);
     const lapSeconds = map.checkpoints.length;                  // (lap 2: a second at each checkpoint)
     assert.deepEqual(boards.fastestLaps[mapId].map(row => [row.username, row.dog, row.seconds]), [['Racer', 'jazz', lapSeconds]]);
     assert.deepEqual(boards.mostRaces.map(row => row.username), ['Racer']);

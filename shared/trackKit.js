@@ -36,10 +36,11 @@ import { swimSpeed } from './dogStats.js';
 //     platforms: [{ id, sStart, sEnd, boost, pads: [{ s0, s1, half, reach, period, phase }] }],   // a stretch with no road at all, only
 //                                           // platforms sliding from side to side: a dog over nothing falls, and starts the crossing again
 //                                           // (boost: { speed, hold }: every platform is a boost pad, moving with it)
-//     undercity: [{ id, sStart, sEnd, depth, wade, surface }],   // a second road `depth` metres under the main one from sStart to sEnd (Neon Nexus,
+//     undercity: [{ id, sStart, sEnd, depth, wade, surface, boost }],   // a second road `depth` metres under the main one from sStart to sEnd (Neon Nexus,
 //                                           // the river under Monkey Jungle's bridges: wade, how deep the water over it is):
 //                                           // a dog that falls off a platform lands on it instead of starting again.  Its way back up is
 //                                           // a lift: a launch with `lift: true, under: id`, which only takes a dog that is down there
+//                                           // (boost: its floor speeds a dog up this much, as a boost pad: Neon Nexus)
 //     slipAt: s => 0..1,                    // how slippery (leave out for a dry track)
 //     hazardsAt: t => [{ id, kind, x, y, z, rotationY, radius, height, active }],   // everything that moves, t = seconds since GO
 //     keepClear: [[s0, s1], ...],           // stretches with no pickups or burrow mouths, besides the ones worked out here
@@ -386,7 +387,7 @@ export function makeTrack(def, features = () => ({})) {
     // (and so is one that has dropped below the top of the platforms: a platform sliding over it does not catch it from underneath)
     if (under && (y < p.trackY - under.depth / 2 || q.gap || (isHole(p.s) && y < p.trackY - UNDER_PLATFORM))) {
       const low = p.trackY - under.depth;
-      Object.assign(q, { level: under.id, trackY: low, y: low, gap: false, kick: undefined, boost: 0, mud: false, slowName: undefined, surface: under.surface ?? 'deck', inWater: false, waterDepth: 0, movement: 'run', lane: null });
+      Object.assign(q, { level: under.id, trackY: low, y: low, gap: false, kick: undefined, boost: under.boost ?? 0, mud: false, slowName: undefined, surface: under.surface ?? 'deck', inWater: false, waterDepth: 0, movement: 'run', lane: null });
       // (a level below that is a river bed: the dog wades it, as slow as its swimming makes it)
       if (under.wade) Object.assign(q, { surface: 'water', inWater: true, waterDepth: under.wade, waterY: low + under.wade, movement: 'wade' });
     }

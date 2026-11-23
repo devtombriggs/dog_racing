@@ -603,6 +603,16 @@ html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scal
 .zr-lb__title img { display: block; height: clamp(54px, 10vh, 96px); width: auto; }
 .zr-lb__you { margin: 0 0 10px !important; }
 .zr-lb__you b { color: var(--zr-yellow); }
+/* Multiplayer | Single Player: the colours of their buttons on the home screen */
+.zr-lb__modes { display: flex; justify-content: center; margin: 0 auto 10px; border: 3px solid #ffffff55; border-radius: 999px; overflow: hidden; width: fit-content; }
+.zr-lb__mode {
+  padding: 8px 20px; border: 0; background: #101a2c; color: #ffffffb0; cursor: pointer;
+  font: 400 17px/1 var(--zr-display); letter-spacing: 0.04em; text-transform: uppercase;
+}
+.zr-lb__mode:hover { color: #fff; }
+.zr-lb__mode--multiplayer[aria-selected="true"] { color: #fff; background: linear-gradient(#4fa3ff, #1f5fd8); }
+.zr-lb__mode--singlePlayer[aria-selected="true"] { color: #fff; background: linear-gradient(#ffc93c, #f08a00); }
+.zr-lb__mode:focus-visible { outline: 3px solid var(--zr-yellow); outline-offset: -3px; }
 .zr-lb__tabs { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 12px; }
 .zr-lb__tab {
   padding: 7px 14px; border: 3px solid #ffffff55; border-radius: 999px;
@@ -649,6 +659,8 @@ html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scal
   .zr-lb__you { margin: 0 0 6px !important; font-size: 12px; }
   .zr-lb__tabs { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; margin-bottom: 6px; padding-bottom: 2px; scrollbar-width: none; }
   .zr-lb__tab { flex: none; padding: 5px 10px; font-size: 12px; border-width: 2px; }
+  .zr-lb__modes { margin-bottom: 6px; border-width: 2px; }
+  .zr-lb__mode { padding: 5px 14px; font-size: 13px; }
   .zr-lb__maps { padding: 2px 2px 6px; }
   .zr-lb__map { width: 58px; font-size: 9px; border-radius: 10px; }
   .zr-lb__map img { width: 46px; height: 46px; border-radius: 8px; }

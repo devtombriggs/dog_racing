@@ -86,7 +86,7 @@ It finds buttons by where they are on the screen, so a new screen needs nothing 
 
 ## Phones and tablets
 
-On a touch screen (`src/touch.js`; try it on a computer with `?touch=1`) the game is played sideways: held upright, a "Turn your phone sideways" screen covers it. Android goes full screen and locks sideways at the first tap; an iPhone allows neither from a web page, but **Add to Home Screen** (`public/manifest.webmanifest`) opens it full screen. In a race (`src/ui/race/TouchControls.jsx`) the dog runs by itself; a stick appears under the left thumb and steers, and on the right are Drift (hold), Jump, Item (showing what the dog carries) and Brake (hold: slows, then reverses), with the race menu top right. The screen shows only the race order and a small course map. Split Screen is not offered on a phone.
+On a touch screen (`src/touch.js`; try it on a computer with `?touch=1`) the game is played sideways: held upright, a "Turn your phone sideways" screen covers it. Android goes full screen and locks sideways at the first tap; an iPhone allows neither from a web page, but **Add to Home Screen** (`public/manifest.webmanifest`) opens it full screen. In a race (`src/ui/race/TouchControls.jsx`) the dog runs by itself; ◀ and ▶ bottom left steer (held: a full turn, and a little sharper than on a keyboard; a thumb can slide from one to the other), and on the right are Drift (hold), Jump, Item (showing what the dog carries) and Brake (hold: slows, then reverses), with the race menu top right. The screen shows only the race order and a small course map. Split Screen is not offered on a phone.
 
 ## Full screen and the Esc menu
 

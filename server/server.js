@@ -439,6 +439,7 @@ function useItem(room, player) {
     const origin = [x + forward[0] * BALL.launchAhead, y + BALL.height, z + forward[2] * BALL.launchAhead];
     // its whole route, bouncing off the walls, worked out now (a generated map knows where its walls are)
     const track = PROCEDURAL_TRACKS[room.mapId];
+    track?.setClock?.((Date.now() - room.startedAt) / 1000);        // (where the bridges and platforms have swung to)
     const route = ballRoute(origin, forward, track ? (qx, qz, hint, qy) => track.query(qx, qz, hint, qy) : null);
     const ball = {
       id: `ball-${room.nextItemId++}`, owner: player.id, firedAt: Date.now(), origin, direction: forward, ...route,
@@ -447,7 +448,7 @@ function useItem(room, player) {
     room.balls.set(ball.id, ball);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
     io.to(room.code).emit('ballThrown', { id: ball.id, owner: ball.owner, origin: ball.origin, direction: ball.direction, ground: ball.ground,
-      legs: ball.legs, length: ball.length, popped: ball.popped });
+      legs: ball.legs, length: ball.length, popped: ball.popped, heights: ball.heights });
   } else if (item === 'frisbee') {
     throwFrisbee(room, player);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
@@ -980,7 +981,7 @@ function recordRace(room) {
   const results = [...room.players.values()].filter(player => player.userId && !player.bot).map(player => ({
     userId: player.userId, mapId: room.mapId, dog: player.dog, place: places.get(player.id), racers: room.players.size,
     finished: player.finished, raceSeconds: player.finishTime, bestLap: player.bestLap,
-    grandPrix: room.grandPrix?.id ?? null, singlePlayer: room.singlePlayer,
+    grandPrix: room.grandPrix?.id ?? null, singlePlayer: room.singlePlayer, humans: room.raceHumans ?? 1,
   }));
   if (!results.length) return;
   try { db.recordRace(results); } catch (error) { console.error('Could not record the race:', error); }
@@ -989,7 +990,7 @@ function recordRace(room) {
 function recordGrandPrix(room, table) {
   const results = table.map((entry, index) => ({ entry, place: index + 1 }))
     .filter(({ entry }) => room.players.get(entry.playerId)?.userId && !entry.bot)
-    .map(({ entry, place }) => ({ userId: room.players.get(entry.playerId).userId, grandPrix: room.grandPrix.id, place, points: entry.points }));
+    .map(({ entry, place }) => ({ userId: room.players.get(entry.playerId).userId, grandPrix: room.grandPrix.id, place, points: entry.points, humans: room.raceHumans ?? 1 }));
   if (!results.length) return;
   try { db.recordGrandPrix(results); } catch (error) { console.error('Could not record the Grand Prix:', error); }
 }
@@ -1082,6 +1083,9 @@ function startRaceIn(room) {
   else stopBots(room);
   const players = [...room.players.values()];
 
+  // how many people this race is between (Tom, 2026-11-23): two or more and it goes on the Multiplayer leaderboards, otherwise
+  // Single Player, a multiplayer room nobody else joined included.  Split screen is one game, so Single Player
+  room.raceHumans = room.singlePlayer ? 1 : players.filter(player => !player.bot).length;
   players.forEach((player, index) => {
     const start = MAPS[room.mapId].startPositions[index];
     player.position = [...start.position];

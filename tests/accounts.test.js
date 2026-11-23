@@ -128,18 +128,24 @@ test('accounts: Google sign-in, the first time choosing a username, after that s
   assert.equal(me2.body.user.username, 'JazzHands');
 });
 
-test('leaderboards: fastest laps and races per map, wins, podiums, win rate, Grand Prix wins and dogs', () => {
+test('leaderboards: fastest laps and races per map, wins, podiums, win rate, Grand Prix wins and dogs (Multiplayer: two people or more)', () => {
   const db = openDb();
   const tom = db.createPasswordUser({ email: 'tom@example.com', username: 'Tom', password: 'longenough' });
   const sam = db.createPasswordUser({ email: 'sam@example.com', username: 'Sam', password: 'longenough' });
-  const race = (user, place, dog, lap, seconds, mapId = 'wendover') => ({ userId: user.id, mapId, dog, place, racers: 6, finished: seconds != null, raceSeconds: seconds, bestLap: lap, singlePlayer: false });
+  const race = (user, place, dog, lap, seconds, mapId = 'wendover') => ({ userId: user.id, mapId, dog, place, racers: 6, finished: seconds != null, raceSeconds: seconds, bestLap: lap, singlePlayer: false, humans: 2 });
   db.recordRace([race(tom, 1, 'ralph', 30.5, 100), race(sam, 2, 'casper', 29.9, 104)]);
   db.recordRace([race(tom, 3, 'ralph', 31, 110), race(sam, 1, 'casper', 32, 101)]);
   db.recordRace([race(tom, 1, 'jazz', 20, 70, 'frostpeak'), race(sam, 6, 'casper', null, null, 'frostpeak')]);
   for (let i = 0; i < 10; i++) db.recordRace([race(sam, 2, 'casper', null, null)]);
-  db.recordGrandPrix([{ userId: tom.id, grandPrix: 'paw', place: 1, points: 40 }, { userId: sam.id, grandPrix: 'paw', place: 2, points: 30 }]);
+  db.recordGrandPrix([{ userId: tom.id, grandPrix: 'paw', place: 1, points: 40, humans: 2 }, { userId: sam.id, grandPrix: 'paw', place: 2, points: 30, humans: 2 }]);
+  // against the computer dogs alone (Tom, 2026-11-23: "people can't just get great times against easy bots"): Single Player only
+  db.recordRace([{ ...race(tom, 1, 'pippa', 5, 50), humans: 1 }]);
+  db.recordGrandPrix([{ userId: tom.id, grandPrix: 'paw', place: 1, points: 40, humans: 1 }]);
 
-  const boards = db.leaderboards();
+  const all = db.leaderboards(), boards = all.multiplayer, solo = all.singlePlayer;
+  assert.deepEqual(solo.fastestLaps.wendover.map(r => [r.username, r.seconds, r.dog]), [['Tom', 5, 'pippa']]);
+  assert.deepEqual([solo.mostWins.map(r => [r.username, r.value]), solo.grandPrixWins.map(r => r.value), solo.popularDogs.map(r => r.dog)], [[['Tom', 1]], [1], ['pippa']]);
+  assert.equal(all.winRateMinRaces, 10);
   assert.deepEqual(boards.fastestLaps.wendover.map(r => [r.username, r.seconds, r.dog]), [['Sam', 29.9, 'casper'], ['Tom', 30.5, 'ralph']]);
   assert.deepEqual(boards.fastestRaces.wendover.map(r => [r.username, r.seconds]), [['Tom', 100], ['Sam', 101]]);
   assert.deepEqual(boards.fastestLaps.frostpeak.map(r => r.username), ['Tom']);
@@ -150,9 +156,10 @@ test('leaderboards: fastest laps and races per map, wins, podiums, win rate, Gra
   assert.deepEqual(boards.grandPrixWins.map(r => [r.username, r.value]), [['Tom', 1]]);
   assert.deepEqual(boards.popularDogs[0], { dog: 'casper', races: 13, wins: 1 });
 
+  // (a player's own numbers are all their races)
   const mine = db.playerStats(tom.id);
-  assert.deepEqual([mine.races, mine.wins, mine.podiums, mine.grandPrixWins, mine.favouriteDog], [3, 2, 3, 1, 'ralph']);
-  assert.deepEqual(mine.bestLaps, { wendover: 30.5, frostpeak: 20 });
+  assert.deepEqual([mine.races, mine.wins, mine.podiums, mine.grandPrixWins, mine.favouriteDog], [4, 3, 4, 2, 'ralph']);
+  assert.deepEqual(mine.bestLaps, { wendover: 5, frostpeak: 20 });
 });
 
 test('accounts: sessions run out', () => {

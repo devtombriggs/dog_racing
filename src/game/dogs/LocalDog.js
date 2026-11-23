@@ -12,6 +12,7 @@ import { DOGS, STAT_EFFECT, WATER_ACCELERATION, statScale, swimShare, turnSpeedL
 import { HANDLING, RUNNING_JUMP_SPEED } from '../../config/handling.js';
 import { CONTACT, dogMass, dogOverlap } from './contact.js';
 import { gaitTimeScale, sprintFraction } from './animation.js';
+import { TOUCH_TURN } from '../../touch.js';
 import { SkidView } from './skidView.js';
 import { DogAvatar } from './DogAvatar.js';
 
@@ -688,7 +689,9 @@ export class LocalDog extends DogAvatar {
 
     // Fast means wide: the turn rate falls away as the dog stretches out
     // (standing still or stuck against something, left and right still turn the dog on the spot)
-    const turnRate = THREE.MathUtils.lerp(this.turnRateSlow, this.turnRateSprint, effort) * Math.max(steeringFactor, HANDLING.pivotSteer);
+    // (and sharper on a phone's ◀ ▶ buttons: touch.js)
+    const turnRate = THREE.MathUtils.lerp(this.turnRateSlow, this.turnRateSprint, effort) * Math.max(steeringFactor, HANDLING.pivotSteer)
+      * (input.touch ? TOUCH_TURN : 1);
 
     // A drift (the drift button held through a corner) turns the dog round its own curve; the arrows only tighten or
     // widen it.  The ordinary steering is not added on top: it is kept in step with the drift's turn instead, so that
@@ -1016,10 +1019,18 @@ export class LocalDog extends DogAvatar {
     }
     // ...except down Frostpeak's black run, where that would sail the dog out level over a
     // 45 % slope: there a jump is a hop that follows the mountain down
-    const groundNow = aloft && this.groundY - groundBelow > DROP.from ? this.groundY      // (over a gap: held at the level he was on)
+    let groundNow = aloft && this.groundY - groundBelow > DROP.from ? this.groundY      // (over a gap: held at the level he was on)
       : this.isJumping && !steepRun && !special?.flyHeight   // (flying, he follows the ground)
         ? Math.max(groundBelow, this.groundY)
         : groundBelow;
+    // In the air, the ground under the dog has come up a whole level: a swaying bridge or platform back under a dog that
+    // had dropped off it (Tom, 2026-11-23: Enzo shot up into the sky on the jungle bridges).  The dog stays where it is in
+    // the air: above the deck it comes down on it, and below it, it carries on falling to the level it was dropping to
+    if (this.isJumping && groundNow - this.groundY > DROP.from) {
+      const height = this.groundY + this.jumpHeight;
+      if (height >= groundNow) { this.jumpHeight = height - groundNow; this.groundY = groundNow; }
+      else groundNow = this.groundY;
+    }
 
     // Ease onto the new height so tile edges and kerbs do not jolt the dog,
     // but go straight there after a big change (a respawn, a drop), and in the air up a hill: there the ground

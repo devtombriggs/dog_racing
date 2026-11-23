@@ -4,8 +4,8 @@
 //
 //   const items = createItems({ scene, renderer });
 //   items.setHeld(playerId, 'ball' | 'toy' | 'bone' | 'frisbee' | 'firework' | 'collar' | 'special' | null);
-//   items.throwBall({ id, origin, direction, legs, length, popped });   items.removeBall(id, position);
-//   (a ball bounces off walls: its route, legs, comes from the server: shared/items.js ballRoute)
+//   items.throwBall({ id, origin, direction, legs, length, popped, heights });   items.removeBall(id, position);
+//   (a ball bounces off walls and skims the road: its route, legs and heights, comes from the server: shared/items.js ballRoute)
 //   items.placeHazard({ id, position, rotationY }); items.removeHazard(id, burst);
 //   items.throwFrisbee({ id, position, yaw });  items.moveFrisbees([{ id, position, yaw }]);  items.removeFrisbee(id, position);
 //   each frame: items.update(delta, anchors)       // anchors: Map playerId -> Object3D (the dog's head)
@@ -146,8 +146,8 @@ export function createItems({ scene, renderer }) {
       if (item) held.set(playerId, { item, object: null }); else held.delete(playerId);
     },
 
-    throwBall({ id, origin, direction, ground, legs = null, length = null, popped = false }) {
-      const ball = { origin, direction, ground, ...(legs ? { legs, length } : {}) };
+    throwBall({ id, origin, direction, ground, legs = null, length = null, popped = false, heights = null }) {
+      const ball = { origin, direction, ground, ...(legs ? { legs, length } : {}), ...(heights ? { heights } : {}) };
       balls.set(id, { ball, popped, bounced: 0, startedAt: performance.now(), object: null });
     },
     removeBall(id, position) {
