@@ -25,7 +25,7 @@ export function HudPanel({ state, speedRef, surfaceRef, device = null }) {
         </div>
         {item && (
           <div className="race-hud__item">
-            {heldItem === SPECIAL_ITEM && <img src="/icons/special.png" alt="" />}
+            <img src={heldItem === SPECIAL_ITEM ? '/icons/special.png' : `/icons/items/${heldItem}.png`} alt="" />
             {item}<kbd>{press}</kbd>
           </div>
         )}

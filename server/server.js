@@ -5,7 +5,7 @@ import { env } from 'node:process';
 import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { SLALOM, slalomHits } from '../shared/slalom.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
-import { rollItem, forwardOf, ballPositionAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
+import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
 import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, quakeSeconds, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
@@ -436,14 +436,18 @@ function useItem(room, player) {
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
     io.to(room.code).emit('hazardPlaced', { id: hazard.id, owner: hazard.owner, position: hazard.position, rotationY: hazard.rotationY, ride: hazard.ride ?? null });
   } else if (item === 'ball') {
+    const origin = [x + forward[0] * BALL.launchAhead, y + BALL.height, z + forward[2] * BALL.launchAhead];
+    // its whole route, bouncing off the walls, worked out now (a generated map knows where its walls are)
+    const track = PROCEDURAL_TRACKS[room.mapId];
+    const route = ballRoute(origin, forward, track ? (qx, qz, hint, qy) => track.query(qx, qz, hint, qy) : null);
     const ball = {
-      id: `ball-${room.nextItemId++}`, owner: player.id, firedAt: Date.now(),
-      origin: [x + forward[0] * BALL.launchAhead, y + BALL.height, z + forward[2] * BALL.launchAhead], direction: forward,
+      id: `ball-${room.nextItemId++}`, owner: player.id, firedAt: Date.now(), origin, direction: forward, ...route,
       ground: room.mapId === 'frostpeak'          // skims down the black run rather than flying off level into the sky
     };
     room.balls.set(ball.id, ball);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
-    io.to(room.code).emit('ballThrown', { id: ball.id, owner: ball.owner, origin: ball.origin, direction: ball.direction, ground: ball.ground });
+    io.to(room.code).emit('ballThrown', { id: ball.id, owner: ball.owner, origin: ball.origin, direction: ball.direction, ground: ball.ground,
+      legs: ball.legs, length: ball.length, popped: ball.popped });
   } else if (item === 'frisbee') {
     throwFrisbee(room, player);
     io.to(room.code).emit('itemUsed', { playerId: player.id, item });
@@ -879,7 +883,7 @@ function checkItemHits(room, player, previousPosition) {
   const now = Date.now();
   for (const ball of room.balls.values()) {
     const age = (now - ball.firedAt) / 1000;
-    if (age > BALL.duration) { room.balls.delete(ball.id); continue; }
+    if (age > ballSeconds(ball)) { room.balls.delete(ball.id); continue; }
     const groundAt = BALL_GROUND[room.mapId];
     const from = ballPositionAt(ball, Math.max(0, age - 0.12), groundAt), to = ballPositionAt(ball, age, groundAt);
     // a ball that meets a chew toy knocks it off the road, and that is the end of the ball too
@@ -1745,9 +1749,9 @@ function threatTo(room, player) {
   const now = Date.now();
   for (const ball of room.balls.values()) {
     if (ball.owner === player.id) continue;
-    const at = ballPositionAt(ball, (now - ball.firedAt) / 1000, BALL_GROUND[room.mapId]);
-    const ahead = (player.position[0] - at[0]) * ball.direction[0] + (player.position[2] - at[2]) * ball.direction[2];
-    if (ahead > 0 && distanceToSegment(player.position, at, [at[0] + ball.direction[0] * 40, at[1], at[2] + ball.direction[2] * 40]) < 3) nearest = Math.min(nearest, ahead);
+    const age = (now - ball.firedAt) / 1000, at = ballPositionAt(ball, age, BALL_GROUND[room.mapId]), [hx, , hz] = ballHeadingAt(ball, age);
+    const ahead = (player.position[0] - at[0]) * hx + (player.position[2] - at[2]) * hz;
+    if (ahead > 0 && distanceToSegment(player.position, at, [at[0] + hx * 40, at[1], at[2] + hz * 40]) < 3) nearest = Math.min(nearest, ahead);
   }
   return nearest;
 }

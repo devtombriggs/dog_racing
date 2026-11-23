@@ -4,7 +4,8 @@
 //
 //   const items = createItems({ scene, renderer });
 //   items.setHeld(playerId, 'ball' | 'toy' | 'bone' | 'frisbee' | 'firework' | 'collar' | 'special' | null);
-//   items.throwBall({ id, origin, direction });   items.removeBall(id, position);
+//   items.throwBall({ id, origin, direction, legs, length, popped });   items.removeBall(id, position);
+//   (a ball bounces off walls: its route, legs, comes from the server: shared/items.js ballRoute)
 //   items.placeHazard({ id, position, rotationY }); items.removeHazard(id, burst);
 //   items.throwFrisbee({ id, position, yaw });  items.moveFrisbees([{ id, position, yaw }]);  items.removeFrisbee(id, position);
 //   each frame: items.update(delta, anchors)       // anchors: Map playerId -> Object3D (the dog's head)
@@ -12,7 +13,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { BALL, ballPositionAt } from '../../shared/items.js';
+import { ballPositionAt, ballSeconds, ballBouncesAt } from '../../shared/items.js';
 import { buildRocket } from './firework.js';
 import { buildCollar } from './collar.js';
 
@@ -145,8 +146,9 @@ export function createItems({ scene, renderer }) {
       if (item) held.set(playerId, { item, object: null }); else held.delete(playerId);
     },
 
-    throwBall({ id, origin, direction, ground }) {
-      balls.set(id, { ball: { origin, direction, ground }, startedAt: performance.now(), object: null });
+    throwBall({ id, origin, direction, ground, legs = null, length = null, popped = false }) {
+      const ball = { origin, direction, ground, ...(legs ? { legs, length } : {}) };
+      balls.set(id, { ball, popped, bounced: 0, startedAt: performance.now(), object: null });
     },
     removeBall(id, position) {
       const entry = balls.get(id);
@@ -190,10 +192,13 @@ export function createItems({ scene, renderer }) {
       }
       for (const [id, entry] of balls) {
         const age = (performance.now() - entry.startedAt) / 1000;
-        if (age > BALL.duration) { this.removeBall(id); continue; }
+        // the wall after its last bounce: it pops there (out of time with no wall: it just goes)
+        if (age > ballSeconds(entry.ball)) { this.removeBall(id, entry.popped ? ballPositionAt(entry.ball, age, groundAt) : null); continue; }
         if (!entry.object && templates.ball) { entry.object = templates.ball.clone(true); root.add(entry.object); }
         if (!entry.object) continue;
         const p = ballPositionAt(entry.ball, age, groundAt);
+        const bounced = ballBouncesAt(entry.ball, age);
+        if (bounced > entry.bounced) { entry.bounced = bounced; burst(p, 0xd8ff5a); }      // (a puff where it hit the wall)
         entry.object.position.set(p[0], p[1] + Math.abs(Math.sin(age * 7)) * 0.5, p[2]);   // skips along
         entry.object.rotation.x += delta * 18;
       }

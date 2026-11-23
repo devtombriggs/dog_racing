@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { itemChoices, itemOdds, rollItem, ballPositionAt, forwardOf, stepFrisbee, frisbeeHits, BALL, FRISBEE } from '../shared/items.js';
+import { itemChoices, itemOdds, rollItem, ballPositionAt, ballRoute, ballSeconds, ballBouncesAt, ballHeadingAt, forwardOf, stepFrisbee, frisbeeHits, BALL, FRISBEE } from '../shared/items.js';
+import { PROCEDURAL_TRACKS } from '../shared/maps.js';
 
 test('item odds follow the race order: only balls and chew toys for the leader, no chew toys for last', () => {
   assert.deepEqual(itemChoices(1, 4), ['ball', 'toy']);
@@ -258,4 +259,45 @@ test('Jimmy: under Ralph all round, Meela\'s speed downhill; his Dragon Dance sc
   // ...and from last place it carries him a bit further than Poppy's wave carries her
   const metres = top(jimmy) * dragon.speed * dragon.durationMs / 1000;
   assert.ok(metres > KELP.distance && metres < KELP.distance * 1.25, `${metres} m against Poppy's ${KELP.distance}`);
+});
+
+test('a tennis ball bounces off walls three times and pops on the fourth (Tom, 2026-11-23)', () => {
+  // a corridor 10 m wide (walls at x = -5 and 5), thrown across it at an angle
+  const corridor = (x, z) => ({ blocked: Math.abs(x) > 5, clampX: Math.max(-5, Math.min(5, x)), clampZ: z, index: -1 });
+  const dir = [Math.sin(0.5), 0, Math.cos(0.5)];
+  const route = ballRoute([0, 1.3, 0], dir, corridor);
+  assert.equal(route.legs.length, 1 + BALL.bounces, 'three bounces');
+  assert.ok(route.popped && route.length < BALL.duration * BALL.speed, 'gone at the fourth wall, before its time is up');
+  const ball = { origin: [0, 1.3, 0], direction: dir, ...route };
+  for (let t = 0; t <= ballSeconds(ball); t += 0.01) {
+    const [x, , z] = ballPositionAt(ball, t);
+    assert.ok(Math.abs(x) <= 5.5, `inside the walls at ${t.toFixed(2)} s (x ${x.toFixed(2)})`);
+    assert.ok(z >= -1e-9, 'always on up the corridor');
+  }
+  // off each wall like a mirror: across flips, along stays
+  for (let i = 1; i < route.legs.length; i++) {
+    const [, , dx, dz] = route.legs[i], [, , px, pz] = route.legs[i - 1];
+    assert.ok(Math.abs(dx + px) < 0.02 && Math.abs(dz - pz) < 0.02, `bounce ${i}`);
+  }
+  assert.equal(ballBouncesAt(ball, 0), 0);
+  assert.equal(ballBouncesAt(ball, ballSeconds(ball)), BALL.bounces);
+  assert.ok(ballHeadingAt(ball, 0)[0] > 0 && ballHeadingAt(ball, route.legs[1][4] / BALL.speed + 0.01)[0] < 0, 'heading back the other way after the first');
+  // no walls: straight on for its whole time, as before
+  const open = ballRoute([0, 1.3, 0], dir, () => ({ blocked: false }));
+  assert.deepEqual([open.legs.length, open.popped, open.length], [1, false, BALL.duration * BALL.speed]);
+  assert.deepEqual(ballRoute([0, 1.3, 0], dir).legs.length, 1, 'a map with no wall data: straight');
+});
+
+test('a tennis ball thrown at the Speed Bowl\'s barrier bounces back on to the road', () => {
+  const track = PROCEDURAL_TRACKS.speed_bowl, p = track.pointAt(40);
+  const left = [Math.cos(p.rotationY), 0, -Math.sin(p.rotationY)], ahead = [Math.sin(p.rotationY), 0, Math.cos(p.rotationY)];
+  const dir = [left[0] * 0.7 + ahead[0] * 0.7, 0, left[2] * 0.7 + ahead[2] * 0.7];     // across the road at 45 degrees
+  const origin = [p.x, p.y + BALL.height, p.z];
+  const route = ballRoute(origin, dir, (x, z, hint, y) => track.query(x, z, hint, y));
+  assert.ok(route.legs.length >= 2, `it bounced (${route.legs.length - 1} times)`);
+  const ball = { origin, direction: dir, ...route };
+  for (let t = 0; t <= ballSeconds(ball); t += 0.02) {
+    const [x, , z] = ballPositionAt(ball, t), q = track.query(x, z);
+    assert.ok(Math.abs(q.lateral) <= q.halfWidth + 3, `still by the road at ${t.toFixed(2)} s`);
+  }
 });

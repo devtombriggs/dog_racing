@@ -24,10 +24,15 @@ export const ITEM_NAMES = { ball: 'Tennis Ball', toy: 'Chew Toy', bone: 'Golden 
 
 export const BALL = {
   speed: 45,            // m/s, roughly 2.5x a sprinting dog
-  duration: 2.6,        // seconds in flight (about 115 m)
+  duration: 4,          // seconds in flight at most (180 m), if it meets no wall to end it sooner
   launchAhead: 2.5,     // starts this far in front of the thrower
   height: 1.3,          // flies at this height above where it was thrown
   radius: 1.6,          // hits a dog whose centre comes this close
+  // It bounces off walls and barriers (Tom, 2026-11-23: "3 bounces and if it doesn't hit a player in that time
+  // then they disappear on the 4th"): ballRoute
+  bounces: 3,
+  traceStep: 0.5,       // metres between the places its route is checked for a wall
+  offWall: 0.3,         // how far out from the wall a bounce starts it again
 };
 
 export const TOY = {
@@ -140,14 +145,70 @@ export function forwardOf(rotationY) {
 }
 
 /**
- * Where a thrown ball is, t seconds after the throw.  It flies straight the way the thrower faced.
- * Normally it stays at the height it was thrown from; a ball marked `ground` (Frostpeak's steep
- * black run) skims BALL.height above the ground instead, so it follows the slope down (or up).
+ * The way a thrown ball goes: straight on from `origin` along `direction`, bouncing off any wall or barrier in
+ * its way (like light off a mirror), BALL.bounces times; the wall after that is where it ends.  Worked out once,
+ * when it is thrown, so the server and every player's game have the same route.
+ *   query(x, z, hint, y): the map's ground there (a generated map's track.query): { blocked, clampX, clampZ,
+ *   index }.  `blocked` means (x, z) is through a wall, and (clampX, clampZ) is the wall's face.  null: no walls
+ *   (it flies straight for BALL.duration)
+ * Returns { legs: [[x, z, dx, dz, at]] (each straight stretch: where it starts, its heading, and how far along the
+ * route that is in metres), length (m), popped (it ended on a wall, not by running out of time) }
+ */
+export function ballRoute(origin, direction, query = null) {
+  const most = BALL.duration * BALL.speed, flat = Math.hypot(direction[0], direction[2]) || 1;
+  let dx = direction[0] / flat, dz = direction[2] / flat;
+  const legs = [[origin[0], origin[2], dx, dz, 0]];
+  if (!query) return { legs, length: most, popped: false };
+  const feet = origin[1] - BALL.height;          // (which level of the map it is on, where there is one below)
+  let [lx, lz, , , at] = legs[0], hint = -1, bounces = 0;
+  for (let along = at + BALL.traceStep; along <= most; along += BALL.traceStep) {
+    const px = lx + dx * (along - at), pz = lz + dz * (along - at);
+    const q = query(px, pz, hint, feet);
+    hint = q?.index ?? -1;
+    if (!q?.blocked) continue;
+    // the wall's face points back the way the ball came from it: the way from where it got to, to the face
+    let nx = q.clampX - px, nz = q.clampZ - pz;
+    const away = Math.hypot(nx, nz);
+    if (away < 1e-6) { nx = -dx; nz = -dz; } else { nx /= away; nz /= away; }
+    if (++bounces > BALL.bounces) return { legs, length: along, popped: true };
+    const into = dx * nx + dz * nz;
+    if (into < 0) { dx -= 2 * into * nx; dz -= 2 * into * nz; } else { dx = nx; dz = nz; }
+    const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
+    lx = q.clampX + nx * BALL.offWall; lz = q.clampZ + nz * BALL.offWall; at = along;
+    legs.push([lx, lz, dx, dz, at]);
+  }
+  return { legs, length: most, popped: false };
+}
+
+/** Seconds a ball is in the air: until its route ends (ballRoute), or BALL.duration for a ball with none */
+export const ballSeconds = ball => (ball.length ?? BALL.duration * BALL.speed) / BALL.speed;
+
+// The stretch of its route a ball is on, d metres along it
+function legAt(ball, d) {
+  const legs = ball.legs ?? [[ball.origin[0], ball.origin[2], ball.direction[0], ball.direction[2], 0]];
+  let i = 0;
+  while (i + 1 < legs.length && legs[i + 1][4] <= d) i++;
+  return { leg: legs[i], index: i };
+}
+
+/** Which way a ball is heading t seconds after the throw: [dx, 0, dz] */
+export function ballHeadingAt(ball, t) {
+  const { leg } = legAt(ball, Math.max(0, Math.min(t, ballSeconds(ball))) * BALL.speed);
+  return [leg[2], 0, leg[3]];
+}
+
+/** How many times a ball has bounced, t seconds after the throw */
+export const ballBouncesAt = (ball, t) => legAt(ball, Math.max(0, Math.min(t, ballSeconds(ball))) * BALL.speed).index;
+
+/**
+ * Where a thrown ball is, t seconds after the throw: along its route (ballRoute; without one, straight the way
+ * the thrower faced).  Normally it stays at the height it was thrown from; a ball marked `ground` (Frostpeak's
+ * steep black run) skims BALL.height above the ground instead, so it follows the slope down (or up).
  * groundAt(x, z) gives the ground height there.
  */
 export function ballPositionAt(ball, t, groundAt = null) {
-  const d = Math.max(0, Math.min(t, BALL.duration)) * BALL.speed;
-  const x = ball.origin[0] + ball.direction[0] * d, z = ball.origin[2] + ball.direction[2] * d;
+  const d = Math.max(0, Math.min(t, ballSeconds(ball))) * BALL.speed, { leg } = legAt(ball, d);
+  const x = leg[0] + leg[2] * (d - leg[4]), z = leg[1] + leg[3] * (d - leg[4]);
   const ground = ball.ground && groundAt ? groundAt(x, z) : null;
   return [x, Number.isFinite(ground) ? ground + BALL.height : ball.origin[1], z];
 }

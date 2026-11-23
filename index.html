@@ -9,8 +9,10 @@
     <!-- on a phone's home screen: opens full screen, sideways (src/touch.js) -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0b1c4a" />
-    <!-- the game has its own colours: no browser dark theme over it (Android Chrome darkened the pictures and stat bars) -->
-    <meta name="color-scheme" content="only light" />
+    <!-- The game has its own colours, the same in dark mode: no browser darkening it.  Samsung Internet's dark mode
+         darkens every page (the picture, the buttons, the stat bars) unless the page says it handles dark itself,
+         so it says so; Chrome's leaves it alone either way.  (src/index.css keeps the page's own colours.) -->
+    <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

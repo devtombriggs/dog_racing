@@ -1,5 +1,11 @@
-/* The game has its own colours: no browser dark theme over it (Android Chrome's darkened the pictures and stat bars) */
-:root { color-scheme: only light; }
+/* The game has its own colours, the same in dark mode (index.html says it handles dark, so Samsung Internet's dark
+   mode does not darken the picture, the buttons and the stat bars): its own dark style is simply the same colours */
+:root { color-scheme: light; }
+html, body { background: #0b1c4a; }
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: light; }
+  html, body { background: #0b1c4a; }
+}
 
 * {
   box-sizing: border-box;
@@ -282,7 +288,7 @@ html.touch .race-minimap {
 .touch-btn--drift.touch-btn--on { background: radial-gradient(circle at 40% 30%, #9ad8ff, #2f86f0); }
 .touch-btn--jump { right: calc(var(--pad-r) + 120px); bottom: var(--pad-b); width: 76px; height: 76px; background: radial-gradient(circle at 40% 30%, #ffd84d, #e89a12); }
 .touch-btn--item { right: calc(var(--pad-r) + 14px); bottom: calc(var(--pad-b) + 120px); width: 76px; height: 76px; font-size: 34px; background: radial-gradient(circle at 40% 30%, #c08bff, #7333dd); }
-.touch-btn--item img { width: 46px; height: 46px; }
+.touch-btn--item img { width: 54px; height: 54px; pointer-events: none; filter: drop-shadow(0 2px 3px #0007); }
 .touch-btn--empty { font-size: 14px; opacity: 0.45; }
 .touch-btn--brake { right: calc(var(--pad-r) + 128px); bottom: calc(var(--pad-b) + 96px); width: 58px; height: 58px; font-size: 12px; background: radial-gradient(circle at 40% 30%, #ff8a7a, #c9372a); }
 .touch-pause {

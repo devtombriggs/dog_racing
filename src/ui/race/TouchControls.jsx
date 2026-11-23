@@ -12,7 +12,6 @@ import { SPECIAL_ITEM } from '../../../shared/specials.js';
 const STICK = { reach: 56, dead: 0.12 };          // px the knob goes from the middle; share of that which does nothing
 // Keep this finger's moves and lifting even when it slides off the control (a browser may refuse: carry on without)
 const follow = (event) => { try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* not a live pointer */ } };
-const ITEM_ICONS = { ball: '🎾', toy: '🧸', bone: '🦴', frisbee: '🥏', firework: '🎆', collar: '🛡️' };
 
 function Stick() {
   const [at, setAt] = useState(null);             // { x, y, dx, dy } while a thumb is on it
@@ -74,7 +73,9 @@ function TouchButton({ className, label, hold, tap, children }) {
 
 export function TouchControls({ heldItem }) {
   useEffect(() => () => touchInput.release(), []);
-  const item = heldItem === SPECIAL_ITEM ? <img src="/icons/special.png" alt="" /> : heldItem ? ITEM_ICONS[heldItem] ?? '★' : null;
+  // the item itself (pictures of the game's own models: public/icons/items), or the dog's special badge
+  const item = heldItem === SPECIAL_ITEM ? <img src="/icons/special.png" alt="" draggable="false" />
+    : heldItem ? <img src={`/icons/items/${heldItem}.png`} alt="" draggable="false" /> : null;
   const itemName = heldItem === SPECIAL_ITEM ? 'Special' : heldItem ? ITEM_NAMES[heldItem] : 'No item';
   return (
     <div className="touch-controls">
