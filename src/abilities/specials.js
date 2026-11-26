@@ -36,11 +36,21 @@ const FILES = {
   black_lab: { clips: '/models/specials/poppy_wave_clips.glb' },
   pablo: { team: '/models/specials/pablo_sled_ability.glb' },
 };
+// Where each dog's special clips are when another dog uses its special (Merlin, who is given any dog's: shared/specials.js
+// `borrows`).  Some are in the dog's own model.  Only the turning of each bone is taken from them: every dog has the same
+// bones, but not the same build, and a clip's own lengths would pull the borrower into the other dog's shape.
+const BORROWED = {
+  ralph: ['/models/ralph.glb'], barney: ['/models/ralph.glb'], enzo: ['/models/enzo.glb'], casper: ['/models/casper.glb'],
+  second_dog: [FILES.second_dog.clips], gsp: [FILES.gsp.clips], black_lab: [FILES.black_lab.clips],
+};
+const SPECIAL_CLIP = /^(JetFly|BellyFlop|RugbyRun|Zoomies|Wave|PheasantFlush)/;
+const turnsOnly = clip => new THREE.AnimationClip(clip.name, clip.duration, clip.tracks.filter(track => track.name.endsWith('.quaternion')));
+const GIANT = { grow: 0.45, shrink: 0.35 };                 // Nacho's Gigante Mode: seconds to grow, and to shrink again
 const SLED = { summon: 1.6, ram: 0.8, dismiss: 1.2 };      // special_abilities/pablo_sled_clip_info.json
 const ZOOMIES = { windup: 0.6, whirlFrom: 0.42, hit: 2 / 3, end: 1.5, endRate: 1.5 };
 const WAVE = { flop: 0.8, waveFrom: 0.4, hit: 0.8, end: 1.6, endRate: 1.6 };
 const RUGBY = { runRate: 2.2, dive: 0.5, diveRate: 1.6, spin: 1.2 };     // ...and spin: seconds of the slow turn he starts with, to show off the shirt and ball     // how fast his upright run is played; the dive back to all fours is the leap of his Jump clip
-const FLASH = { rate: 1.7 };                                // Ziggy's Lightning Run: how much faster his sprint is played
+const FLASH = { rate: 1.7 };                                // Ziggy's Lightning Run: how much faster her sprint is played
 const HEX_SPIN = 0.9;                                       // Merlin's flourish: seconds of one quick turn on the spot as he casts
 const FLUSH = { birdsAt: 0.3 };                             // of the cue clip: the first bark
 
@@ -77,6 +87,8 @@ export function createSpecials({ scene, resolve }) {
     if (e.state?.kind === 'rugby') { e.rugby?.off(); if (e.model) e.model.rotation.y = 0; }      // Casper's shirt comes off (the ball has gone)
     if (e.state?.kind === 'dragon') { e.dragon?.hide(); if (e.model) e.model.visible = true; }      // Jimmy is himself again
     if (e.state?.kind === 'hex' && e.model) e.model.rotation.y = 0;
+    if (e.state?.kind === 'giant' && e.model) e.model.scale.setScalar(e.size);
+    if (e.own) e.spec = e.own;               // (Merlin: his own again)
     e.lightning?.setActive(false); e.copter?.setActive(false);
     e.override = false;
     e.state = null;
@@ -123,11 +135,18 @@ export function createSpecials({ scene, resolve }) {
       const e = { id, dogId, spec, group, model, mixer, getAction, setAction, own, dragon: null, rugby: null, lightning: null, copter: null, clips: Object.fromEntries(animations.map(c => [c.name, c])),
         state: null, override: false, jets: null, whirl: null, wave: null, flock: null, team: null, teamGltf: null, birdGltf: null };
       entries.set(id, e);
+      e.own = spec; e.size = model?.scale.x ?? 1;
+      // (a dog that is given other dogs' specials: their clips, their birds and their team, ready before they are wanted)
+      if (spec.borrows) {
+        for (const urls of Object.values(BORROWED)) for (const url of urls) load(url).then(g => { if (g && entries.get(id) === e) for (const c of g.animations) if (SPECIAL_CLIP.test(c.name) && !e.clips[c.name]) e.clips[c.name] = turnsOnly(c); });
+        load(FILES.gsp.bird).then(g => { if (g && entries.get(id) === e) e.birdGltf = g; });
+        load(FILES.pablo.team).then(g => { if (g && entries.get(id) === e) e.teamGltf = g; });
+      }
       const files = FILES[dogId] ?? {};
       if (files.clips) load(files.clips).then(g => { if (g && entries.get(id) === e) for (const c of g.animations) e.clips[c.name] = c; });
       if (files.bird) load(files.bird).then(g => { if (g && entries.get(id) === e) e.birdGltf = g; });
       if (files.team) load(files.team).then(g => { if (g && entries.get(id) === e) e.teamGltf = g; });
-      if (spec.kind === 'rugby' && model) e.rugby = createRugbyKit({ scene, model });     // (straight away: it hides the back of his shirt until he needs it)
+      if (spec.kind === 'rugby' && model) e.rugby = createRugbyKit({ scene, model, shirt: dogId === 'casper' });     // (straight away: it hides the back of his shirt until he needs it)
     },
 
     unregister(id) {
@@ -139,10 +158,13 @@ export function createSpecials({ scene, resolve }) {
       entries.delete(id);
     },
 
-    start(id, { kind, durationMs, targets = [] } = {}) {
+    // as: the dog whose special this is, where it is not the dog's own (Merlin)
+    start(id, { kind, durationMs, targets = [], as = null } = {}) {
       const e = entries.get(id);
-      if (!e || e.spec.kind !== kind) return;
+      if (!e) return;
       if (e.state) { stopEffects(e); hideTeam(e); release(e); }
+      e.spec = (as && SPECIALS[as]) || e.own;
+      if (e.spec.kind !== kind) { e.spec = e.own; return; }
       e.state = { kind, t: 0, phase: 'start', active: true, duration: durationMs / 1000, hitLeft: 0, targets, birdsOut: false };
       if (kind === 'jet' && e.spec.look === 'ears') {
         // Barney: his ears are the rotors (no rocket paws); he flies in the pose Ralph does
@@ -150,10 +172,13 @@ export function createSpecials({ scene, resolve }) {
         e.copter.setActive(true);
         playClip(e, 'JetFly', { loop: true, fade: 0.2 });
       } else if (kind === 'flash') {
-        // Ziggy: his own sprint, played much faster, with lightning behind him
+        // Ziggy: her own sprint, played much faster, with lightning behind her
         e.lightning ??= createLightning({ scene });
         e.lightning.setActive(true);
         playClip(e, 'Sprint', { loop: true, fade: 0.1, rate: FLASH.rate });
+      } else if (kind === 'giant') {
+        // Nacho: he grows (update), and runs on in his own strides
+        e.state.grown = 1;
       } else if (kind === 'hex') {
         // Merlin: nothing happens to him but the flourish (a turn on the spot, in update); the server does the rest
         e.state.spun = false;
@@ -175,7 +200,7 @@ export function createSpecials({ scene, resolve }) {
         playClip(e, 'BellyFlop', { loop: true, fade: 0.15 });
       } else if (kind === 'rugby') {
         // Casper: shirt on, ball in his paws, up on his back legs and away
-        e.rugby ??= createRugbyKit({ scene, model: e.model });
+        e.rugby ??= createRugbyKit({ scene, model: e.model, shirt: e.dogId === 'casper' });
         e.rugby.on();
         playClip(e, 'RugbyRun', { loop: true, fade: 0.15, rate: RUGBY.runRate });
       } else if (kind === 'dragon') {
@@ -214,6 +239,7 @@ export function createSpecials({ scene, resolve }) {
       else if (s.kind === 'sled') { teamClip(e, 'SledDismiss', false); s.endFor = SLED.dismiss; }
       else if (s.kind === 'zoomies') { s.endFor = playClip(e, 'ZoomiesEnd', { fade: 0.06, rate: ZOOMIES.endRate }) ? ZOOMIES.end / ZOOMIES.endRate : 0; }
       else if (s.kind === 'rugby') { e.rugby?.pass(); s.endFor = playClip(e, 'Jump', { fade: 0.1, rate: RUGBY.diveRate }) ? RUGBY.dive : 0; }      // the ball is away (the server flies it), and he dives back on to all fours
+      else if (s.kind === 'giant') s.endFor = GIANT.shrink;
       else if (s.kind === 'wave') { s.endFor = playClip(e, 'WaveEnd', { fade: 0.06, rate: WAVE.endRate }) ? WAVE.end / WAVE.endRate : 0; }
     },
 
@@ -223,6 +249,7 @@ export function createSpecials({ scene, resolve }) {
         if (s) {
           s.t += delta;
           if (s.phase === 'end') {
+            if (s.kind === 'giant' && e.model) e.model.scale.setScalar(e.size * (1 + (s.grown - 1) * Math.max(0, 1 - s.t / GIANT.shrink)));
             if (s.t >= (s.endFor ?? 0)) { hideTeam(e); release(e); }
           } else if (s.kind === 'sled') {
             if (!e.team && e.teamGltf) { showTeam(e); teamClip(e, 'SledBoost', true); s.phase = 'boost'; }   // the team loaded late
@@ -246,6 +273,11 @@ export function createSpecials({ scene, resolve }) {
               e.model.rotation.y = k < 1 ? Math.PI * 2 * (k * k * (3 - 2 * k)) : 0;
               s.spun = k >= 1;
             }
+          } else if (s.kind === 'giant') {
+            // up to full size in a moment, a little bounce as he gets there; and down again when it ends (below)
+            const k = Math.min(1, s.t / GIANT.grow), over = 1 + 0.12 * Math.sin(Math.PI * k) * (k < 1 ? 1 : 0);
+            s.grown = (1 + (e.spec.giant - 1) * k * k * (3 - 2 * k)) * over;
+            if (e.model) e.model.scale.setScalar(e.size * s.grown);
           } else if (s.kind === 'hex') {
             if (e.model && !s.spun) {
               const k = Math.min(1, s.t / HEX_SPIN);

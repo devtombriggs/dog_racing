@@ -20,7 +20,8 @@ export const DOG_STATS = {
   // The three dogs from the Shop (Tom, 2026-11-26).  None is better than the free dogs, only different:
   ziggy: { speed: 8.5, acceleration: 7, agility: 6, swimming: 3, drift: 4.5 },          // the whippet: nearly Meela's speed, quicker off the mark, and no swimmer
   barney: { speed: 5.5, acceleration: 10, agility: 9, swimming: 4.5, drift: 9.5 },      // the basset hound: Ralph, a shade better ("similar stats to ralph just slightly better")
-  merlin: { speed: 6.5, acceleration: 8, agility: 9, swimming: 5, drift: 8 },           // the Brussels griffon: his card's 7 / 8 / 9, with Jazz's speed
+  merlin: { speed: 6.5, acceleration: 8, agility: 9, swimming: 5, drift: 8 },
+  nacho: { speed: 6, acceleration: 10, agility: 10, swimming: 3, drift: 9 },            // the chihuahua: his sheet's 6 / 10 / 10; Pablo's pace and drift, and no swimmer           // the Brussels griffon: his card's 7 / 8 / 9, with Jazz's speed
   jimmy: { speed: 4.5, acceleration: 9, agility: 8.5, swimming: 4, drift: 10, downhill: 9 },   // the Chinese crested in his wheel cart: the slowest dog (under Ralph all round), but Meela's speed downhill
 };
 
@@ -30,10 +31,10 @@ export const DOG_STATS_SHOWN = { second_dog: { speed: 10 } };
 export const shownStat = (dogId, key) => DOG_STATS_SHOWN[dogId]?.[key] ?? DOG_STATS[dogId]?.[key];
 
 export const DOG_NAMES = { gsp: 'Pippa', second_dog: 'Meela', black_lab: 'Poppy', pablo: 'Pablo', ralph: 'Ralph', kombu: 'Kombu', rocky: 'Rocky', enzo: 'Enzo', baz_naz: 'Baz & Naz', jazz: 'Jazz', casper: 'Casper', jimmy: 'Jimmy',
-  ziggy: 'Ziggy', barney: 'Barney', merlin: 'Merlin' };          // (the Shop's three: names of mine, Tom to change if he likes)
+  ziggy: 'Ziggy', barney: 'Barney', merlin: 'Merlin', nacho: 'Nacho' };          // (the Shop's three: names of mine, Tom to change if he likes)
 
 // A short-legged dog changes stride (walk, trot, run, sprint) at lower speeds: its share of the big dogs' speeds
-export const DOG_STRIDE_BANDS = { pablo: 0.7, ralph: 0.5, baz_naz: 0.6, casper: 0.7, jimmy: 0.62, barney: 0.55, merlin: 0.62 };
+export const DOG_STRIDE_BANDS = { pablo: 0.7, ralph: 0.5, baz_naz: 0.6, casper: 0.7, jimmy: 0.62, barney: 0.55, merlin: 0.5, nacho: 0.45, ziggy: 0.75 };
 
 // Every point above or below 7 changes the handling by the share given here.  Raise a share to make
 // the dogs feel more different.

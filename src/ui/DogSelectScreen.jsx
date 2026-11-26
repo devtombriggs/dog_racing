@@ -12,7 +12,8 @@ import { SHOP_ITEM, LOCKED_DOGS, dogUnlocked } from '../../shared/shop.js';
 import { Coins } from './shopArt.jsx';
 
 // (in alphabetical order of their names)
-const DOG_IDS = Object.keys(DOGS).sort((a, b) => DOGS[a].displayName.localeCompare(DOGS[b].displayName));
+// by name; the dogs from the Shop after all the others, at the bottom (Tom, 2026-11-26)
+const DOG_IDS = Object.keys(DOGS).sort((a, b) => Boolean(LOCKED_DOGS[a]) - Boolean(LOCKED_DOGS[b]) || DOGS[a].displayName.localeCompare(DOGS[b].displayName));
 const COLUMNS = 4;
 const ROWS = Math.ceil((DOG_IDS.length + 2) / COLUMNS);       // (the Random tile at the end is two wide)
 // (small copies of the portraits, made beside the full-size ones: public/portraits/*.webp)
@@ -30,9 +31,10 @@ const SPECIAL_WORDS = {
   baz_naz: 'The twins pull their rope tight across the road, run faster through anything, and trip whoever it catches',
   jazz: 'One great stomp: every other dog can barely move for five seconds, and loses its special, its shield and whatever it was carrying',
   casper: 'Rugby shirt on, ball in paws: six seconds flat out on his back legs flattening any dog in his way, then the ball flies at the leader',
-  ziggy: 'Four and a half seconds faster than anything on four legs, lightning at his heels, and he steers it himself',
+  ziggy: 'Four and a half seconds faster than anything on four legs, lightning at her heels, and she steers it herself',
+  nacho: 'Grows as big as a horse for six seconds: faster, unstoppable, and any dog in his way is flattened',
   barney: 'His ears spin like rotor blades and he flies over everyone, and nothing can hit him',
-  merlin: 'Turns every other dog into a slow, hopping frog one by one, then shuffles the whole field and lands himself in 2nd',
+  merlin: 'A wizard’s luck: each special he is given is some dog’s, any of them. His own turns every other dog into a hopping frog, then shuffles the field and lands him in 2nd',
   jimmy: 'Turns into a dragon, much faster, and fires up to five fireworks at the leader: more the further back he is',
   black_lab: 'Rides her own wave for five seconds: the fastest of the lot, but it steers itself',
 };

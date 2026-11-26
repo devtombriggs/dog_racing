@@ -350,9 +350,10 @@ export class Race {
       // ITEMS
       // ---------------------------------
 
-      itemChanged: ({ playerId, item }) => {
-        items.setHeld(playerId, item);
-        if (mine(playerId)) { this.myItem = item; session.set({ heldItem: item }); }
+      // as: whose special it is, where it is not the dog's own (Merlin's: it shows that dog's picture)
+      itemChanged: ({ playerId, item, as = null }) => {
+        items.setHeld(playerId, item, as);
+        if (mine(playerId)) { this.myItem = item; session.set({ heldItem: item, heldItemAs: as }); }
       },
 
       itemUsed: ({ playerId, item }) => {
@@ -439,7 +440,7 @@ export class Race {
 
       specialStarted: (data) => {
         specials.start(data.playerId, data);
-        if (mine(data.playerId)) local.specialStarted();
+        if (mine(data.playerId)) local.specialStarted(specials.physics(data.playerId));
       },
 
       specialHit: ({ playerId }) => specials.hit(playerId),
@@ -604,6 +605,7 @@ export class Race {
       avatar.duo.update(delta, { speed, sprintSpeed: local.sprintSpeed, action: avatar.currentAction, spread, stack });
     }
 
+    this.chaseCamera.reach = specials.physics(local.id)?.giant ? 1.6 : 1;         // (Nacho's Gigante Mode: back far enough to see all of him)
     this.chaseCamera.update(delta, Boolean(local.launchFlight));
     this.quake.shake(this.stage.camera);
     this.stage.render();

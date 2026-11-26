@@ -8,7 +8,7 @@ import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGolde
 import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
 import { launchFrisbee, stepFrisbee, roadAhead } from '../shared/frisbee.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, HEX, quakeSeconds, kelpDistance, specialDurationMs, specialChance, comebackGain, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, HEX, quakeSeconds, kelpDistance, specialDurationMs, specialChance, comebackGain, specialFor, borrowedSpecial, BURROWERS, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
@@ -50,7 +50,7 @@ const io = new Server(httpServer, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo', 'baz_naz', 'jazz', 'casper', 'jimmy', 'ziggy', 'barney', 'merlin'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo', 'baz_naz', 'jazz', 'casper', 'jimmy', 'ziggy', 'barney', 'merlin', 'nacho'];
 const MAX_PLAYERS = RACE_DOGS;
 const LOCAL_SEATS = LOCAL_PLAYERS;       // the most players at one split screen
 const LOBBY_BROWSER = 'lobby-browser';
@@ -139,7 +139,7 @@ function rideBurrow(room, player, data) {
     });
     return true;
   }
-  if (player.dog !== 'ralph' || !burrowOpen(room, player)) return false;
+  if (!BURROWERS.includes(player.dog) || !burrowOpen(room, player)) return false;
   const used = burrowsUsed.get(player);
   for (const tunnel of tunnels) {
     const key = `${player.lap}:${tunnel.id}`;
@@ -376,7 +376,9 @@ function grantItem(room, player) {
   if (special) player.comeback = 0;
   player.item = FORCE_ITEM ?? (special ? SPECIAL_ITEM : rollItem(place, standings.length, Math.random, { noFirework: !fireworkAllowed(room) }));
   if (player.item === 'firework' && !FORCE_ITEM) room.fireworksGiven = (room.fireworksGiven ?? 0) + 1, room.fireworkGivenAt = Date.now();
-  io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item });
+  // (Merlin: whose special it is this time; everyone is told, so that what he holds shows that dog's picture)
+  player.specialAs = player.item === SPECIAL_ITEM ? borrowedSpecial(player.dog) : null;
+  io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item, ...(player.specialAs && specialFor(player.dog)?.borrows ? { as: player.specialAs } : {}) });
 }
 
 // May a Treat Box give a firework just now?  (shared/items.js FIREWORK_LIMIT: once or twice a race, like Mario Kart's blue shell)
@@ -487,7 +489,8 @@ function useItem(room, player) {
 // flying, or steering itself); the server says when it starts and ends, and decides who it hits.
 // ---------------------------------
 function startSpecial(room, player) {
-  const spec = specialFor(player.dog);
+  const as = player.specialAs ?? player.dog, spec = specialFor(as);      // (Merlin's may be another dog's)
+  player.specialAs = null;
   if (!spec) return;
   if (spec.kind === 'kelp') { kelpDive(room, player); return; }       // (over in a moment: nothing to keep track of)
   if (spec.kind === 'sheep') { releaseSheep(room, player); return; }  // (the flock is on its own from here: he just runs on)
@@ -503,7 +506,7 @@ function startSpecial(room, player) {
       if (rooms.get(room.code) === room && room.players.get(player.id) === player) endSpecial(room, player, 'done');
     }, durationMs)
   });
-  const started = { playerId: player.id, kind: spec.kind, durationMs };
+  const started = { playerId: player.id, kind: spec.kind, durationMs, ...(as !== player.dog ? { as } : {}) };
   if (spec.kind === 'flush') started.targets = sendPheasants(room, player);
   if (spec.fireworks) started.fireworks = dragonFireworks(spec, place, standings.length), dragonFire(room, player, spec, started.fireworks);
   io.to(room.code).emit('specialStarted', started);

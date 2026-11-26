@@ -2618,3 +2618,58 @@ test('the shuffle: Merlin always 2nd, nobody lost or doubled, laps and checkpoin
     void was;
   }
 });
+
+// Tom, 2026-11-26: "nerf merlin... keep his ult but also give him the chance to get and use everyone else's... Have a picture of the
+// dog instead of the ULT depending on who's he gets"
+test('Merlin is given any dog\'s special (his own among them, never the twins\' rope): everyone is told whose, and that is the one he uses', async (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const { SPECIALS, borrowedSpecial } = await import('../shared/specials.js');
+  // the pick: every dog's but the twins', each as likely as another; a dog that does not borrow gets its own
+  const picks = new Set(Array.from({ length: 400 }, (_, k) => borrowedSpecial('merlin', () => (k + 0.5) / 400)));
+  assert.deepEqual([...picks].sort(), Object.keys(SPECIALS).filter(id => id !== 'baz_naz').sort());
+  assert.equal(borrowedSpecial('gsp', () => 0.3), 'gsp');
+  const mapId = 'speed_bowl', T = PROCEDURAL_TRACKS[mapId];
+  const merlin = client(), other = client();
+  const room = merlin.call('hostGame', { mapId, name: 'M' }).room;
+  other.call('joinGame', { roomCode: room.code, name: 'O' });
+  merlin.call('selectDog', { dog: 'merlin' }); other.call('selectDog', { dog: 'gsp' });
+  other.call('setReady', { ready: true }); merlin.call('setReady', { ready: true });
+  merlin.call('startRace'); merlin.call('raceLoaded'); other.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (p, s) => { const q = T.pointAt(s); p.call('playerMove', { position: [q.x, q.y, q.z], rotation: q.rotationY, animation: 'Sprint', respawnRevision: 0 }); };
+  move(other, 80); move(merlin, 30);
+  const live = rooms.get(room.code), seat = live.players.get(merlin.id);
+  // given Ziggy's: the server says so when it tells everyone what he holds, and that is what starts
+  const ids = Object.keys(SPECIALS).filter(id => id !== 'baz_naz');
+  context.mock.method(Math, 'random', () => (ids.indexOf('ziggy') + 0.5) / ids.length);
+  const box = TREAT_BOXES_BY_MAP[mapId][0];
+  seat.item = null;
+  merlin.call('playerMove', { position: box.groundPosition, rotation: 0, animation: 'Sprint', respawnRevision: 0 });
+  const given = events('itemChanged').filter(e => e.playerId === merlin.id).at(-1);
+  if (given?.item === 'special') {
+    assert.equal(given.as, 'ziggy');
+    merlin.call('useItem');
+    const started = events('specialStarted').at(-1);
+    assert.deepEqual([started.playerId, started.kind, started.as], [merlin.id, 'flash', 'ziggy']);
+    assert.equal(seat.specialAs, null);
+  }
+  // (and whatever the box gave: handed a special straight, the same holds)
+  seat.item = 'special'; seat.specialAs = 'nacho';
+  context.mock.timers.tick(20000);
+  merlin.call('useItem');
+  const giant = events('specialStarted').at(-1);
+  assert.deepEqual([giant.kind, giant.as, giant.durationMs], ['giant', 'nacho', SPECIALS.nacho.durationMs]);
+  merlin.call('leaveGame'); other.call('leaveGame');
+});
+
+test('Nacho: Gigante Mode knocks over a dog in his way, and he may go down Ralph\'s burrows (Tom, 2026-11-26)', async () => {
+  const { SPECIALS, BURROWERS, specialTouches } = await import('../shared/specials.js');
+  assert.deepEqual(BURROWERS, ['ralph', 'nacho']);
+  const giant = SPECIALS.nacho;
+  assert.ok(giant.kind === 'giant' && giant.giant >= 3 && giant.speed > 1 && giant.ghost);
+  assert.ok(specialTouches(giant, [0, 0, 0], 0, [1, 0, 5]), 'a dog just up the road, a little to one side');
+  assert.ok(!specialTouches(giant, [0, 0, 0], 0, [0, 0, -5]), 'not one behind him');
+  assert.ok(!specialTouches(giant, [0, 0, 0], 0, [8, 0, 0]), 'nor one well out to the side');
+});
+

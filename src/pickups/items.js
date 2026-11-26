@@ -17,6 +17,7 @@ import { ballPositionAt, ballSeconds, ballBouncesAt } from '../../shared/items.j
 import { buildRocket } from './firework.js';
 import { buildCollar } from './collar.js';
 import { phoneView } from '../touch.js';
+import { portraitOf } from '../config/dogs.js';
 
 const MODELS = { ball: '/models/tennis_ball.glb', toy: '/models/chew_toy.glb', bone: '/models/golden_bone.glb', frisbee: '/models/frisbee.glb' };
 // Size shown above a dog's head, a vertical nudge to centre it, the glow colour (as on the HUD sheet),
@@ -63,6 +64,16 @@ export function createItems({ scene, renderer }) {
   specialTex.colorSpace = THREE.SRGBColorSpace; owned.push(specialTex);
   const specialMat = new THREE.SpriteMaterial({ map: specialTex, transparent: true, depthWrite: false, toneMapped: false });
   owned.push(specialMat);
+  // a dog's picture, for the special Merlin has been given (one material for each dog, made when first wanted)
+  const portraits = new Map();
+  const portraitMat = (dogId) => {
+    if (!portraits.has(dogId)) {
+      const tex = new THREE.TextureLoader().load(portraitOf(dogId)); tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
+      owned.push(tex, mat); portraits.set(dogId, mat);
+    }
+    return portraits.get(dogId);
+  };
 
   // the firework and the golden collar are built here rather than loaded
   templates.firework = buildRocket();
@@ -86,7 +97,7 @@ export function createItems({ scene, renderer }) {
     }).catch(err => console.warn(`[Items] ${id} model failed to load:`, err));
   }
 
-  function makeHeld(item) {
+  function makeHeld(item, as = null) {
     const group = new THREE.Group();
     const spec = HELD[item];
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({ ...additive, color: spec.glow, opacity: 0.8 }));
@@ -96,8 +107,8 @@ export function createItems({ scene, renderer }) {
     spinner.position.y = spec.lift;
     group.add(spinner);
     group.userData.spinner = spinner;
-    if (item === 'special') {                        // a badge that always faces you, pulsing
-      const badge = new THREE.Sprite(specialMat);
+    if (item === 'special') {                        // a badge that always faces you, pulsing (Merlin's: the picture of the dog whose special it is)
+      const badge = new THREE.Sprite(as ? portraitMat(as) : specialMat);
       badge.scale.setScalar(spec.scale);
       group.add(badge);
       group.userData.badge = badge;
@@ -146,10 +157,10 @@ export function createItems({ scene, renderer }) {
       if (position) burst(position, 0xff5a5a);
     },
 
-    setHeld(playerId, item) {
+    setHeld(playerId, item, as = null) {
       const current = held.get(playerId);
       if (current?.object) { root.remove(current.object); current.object.children[0].material.dispose(); }
-      if (item) held.set(playerId, { item, object: null }); else held.delete(playerId);
+      if (item) held.set(playerId, { item, as, object: null }); else held.delete(playerId);
     },
 
     throwBall({ id, origin, direction, ground, legs = null, length = null, popped = false, heights = null }) {
@@ -178,7 +189,7 @@ export function createItems({ scene, renderer }) {
     update(delta, anchors, groundAt = null, track = null) {
       const t = performance.now() / 1000;
       for (const [playerId, entry] of held) {
-        if (!entry.object && (templates[entry.item] || entry.item === 'special')) { entry.object = makeHeld(entry.item); entry.object.scale.setScalar(phoneView().item); root.add(entry.object); }
+        if (!entry.object && (templates[entry.item] || entry.item === 'special')) { entry.object = makeHeld(entry.item, entry.as); entry.object.scale.setScalar(phoneView().item); root.add(entry.object); }
         if (!entry.object) continue;
         const anchor = anchors.get(playerId);
         entry.object.visible = !!anchor;

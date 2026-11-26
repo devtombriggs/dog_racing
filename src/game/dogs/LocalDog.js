@@ -348,8 +348,8 @@ export class LocalDog extends DogAvatar {
   }
 
   // This dog's special ability has begun
-  specialStarted() {
-    const spec = SPECIALS[this.race.localPlayer?.dog];
+  specialStarted(given = null) {
+    const spec = given ?? SPECIALS[this.race.localPlayer?.dog];
     if (spec?.speed && this.currentSpeed > 0) this.currentSpeed = Math.max(this.currentSpeed, this.sprintSpeed);   // straight up to full pace
     if (spec?.flyHeight) { this.jumpGravity = JUMP.gravity; this.verticalVelocity = 0; }
     this.specialBegan = performance.now();

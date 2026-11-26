@@ -18,6 +18,7 @@ const NO_RACE = {
   frisbeesIncoming: [],
   fireworksIncoming: [],
   heldItem: null,
+  heldItemAs: null,          // (Merlin: the dog whose special he is holding)
   // the first dog is home: when the race ends for everyone else (performance clock)
   raceEndsAt: null,
   // a Grand Prix race is over: the points table the server sent ({ round, of, final, table, nextMapId })

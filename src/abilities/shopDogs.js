@@ -1,6 +1,6 @@
 // What the specials of the three dogs from the Shop look like (Tom, 2026-11-26; the rules are in shared/specials.js):
 //
-//   createLightning({ scene })     Ziggy's Lightning Run: a trail of lightning bolts behind him, and a glow at his heels
+//   createLightning({ scene })     Ziggy's Lightning Run: a trail of lightning bolts behind her, and a glow at her heels
 //   createEarCopter({ model })     Barney's Ear-copter: his ears become two spinning rotors over his head
 //   createFrogs({ scene })         Merlin's Hocus Croakus: a dog turned into a hopping frog for a few seconds
 //   createPuffs({ scene })         ...and the purple puff of stars wherever his magic goes off

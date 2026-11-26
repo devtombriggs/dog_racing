@@ -18,6 +18,9 @@ export class ChaseCamera {
     this.turn = new THREE.Quaternion();
     this.offset = new THREE.Vector3(...(config.cameraOffset || [0, 4, -8])).multiplyScalar(view?.closer ?? 1);
     this.lookHeight = (config.cameraLookHeight ?? 1.5) + (view?.look ?? 0);
+    // how many times further back than usual (and higher): Nacho, grown to a giant, has to fit in the picture.  Set `reach`;
+    // the camera eases to it
+    this.reach = 1; this.reached = 1;
 
     this.snap();
     camera.lookAt(target.position.x, target.position.y + this.lookHeight, target.position.z);
@@ -25,7 +28,7 @@ export class ChaseCamera {
 
   #place() {
     this.turn.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, this.heading());
-    return this.target.position.clone().add(this.offset.clone().applyQuaternion(this.turn));
+    return this.target.position.clone().add(this.offset.clone().multiplyScalar(this.reached).applyQuaternion(this.turn));
   }
 
   // Straight to its place behind the dog (a respawn can be far away)
@@ -46,6 +49,7 @@ export class ChaseCamera {
 
   // rigid: stay locked behind the dog (while it is fired through the air) instead of easing after it
   update(delta, rigid) {
+    this.reached += (this.reach - this.reached) * (1 - Math.exp(-5 * delta));
     const place = this.#place();
     this.confine?.(place, this.target.position);
     if (rigid) this.camera.position.copy(place);
@@ -54,7 +58,7 @@ export class ChaseCamera {
     this.confine?.(this.camera.position, this.target.position);
 
     const lookTarget = this.target.position.clone();
-    lookTarget.y += this.lookHeight;
+    lookTarget.y += this.lookHeight * this.reached;
     this.camera.lookAt(lookTarget);
   }
 }

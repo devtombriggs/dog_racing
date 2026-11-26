@@ -293,12 +293,14 @@ export const DOGS = {
     model: '/models/ziggy.glb',
     stats: DOG_STATS.ziggy,
     skid: CROUCH_SKID,
-    // (Meela's frame, a fifth smaller: a whippet is a greyhound in small.  At the same pace his legs turn over quicker)
-    scale: 2.4,
-    size: 0.85,
-    maxStrideRate: 1.6,
-    cameraOffset: [0, 3.6, -7.2],
-    cameraLookHeight: 1.4,
+    // (Meela's frame at Casper's size: Tom, 2026-11-26 "she needs to be casper size not like a greyhound".  About 1.6 m at
+    //  the top of her head here.  At the same pace her legs turn over much quicker than Meela's)
+    scale: 1.85,
+    size: 0.7,
+    strideBands: DOG_STRIDE_BANDS.ziggy,
+    maxStrideRate: 2.0,
+    cameraOffset: [0, 3.0, -6.2],
+    cameraLookHeight: 1.2,
     // new_dogs/ziggy/clip_info.json (Meela's captured gallop)
     gaitSpeed: { Walk: 1.52, Trot: 2.587, Run: 3.9, Sprint: 5.5 }
   },
@@ -332,14 +334,36 @@ export const DOGS = {
     stats: DOG_STATS.merlin,
     skid: CROUCH_SKID,
     // (Poppy's frame on short legs, in a wizard's hat and cape.  A small dog: about 1.1 m at the back here, his hat half as much again)
-    scale: 2.0,
-    size: 0.6,
+    // (smaller: Tom, 2026-11-26.  About 0.85 m at the back now, 1.35 to the tip of his hat)
+    scale: 1.5,
+    size: 0.5,
     strideBands: DOG_STRIDE_BANDS.merlin,
-    maxStrideRate: 1.9,
-    cameraOffset: [0, 3.0, -6.2],
-    cameraLookHeight: 1.15,
+    maxStrideRate: 2.2,
+    cameraOffset: [0, 2.8, -5.8],
+    cameraLookHeight: 1.0,
     // new_dogs/merlin/clip_info.json (Poppy's captured strides on legs 62% as long)
     gaitSpeed: { Walk: 0.95, Trot: 1.62, Run: 2.85, Sprint: 4.43 }
+  },
+  nacho: {
+    name: 'Nacho (Chihuahua)',
+    displayName: DOG_NAMES.nacho,
+    breed: 'Chihuahua',
+    portrait: '/portraits/nacho.png',
+    accent: '#0b6b3a',
+    model: '/models/nacho.glb',
+    stats: DOG_STATS.nacho,
+    perk: 'Small enough for Ralph’s burrows',
+    skid: CROUCH_SKID,
+    // (Poppy's frame made tiny, in a sombrero and a poncho.  The smallest dog: about 0.75 m at the back here, 1.1 to the top
+    //  of his hat.  His legs go like a sewing machine)
+    scale: 1.35,
+    size: 0.45,
+    strideBands: DOG_STRIDE_BANDS.nacho,
+    maxStrideRate: 2.3,
+    cameraOffset: [0, 2.6, -5.6],
+    cameraLookHeight: 0.9,
+    // new_dogs/nacho/clip_info.json (Poppy's captured strides on legs three quarters as long)
+    gaitSpeed: { Walk: 0.96, Trot: 1.64, Run: 2.88, Sprint: 4.48 }
   },
   ralph: {
     name: 'Ralph (Dachshund)',
@@ -369,6 +393,9 @@ export const DOGS = {
     }
   }
 };
+
+/** the small picture of a dog (public/portraits: a .webp beside every .png) */
+export const portraitOf = dogId => (DOGS[dogId]?.portrait ?? '/icons/special.png').replace(/\.png.*$/, '.webp');
 
 // The ratings themselves, and what each point does, are in shared/dogStats.js (the server uses them too)
 

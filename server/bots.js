@@ -20,7 +20,7 @@ import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSpeedLoss, pickupShare, downhillSpeed } from '../shared/dogStats.js';
 import { HANDLING, JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../shared/handling.js';
 import { BONE_BOOST, PAD_KICK, TOY } from '../shared/items.js';
-import { SPECIALS, SPECIAL_ITEM, bellyBounce, jumpsInSpecial } from '../shared/specials.js';
+import { SPECIALS, SPECIAL_ITEM, BURROWERS, bellyBounce, jumpsInSpecial } from '../shared/specials.js';
 import { DRIFT, driftPerks, driftArc, driftCurvature, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow } from '../shared/drift.js';
 import { WENDOVER, woodlandWaterAt, woodlandDogY, woodlandSwimMultiplier } from '../shared/wendoverData.js';
 import { BURROWS } from '../shared/burrows.js';
@@ -420,7 +420,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     }
 
     // Ralph goes down his burrows (the server takes him through when he runs into the mouth of one)
-    if (dog === 'ralph' && L.itemSense > 0 && !world.special && world.burrowOpen !== false) {
+    if (BURROWERS.includes(dog) && L.itemSense > 0 && !world.special && world.burrowOpen !== false) {
       for (const burrow of route.burrows) {
         const gap = route.ahead(burrow.s, s);
         if (gap > -1 && gap < 40) return burrow.lateral;

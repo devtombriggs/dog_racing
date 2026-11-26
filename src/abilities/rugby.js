@@ -91,7 +91,8 @@ function shirt() {
   return shirtTexture;
 }
 
-export function createRugbyKit({ scene, model }) {
+// shirt: false for a dog that is not Casper (Merlin, with Casper's special): the ball only, no shirt painted on its coat
+export function createRugbyKit({ scene, model, shirt: wearsShirt = true }) {
   const ball = buildRugbyBall();
   ball.visible = false;
   scene.add(ball);
@@ -101,8 +102,8 @@ export function createRugbyKit({ scene, model }) {
   let back = null;               // the patch on his back that CASPER and 7 go on
   model.traverse((object) => {
     if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-      if (material.map && /coat/i.test(material.name) && !coats.some(c => c.material === material)) coats.push({ material, plain: material.map });
-      if (/ShirtBack/.test(material.name)) back = material;
+      if (wearsShirt && material.map && /coat/i.test(material.name) && !coats.some(c => c.material === material)) coats.push({ material, plain: material.map });
+      if (wearsShirt && /ShirtBack/.test(material.name)) back = material;
     }
     if (object.isBone && /^paw\.?[LR]$/.test(object.name)) paws.push(object);
   });

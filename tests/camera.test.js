@@ -42,7 +42,7 @@ test('out of doors the camera is left alone, and maps with no walls have nothing
 test('every dog has its own colour on the course map, well apart from every other dog\'s', () => {
   const rgb = hex => [1, 3, 5].map(k => parseInt(hex.slice(k, k + 2), 16));
   const ids = Object.keys(DOGS);
-  assert.equal(ids.length, 15);
+  assert.equal(ids.length, 16);
   for (const a of ids) for (const b of ids) {
     if (a >= b) continue;
     const [p, q] = [rgb(DOGS[a].accent), rgb(DOGS[b].accent)], apart = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);

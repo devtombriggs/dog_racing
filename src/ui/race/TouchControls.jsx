@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { touchInput } from '../../touch.js';
 import { ITEM_NAMES } from '../../../shared/items.js';
 import { SPECIAL_ITEM } from '../../../shared/specials.js';
+import { DOGS, portraitOf } from '../../config/dogs.js';
 
 // The controls on a phone's screen during a race (touch.js):
 //   bottom left   ◀ and ▶ (Tom, 2026-11-23: the stick was too hard to turn with): held, a full turn that way, as the arrow
@@ -62,12 +63,13 @@ function TouchButton({ className, label, hold, tap, children }) {
   );
 }
 
-export function TouchControls({ heldItem }) {
+// heldItemAs: the dog whose special Merlin is holding (its picture is shown in place of the badge)
+export function TouchControls({ heldItem, heldItemAs = null }) {
   useEffect(() => () => touchInput.release(), []);
   // the item itself (pictures of the game's own models: public/icons/items), or the dog's special badge
-  const item = heldItem === SPECIAL_ITEM ? <img src="/icons/special.png" alt="" draggable="false" />
+  const item = heldItem === SPECIAL_ITEM ? <img src={heldItemAs ? portraitOf(heldItemAs) : '/icons/special.png'} alt="" draggable="false" style={heldItemAs ? { borderRadius: '22%' } : undefined} />
     : heldItem ? <img src={`/icons/items/${heldItem}.png`} alt="" draggable="false" /> : null;
-  const itemName = heldItem === SPECIAL_ITEM ? 'Special' : heldItem ? ITEM_NAMES[heldItem] : 'No item';
+  const itemName = heldItem === SPECIAL_ITEM ? (heldItemAs ? `${DOGS[heldItemAs]?.displayName}’s special` : 'Special') : heldItem ? ITEM_NAMES[heldItem] : 'No item';
   return (
     <div className="touch-controls">
       <Arrows />

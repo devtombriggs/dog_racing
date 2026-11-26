@@ -20,9 +20,10 @@
 //   Poppy  — Surf's Up:      belly-flops onto her own wave: the fastest of the lot, but it steers itself for five
 //                            seconds, so it only hits who happens to be in the way
 //
-//   Ziggy  — Lightning Run:  four and a half seconds faster than any dog can run, lightning at his heels; he steers it himself
+//   Ziggy  — Lightning Run:  four and a half seconds faster than any dog can run, lightning at her heels; she steers it herself
 //   Barney — Ear-copter:     his ears spin like rotor blades and lift him over everyone, fast, and nothing can hit him: Ralph's
 //                            flight in every way but its looks, a little shorter
+//   Nacho  — Gigante Mode:   six seconds as big as a horse: faster, nothing on the road stops him, and any dog in his way is flattened
 //   Merlin — Hocus Croakus:  one by one, leader first, every other dog is turned into a frog that can only hop slowly for
 //                            three seconds; then the whole field is shuffled, each dog put where another was, and Merlin
 //                            always comes down in 2nd place
@@ -68,12 +69,18 @@ export const SPECIALS = {
   // back half of the field, how far apart, and `front` from the front half (dragonFireworks below).  They are the
   // Treat Box firework (shared/firework.js, FIREWORK in shared/items.js) in every way but who lights them
   jimmy: { kind: 'dragon', name: 'Dragon Dance', durationMs: 7000, lessPerPlaceMs: 1000, speed: 1.8, fireworks: { count: 2, front: 1, everyMs: 2000 } },
-  // The Shop's three (Tom, 2026-11-26).  Ziggy: "super run like the flash": faster than Poppy's wave, shorter, and he steers
+  // The Shop's three (Tom, 2026-11-26).  Ziggy: "super run like the flash": faster than Poppy's wave, shorter, and she steers
   ziggy: { kind: 'flash', name: 'Lightning Run', durationMs: 4500, speed: 2.0 },
   // Barney: "his ears fly like a helicopter".  As Ralph's flight (`look`: what the game draws instead of rocket paws)
   barney: { kind: 'jet', name: 'Ear-copter', look: 'ears', durationMs: 13000, lessPerPlaceMs: 1500, speed: 1.5, flyHeight: 3.2, immune: true },
-  // Merlin: the server runs the spell (HEX below); durationMs is only how long his own flourish lasts
-  merlin: { kind: 'hex', name: 'Hocus Croakus', durationMs: 900 },
+  // Merlin: the server runs the spell (HEX below); durationMs is only how long his own flourish lasts.
+  // `borrows` (Tom, 2026-11-26: "nerf merlin... because he's a wizard keep his ult but also give him the chance to get and use
+  // everyone else's"): each special he is given is one dog's, picked at random from them all, his own among them
+  // (borrowedSpecial below).  What he is holding shows that dog's picture.
+  merlin: { kind: 'hex', name: 'Hocus Croakus', durationMs: 900, borrows: true },
+  // Nacho (Tom, 2026-11-26: "he goes large and squashes anyone in his way"): his sheet's Gigante Mode.  `giant`: how many times
+  // his size he is drawn; any dog he runs into goes down (hitRadius round him, reach in front), and nothing on the road stops him
+  nacho: { kind: 'giant', name: 'Gigante Mode', durationMs: 6000, speed: 1.35, hitRadius: 3.4, reach: 3, ghost: true, giant: 3.4 },
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true, wander: 0.5 },
 };
 
@@ -218,6 +225,18 @@ export function dragonFireworks(spec, place, racers) {
 
 export function specialFor(dog) {
   return SPECIALS[dog] ?? null;
+}
+
+/** The dogs that may go down the burrows (Ralph, and Nacho: Tom, 2026-11-26 "he can also use ralphs tunnels") */
+export const BURROWERS = ['ralph', 'nacho'];
+
+// The specials Merlin cannot borrow: the twins' Trip Wire is a rope between two dogs, and he is one
+const NOT_BORROWED = ['baz_naz'];
+/** Whose special a dog that `borrows` is given this time: a dog's id, any of them as likely as another (its own too) */
+export function borrowedSpecial(dog, random = Math.random) {
+  if (!SPECIALS[dog]?.borrows) return dog;
+  const from = Object.keys(SPECIALS).filter(id => !NOT_BORROWED.includes(id));
+  return from[Math.min(from.length - 1, Math.floor(random() * from.length))];
 }
 
 /**
