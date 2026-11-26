@@ -50,14 +50,15 @@ test('the shop\'s prices: silly things to wear are cheap, skins dearer, characte
   assert.ok(dearest('accessory') / middling <= 12 && cheapest('character') / middling >= 60 && dearest('character') / PLACE_COINS[0] <= 120);
   assert.equal(SHOP_ITEM.hat_santa.slot, 'head'); assert.equal(SHOP_ITEM.hat_santa.dogs, undefined, 'the Santa hat fits every dog');
   assert.deepEqual(SHOP_ITEM.coat_pippa.dogs, ['gsp']); assert.equal(SHOP_ITEM.coat_pippa.slot, 'body');
-  assert.deepEqual(LOCKED_DOGS, { jimmy: 'dog_jimmy' });
+  assert.deepEqual(LOCKED_DOGS, { ziggy: 'dog_ziggy', barney: 'dog_barney', merlin: 'dog_merlin' });         // (Jimmy was the first; he is free again)
+  assert.ok(dogUnlocked('jimmy', []));
   assert.equal(new Set(SHOP_ITEMS.map(item => item.id)).size, SHOP_ITEMS.length);
   for (const item of SHOP_ITEMS) { assert.ok(item.price > 0 && item.name && item.blurb); if (item.kind === 'accessory') assert.ok(SLOTS[item.slot]); }
 });
 
 test('who may race as what, and what a dog may wear', () => {
-  assert.ok(dogUnlocked('gsp', []) && !dogUnlocked('jimmy', []) && !dogUnlocked('jimmy', ['hat_santa']) && dogUnlocked('jimmy', ['dog_jimmy']));
-  assert.ok(fitsDog(SHOP_ITEM.hat_santa, 'ralph') && fitsDog(SHOP_ITEM.coat_pippa, 'gsp') && !fitsDog(SHOP_ITEM.coat_pippa, 'ralph') && !fitsDog(SHOP_ITEM.dog_jimmy, 'jimmy'));
+  assert.ok(dogUnlocked('gsp', []) && !dogUnlocked('merlin', []) && !dogUnlocked('merlin', ['hat_santa', 'dog_ziggy']) && dogUnlocked('merlin', ['dog_merlin']));
+  assert.ok(fitsDog(SHOP_ITEM.hat_santa, 'ralph') && fitsDog(SHOP_ITEM.coat_pippa, 'gsp') && !fitsDog(SHOP_ITEM.coat_pippa, 'ralph') && !fitsDog(SHOP_ITEM.dog_merlin, 'merlin'));
   const owned = ['hat_santa', 'coat_pippa'];
   assert.deepEqual(cosmeticsFor('gsp', owned, { gsp: { head: 'hat_santa', body: 'coat_pippa' } }), { head: 'hat_santa', body: 'coat_pippa' });
   // nothing that is not owned, does not fit, is in the wrong place or does not exist
@@ -143,7 +144,7 @@ test('an admin (ADMIN_EMAILS) owns everything without buying it, and is an ordin
   assert.ok(db.isAdmin(boss.id) && !db.isAdmin(sam.id) && !db.isAdmin(999));
   const all = SHOP_ITEMS.map(item => item.id);
   assert.deepEqual(db.wallet(boss.id), { coins: 999999, owned: all, equipped: {}, admin: true });
-  assert.ok(dogUnlocked('jimmy', db.wallet(boss.id).owned));
+  assert.ok(['ziggy', 'barney', 'merlin'].every(dog => dogUnlocked(dog, db.wallet(boss.id).owned)));
   assert.throws(() => db.buy(boss.id, 'hat_santa'), /already have/);
   assert.deepEqual(db.equip(boss.id, 'gsp', 'body', 'coat_pippa').equipped, { gsp: { body: 'coat_pippa' } });
   assert.throws(() => db.equip(boss.id, 'ralph', 'body', 'coat_pippa'), /does not fit/);

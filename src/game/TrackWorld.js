@@ -193,7 +193,7 @@ export class TrackWorld {
   // seconds: the clock.  sinceGo: seconds since GO (the farm's tractor, animals and sails are placed
   // by it, exactly where the server has them).  dogPositions(): where every dog in sight is.
   update(seconds, playerPosition, sinceGo, dogPositions) {
-    this.proceduralWorld?.update(seconds, playerPosition, sinceGo);
+    this.proceduralWorld?.update(seconds, playerPosition, sinceGo, dogPositions?.());      // (every dog: Modbury's lift puts a gondola round each one riding)
     this.woodlandWorld?.update(seconds, playerPosition, dogPositions());
     this.slalomWorld?.update(seconds);
   }

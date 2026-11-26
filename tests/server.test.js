@@ -389,7 +389,8 @@ test('Modbury water and banks remain supported; cliff falls recover and reject s
   assert.equal(host.call('startRace').success, true);
   host.call('raceLoaded');
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
-  const move = (position, respawnRevision = 0) => host.call('playerMove', {
+  let rev = 0;                    // (the ride up the lift is one revision on; the fall another)
+  const move = (position, respawnRevision = rev) => host.call('playerMove', {
     position, rotation: 0, animation: 'Run', respawnRevision
   });
   const wet = COAST.pointAt((COAST.waterCrossing.sStart + COAST.waterCrossing.sEnd) / 2);
@@ -403,7 +404,17 @@ test('Modbury water and banks remain supported; cliff falls recover and reject s
   assert.equal(latest(room.code, 'playerFell'), undefined);
   assert.deepEqual(latest(room.code, 'playerMoved').position, [bank.clampX, bank.dogY, bank.clampZ]);
   const checkpoints = COAST.checkpoints.filter(cp => cp.index > 0 && cp.s < COAST.samples.s[i]);
-  for (const cp of checkpoints) move(cp.position);
+  // (the mountain lift takes it up the cliff: Tom, 2026-11-26.  The checkpoint at the top counts only for a dog that rode)
+  const ride = () => {
+    const L = COAST.launch, at = s => { const p = COAST.pointAt(s); return [p.x, p.y, p.z]; };
+    move(at(L.padStart + 3)); move(at(L.takeoffS + 1));
+    assert.equal(latest(room.code, 'playerLaunched').playerId, host.id);
+    context.mock.timers.tick(L.duration * 1000 + 100);
+    move(at(L.landingS));
+    assert.equal(latest(room.code, 'playerLanded').playerId, host.id);
+    rev = latest(room.code, 'playerLanded').respawnRevision;
+  };
+  for (const cp of checkpoints) { if (cp.launchLanding) ride(); move(cp.position); }
   const cp = checkpoints.at(-1);
   assert.equal(latest(room.code, 'raceProgress').checkpoint, cp.index);
   const edge = COAST.pointAt(COAST.samples.s[i], sign * (COAST.samples.width[i] / 2 + 3));
@@ -416,14 +427,14 @@ test('Modbury water and banks remain supported; cliff falls recover and reject s
   context.mock.timers.tick(500);
   move([edge.x, edge.y - 20, edge.z]);
   const respawn = latest(room.code, 'playerRespawned');
-  assert.equal(respawn.respawnRevision, 1);
+  assert.equal(respawn.respawnRevision, rev + 1);
   assert.equal(respawn.penaltySeconds, 1.5);
   assert.equal(respawn.speedMultiplier, 0.55);
   assert.ok(Math.hypot(respawn.position[0] - cp.position[0], respawn.position[2] - cp.position[2]) < 3);
   assert.ok(COAST.query(respawn.position[0], respawn.position[2]).onTrack);
   move([edge.x, edge.y - 20, edge.z]);
   assert.deepEqual(latest(room.code, 'playerMoved').position, respawn.position);
-  move(COAST.checkpoints[cp.index + 1].position, 1);
+  move(COAST.checkpoints[cp.index + 1].position, rev + 1);
   assert.equal(latest(room.code, 'raceProgress').checkpoint, cp.index + 1);
   host.call('leaveGame');
 });
@@ -2176,7 +2187,7 @@ test('Jimmy\'s Dragon Dance: from last place seven seconds and two fireworks at 
   for (const p of [j2, other]) p.call('leaveGame');
 });
 
-test('Jazz\'s Earthquake: every other dog still racing is slowed (five seconds for the leader, less further back), its own special or not, but not Ralph flying, and not Jazz', async context => {
+test('Jazz\'s Earthquake: every other dog still racing is slowed (five seconds for the leader, less further back), and loses its special and what it carries (Tom, 2026-11-26), Ralph flying too; not Jazz', async context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const { QUAKE, SPECIALS } = await import('../shared/specials.js');
   assert.equal(SPECIALS.jazz.kind, 'quake');
@@ -2214,7 +2225,12 @@ test('Jazz\'s Earthquake: every other dog still racing is slowed (five seconds f
   // by each dog's own place, not Jazz's: Pippa leads (5 s); the rest are further back and slowed for less
   assert.equal(quake.secondsFor[pippa.id], 5);
   for (const id of [poppy.id, twins.id]) assert.ok(quake.secondsFor[id] < 5 && quake.secondsFor[id] >= 1);
-  assert.deepEqual([...quake.slowed].sort(), [pippa.id, poppy.id, twins.id].sort(), 'Pippa, Poppy and the twins (Trip Wire or not, their paws are on the ground); not Ralph in the air, not Jazz');
+  assert.deepEqual([...quake.slowed].sort(), [pippa.id, poppy.id, twins.id, ralph.id].sort(), 'everyone but Jazz: Ralph is brought down first');
+  // the board is cleared: the twins' rope and Ralph's flight are over, and nobody else is carrying anything
+  assert.deepEqual(events('specialEnded').filter(e => e.reason === 'quake').map(e => e.playerId).sort(), [twins.id, ralph.id].sort());
+  const live = rooms.get(room.code);
+  for (const p of [pippa, twins, poppy, ralph]) assert.equal(live.players.get(p.id).item, null);
+  assert.equal(live.hazards.size + live.balls.size, 0);
   assert.equal(events('specialStarted').filter(e => e.playerId === jazz.id).length, 0, 'nothing of her own to keep track of');
   assert.equal(events('itemUsed').at(-1)?.playerId ?? jazz.id, jazz.id);
   for (const p of sockets) p.call('leaveGame');
@@ -2496,9 +2512,9 @@ test('the Shop: a dog that has to be bought cannot be raced until it is, and wha
       const room = host.call('hostGame', { name: 'x' }).room;
       guest.call('joinGame', { roomCode: room.code, name: 'Visitor' });
       const playerOf = id => latest(room.code, 'lobbyUpdated').players.find(player => player.id === id);
-      // Jimmy is in the Shop: neither a guest nor a player who has not bought him may pick him
-      assert.match(guest.call('selectDog', { dog: 'jimmy' }).error, /Shop/);
-      assert.match(host.call('selectDog', { dog: 'jimmy' }).error, /5,000 coins/);
+      // Merlin is in the Shop: neither a guest nor a player who has not bought him may pick him
+      assert.match(guest.call('selectDog', { dog: 'merlin' }).error, /Shop/);
+      assert.match(host.call('selectDog', { dog: 'merlin' }).error, /5,000 coins/);
       assert.equal(host.call('selectDog', { dog: 'gsp' }).success, true);
       assert.deepEqual(playerOf(host.id).cosmetics, {}, 'nothing bought, nothing worn');
       // some coins, a hat and Pippa's coat, put on Pippa in the Garage
@@ -2511,22 +2527,94 @@ test('the Shop: a dog that has to be bought cannot be raced until it is, and wha
       assert.deepEqual(playerOf(host.id).cosmetics, { head: 'hat_santa', body: 'coat_pippa' }, 'everyone is told what she wears');
       host.call('changeDog'); host.call('selectDog', { dog: 'ralph' });
       assert.deepEqual(playerOf(host.id).cosmetics, { head: 'hat_santa' }, 'each dog wears its own things');
-      // ...and Jimmy, bought: now he can be picked (the guest still cannot)
+      // ...and Merlin, bought: now he can be picked (the guest still cannot)
       host.call('changeDog');
-      db.buy(user.id, 'dog_jimmy');
+      db.buy(user.id, 'dog_merlin');
       assert.equal(db.wallet(user.id).coins, 6000 - 300 - 500 - 5000);
-      assert.equal(host.call('selectDog', { dog: 'jimmy' }).success, true);
+      assert.equal(host.call('selectDog', { dog: 'merlin' }).success, true);
       host.call('changeDog');
-      assert.match(guest.call('selectDog', { dog: 'jimmy' }).error, /Shop/);
+      assert.match(guest.call('selectDog', { dog: 'merlin' }).error, /Shop/);
       // the host sends everyone on without a dog: nobody is given one they have not bought
       for (let k = 0; k < 20; k++) {
         guest.call('changeDog'); host.call('changeDog');
         if (latest(room.code, 'lobbyUpdated').status !== 'lobby') break;
         host.call('skipToMapVote');
-        assert.notEqual(playerOf(guest.id).dog, 'jimmy');
+        assert.ok(!['ziggy', 'barney', 'merlin'].includes(playerOf(guest.id).dog));
         break;
       }
     } finally { env.UNLOCK_ALL = '1'; }
     host.call('leaveGame'); guest.call('leaveGame');
   });
+});
+
+// Merlin's Hocus Croakus (Tom, 2026-11-26; shared/specials.js HEX)
+test('Hocus Croakus: every other dog a frog in turn from the leader back, then the field is shuffled and Merlin is 2nd', async (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const { HEX } = await import('../shared/specials.js');
+  const mapId = 'speed_bowl', T = PROCEDURAL_TRACKS[mapId];
+  const players = ['Merl', 'A', 'B', 'C'].map(() => client()), [merlin, a, b, c] = players;
+  const room = merlin.call('hostGame', { mapId, name: 'Merl' }).room;
+  players.slice(1).forEach((p, i) => p.call('joinGame', { roomCode: room.code, name: 'ABC'[i] }));
+  [['merlin', merlin], ['gsp', a], ['ralph', b], ['jazz', c]].forEach(([dog, p]) => p.call('selectDog', { dog }));
+  players.forEach(p => p.call('setReady', { ready: true }));
+  merlin.call('startRace'); players.forEach(p => p.call('raceLoaded'));
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  // strung out up the road: A leads, then B, then C, and Merlin last
+  const at = { [a.id]: 88, [b.id]: 68, [c.id]: 48, [merlin.id]: 28 };          // (all short of the first checkpoint, so the order is plain)
+  for (const p of players) { const point = T.pointAt(at[p.id]); p.call('playerMove', { position: [point.x, point.y, point.z], rotation: point.rotationY, animation: 'Sprint', respawnRevision: 0 }); }
+  const live = rooms.get(room.code), seat = id => live.players.get(id);
+  const before = Object.fromEntries(players.map(p => [p.id, [...seat(p.id).position]]));
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  seat(merlin.id).item = 'special';
+  merlin.call('useItem');
+  assert.equal(events('specialStarted').at(-1).kind, 'hex');
+  // a frog at a time, leader first
+  context.mock.timers.tick(1);
+  assert.deepEqual(events('hexed').map(e => e.playerId), [a.id]);
+  context.mock.timers.tick(HEX.everyMs); assert.deepEqual(events('hexed').map(e => e.playerId), [a.id, b.id]);
+  context.mock.timers.tick(HEX.everyMs); assert.deepEqual(events('hexed').map(e => e.playerId), [a.id, b.id, c.id]);
+  for (const e of events('hexed')) assert.deepEqual([e.by, e.hit, e.seconds, e.speed], [merlin.id, true, HEX.frogSeconds, HEX.speed]);
+  for (const p of [a, b, c]) assert.ok(seat(p.id).slowUntil > Date.now(), 'slowed');
+  assert.ok(!(seat(merlin.id).slowUntil > Date.now()), 'not Merlin');
+  // then the shuffle: everyone who moves is taken away...
+  assert.equal(events('playerBurrowEntered').length, 0);
+  context.mock.timers.tick(HEX.everyMs + HEX.swapAfterMs);
+  const taken = events('playerBurrowEntered');
+  assert.ok(taken.length >= 2 && taken.every(e => e.spell && !e.kelp));
+  assert.ok(taken.some(e => e.playerId === merlin.id), 'Merlin was last: he moves');
+  // ...and put down where another dog was (each sends a move, as its game does, and the server puts it in its new place)
+  context.mock.timers.tick(HEX.rideSeconds * 1000 + 50);
+  for (const p of players) p.call('playerMove', { position: seat(p.id).position, rotation: 0, animation: 'Sprint', respawnRevision: 0 });
+  const near = (p, q) => Math.hypot(p[0] - q[0], p[2] - q[2]) < 0.5;
+  assert.ok(near(seat(merlin.id).position, before[b.id]), 'Merlin is where the dog in 2nd was');
+  const places = [a, b, c].map(p => Object.keys(before).find(id => near(seat(p.id).position, before[id])));
+  assert.deepEqual([...places].sort(), [a.id, c.id, merlin.id].sort(), 'the others share out the places that are left');
+  assert.ok(events('playerBurrowExited').filter(e => e.spell).length >= 2);
+  assert.equal(latest(room.code, 'raceStandings')?.standings?.find?.(e => e.playerId === merlin.id)?.place ?? 2, 2);
+  players.forEach(p => p.call('leaveGame'));
+});
+
+test('the shuffle: Merlin always 2nd, nobody lost or doubled, laps and checkpoints go with the place, and dogs in mid-air or home are left out', () => {
+  const { shuffleField } = forTests;
+  const mapId = 'speed_bowl', T = PROCEDURAL_TRACKS[mapId];
+  for (let trial = 0; trial < 12; trial++) {
+    const players = Array.from({ length: 5 }, () => client()), [merlin, ...others] = players;
+    const room = merlin.call('hostGame', { mapId, name: 'M' }).room;
+    others.forEach((p, i) => p.call('joinGame', { roomCode: room.code, name: `P${i}` }));
+    ['merlin', 'gsp', 'ralph', 'jazz', 'pablo'].forEach((dog, i) => players[i].call('selectDog', { dog }));
+    const live = rooms.get(room.code), seat = p => live.players.get(p.id);
+    live.status = 'racing'; live.specialTimers = new Set();
+    // Merlin starts in a different place each time; one of the others has finished
+    const order = [...others.slice(0, 3)]; order.splice(trial % 4, 0, merlin);
+    order.forEach((p, k) => { const point = T.pointAt(300 - k * 40); Object.assign(seat(p), { position: [point.x, point.y, point.z], rotation: point.rotationY, lap: 2, checkpoint: 4 - k, finished: false }); });
+    Object.assign(seat(others[3]), { finished: true, position: [0, 0, 0] });
+    const was = Object.fromEntries(order.map(p => [p.id, { ...seat(p), position: [...seat(p).position] }]));
+    let n = trial * 7 + 1; const random = () => { n = (n * 9301 + 49297) % 233280; return n / 233280; };
+    const moves = shuffleField(live, seat(merlin), random);
+    assert.equal(moves[merlin.id], order[1].id, 'Merlin takes the place of the dog in 2nd');
+    assert.deepEqual(Object.values(moves).sort(), order.map(p => p.id).sort(), 'every place is taken once');
+    assert.equal(moves[others[3].id], undefined, 'a dog that has finished is not moved');
+    players.forEach(p => p.call('leaveGame'));
+    void was;
+  }
 });

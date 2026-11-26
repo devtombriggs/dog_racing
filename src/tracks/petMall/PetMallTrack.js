@@ -138,7 +138,9 @@ function buildAisles(group, D) {
       let prev = null;
       for (let r = 0; r <= N; r++) {
         const i = r % N, s = r === N ? T.length : S.s[i];
-        if (T.isGapSegment(i) || !keep(i, side)) { prev = null; continue; }
+        // (a run of wall goes on to the first sample past its end, to meet whatever wall comes next: otherwise there is a
+        //  slit between the two that the outdoors shows through.  Not into a lane the cats or trolleys cross by)
+        if (T.isGapSegment(i) || !(keep(i, side) || (keep((i + N - 1) % N, side) && !crossing(i)))) { prev = null; continue; }
         const lat = side * (S.width[i] / 2 + 0.3), x = S.x[i] + S.normalX[i] * lat, z = S.z[i] + S.normalZ[i] * lat, y = S.y[i];
         if (prev) { p.push(prev[0], prev[1], prev[2], prev[0], prev[1] + height, prev[2], x, y, z, x, y + height, z); u.push(prev[3], 0, prev[3], 1, -s * uScale * side, 0, -s * uScale * side, 1); ix.push(v, v + 2, v + 1, v + 1, v + 2, v + 3); v += 4; }
         if (prev && depth) {                                    // the shop behind its front: a flat roof and a back wall

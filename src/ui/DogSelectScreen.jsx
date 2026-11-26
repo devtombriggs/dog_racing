@@ -28,8 +28,11 @@ const SPECIAL_WORDS = {
   rocky: 'Five sheep charge up the road, each knocking over the first dog it reaches',
   kombu: 'Seaweed pulls him under and puts him down far up the road',
   baz_naz: 'The twins pull their rope tight across the road, run faster through anything, and trip whoever it catches',
-  jazz: 'One great stomp: every other dog can barely move for five seconds',
+  jazz: 'One great stomp: every other dog can barely move for five seconds, and loses its special, its shield and whatever it was carrying',
   casper: 'Rugby shirt on, ball in paws: six seconds flat out on his back legs flattening any dog in his way, then the ball flies at the leader',
+  ziggy: 'Four and a half seconds faster than anything on four legs, lightning at his heels, and he steers it himself',
+  barney: 'His ears spin like rotor blades and he flies over everyone, and nothing can hit him',
+  merlin: 'Turns every other dog into a slow, hopping frog one by one, then shuffles the whole field and lands himself in 2nd',
   jimmy: 'Turns into a dragon, much faster, and fires up to five fireworks at the leader: more the further back he is',
   black_lab: 'Rides her own wave for five seconds: the fastest of the lot, but it steers itself',
 };

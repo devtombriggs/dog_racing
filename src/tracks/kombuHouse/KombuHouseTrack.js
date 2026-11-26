@@ -238,7 +238,8 @@ export const createKombuHouse = () => createKitWorld(T, {
     // ---------- the lift: a steel shaft from the lobby to the floor above, and the car that takes you up it
     { const L = T.launch, a = T.pointAt(L.gapStart), b = T.pointAt(L.gapEnd), m = T.launchPoint(L.duration / 2), long = L.gapEnd - L.gapStart + 2, half = a.halfWidth + 0.5, high = T.upstairs + CEILING, DARK = 0x4b525c;
       const holder = new THREE.Group(); holder.position.set((a.x + b.x) / 2, 0, (a.z + b.z) / 2); holder.rotation.y = a.rotationY; holder.name = 'Lift_Shaft'; group.add(holder);
-      const shaftG = merge([box(0.6, high, long, DARK, -half, high / 2, 0), box(0.6, high, long, DARK, half, high / 2, 0), box(half * 2, 0.5, long, DARK, 0, high + 0.25, 0), box(half * 2, 0.3, long, 0x2b2f38, 0, T.floor - 0.5, 0),
+      // (its side walls run on past each end to meet the walls of the rooms: there was a slit there, and the outdoors showed through)
+      const shaftG = merge([box(0.6, high, long + 4, DARK, -half, high / 2, 0), box(0.6, high, long + 4, DARK, half, high / 2, 0), box(half * 2, 0.5, long, DARK, 0, high + 0.25, 0), box(half * 2, 0.3, long, 0x2b2f38, 0, T.floor - 0.5, 0),
         box(half * 2, T.upstairs - 0.3, 0.6, DARK, 0, (T.upstairs - 0.3) / 2, long / 2), box(half * 2, high - T.floor - 7, 0.6, DARK, 0, (high + T.floor + 7) / 2, -long / 2), box(half * 2, CEILING - 7, 0.6, DARK, 0, T.upstairs + (CEILING + 7) / 2, long / 2),
         // the doors, standing open either side, and the frame round them
         ...[-1, 1].flatMap(k => [box(1.6, 7, 0.3, STEEL, k * (half - 1.1), T.floor + 3.5, -long / 2 - 0.3), box(0.5, 7.4, 0.9, 0xffd23a, k * (half - 0.1), T.floor + 3.7, -long / 2 - 0.6)]), box(half * 2, 0.7, 0.9, 0xffd23a, 0, T.floor + 7.3, -long / 2 - 0.6)]);

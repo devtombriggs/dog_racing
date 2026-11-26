@@ -340,7 +340,8 @@ export class LocalDog extends DogAvatar {
   }
 
   // Jazz has stomped: this dog can barely move for a while
-  shaken(seconds, speed) {
+  shaken(seconds, speed, word = 'EARTHQUAKE — HOLD ON!') {
+    this.quakeWord = word;          // (what the screen says: Merlin's frogs slow a dog the same way)
     this.quakeUntil = performance.now() + seconds * 1000;
     this.quakeSpeed = speed;
     this.currentSpeed *= speed;
@@ -1222,6 +1223,6 @@ export class LocalDog extends DogAvatar {
     if (!this.drift && !this.offTrack && downhillSpeed(this.stats, this.slope) > 1.08) hud.setSurface('DOWNHILL — WHEELS AWAY!', '#62ffe6');      // (Jimmy)
     if (!special && now - this.wallAt < 700) hud.setSurface('HIT THE WALL!', '#ff8a6a');
     if (special) hud.setSurface(`${special.name.toUpperCase()}!`, '#ffe45c');
-    else if (performance.now() < this.quakeUntil) hud.setSurface('EARTHQUAKE — HOLD ON!', '#ff8a6a');
+    else if (performance.now() < this.quakeUntil) hud.setSurface(this.quakeWord ?? 'EARTHQUAKE — HOLD ON!', '#ff8a6a');
   }
 }

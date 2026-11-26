@@ -278,8 +278,52 @@ function buildTrack() {
     return f;
   }
 
-  const cpCount = Math.round(LENGTH / CHECKPOINT_SPACING), checkpoints = [];
-  for (let c = 0; c < cpCount; c++) { const i = wrapIndex(Math.round(c * N / cpCount)); checkpoints.push({ index: c, sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] }); }
+  // ---------- the mountain lift (Tom, 2026-11-26: "at the start make a mountain lift instead of the uphill bit to speed up
+  // the map").  A cable car from the end of the beach straight to the top of the cliff: nobody runs the Cliff Climb any
+  // more (the path is still there on the hillside, under the cables).  It is a launch like the Water Park's slide: the server
+  // and every game carry a dog along the same line (launchPoint), and the checkpoint at the top counts only for a dog
+  // that rode up.  `reach`: it takes a dog this far off the side of the road too, so there is no running round it.
+  const climb = { from: S.findIndex((_, i) => SEC[i] === 'B'), to: S.findIndex((_, i) => SEC[i] === 'C') };
+  const launch = {
+    padStart: S[climb.from] - 6, takeoffS: S[climb.from] + 10, gapStart: S[climb.from] + 14, gapEnd: S[climb.to] - 4, landingS: S[climb.to] + 8,
+    duration: 7, reach: 30, lift: true, exitSpeedMultiplier: 1.15, boostSeconds: 1,
+  };
+  const gapStartIndex = indexAtS(launch.gapStart), gapEndIndex = indexAtS(launch.gapEnd);
+  const isGap = s => s > launch.gapStart && s < launch.gapEnd;
+  const isGapSegment = i => i >= gapStartIndex && i < gapEndIndex;
+  // The line of the cable: straight on the map from the bottom station to the top one; in height, a taut line over the
+  // hillside (the least rise that clears the ground by CABLE_CLEAR everywhere: where it bends, there is a pylon)
+  const CABLE_CLEAR = 7, CABLE = [];
+  { const a = pointAt(launch.takeoffS), b = pointAt(launch.landingS), n = 60, need = [];
+    for (let k = 0; k <= n; k++) { const t = k / n; need.push(k === 0 ? a.y : k === n ? b.y : terrainHeight(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t) + CABLE_CLEAR); }
+    const hull = [0];                                        // (the upper hull of those heights)
+    for (let k = 1; k <= n; k++) {
+      while (hull.length >= 2) { const i = hull[hull.length - 2], j = hull[hull.length - 1]; if ((need[j] - need[i]) * (k - i) <= (need[k] - need[i]) * (j - i)) hull.pop(); else break; }
+      hull.push(k);
+    }
+    for (let h = 0; h < hull.length - 1; h++) for (let k = hull[h]; k < hull[h + 1]; k++) CABLE[k] = need[hull[h]] + (need[hull[h + 1]] - need[hull[h]]) * (k - hull[h]) / (hull[h + 1] - hull[h]);
+    CABLE[n] = need[n]; launch.pylons = hull.slice(1, -1).map(k => k / n); }
+  const cableY = t => { const f = Math.max(0, Math.min(1, t)) * (CABLE.length - 1), k = Math.min(CABLE.length - 2, Math.floor(f)); return CABLE[k] + (CABLE[k + 1] - CABLE[k]) * (f - k); };
+  /** The ride up: the same line for the server and every game.  The car sets off and arrives gently (eased). */
+  function launchPoint(elapsed, lateral = 0) {
+    const k = Math.max(0, Math.min(1, elapsed / launch.duration)), t = k * k * (3 - 2 * k), dt = 6 * k * (1 - k);
+    const a = pointAt(launch.takeoffS, lateral), b = pointAt(launch.landingS, lateral), dx = b.x - a.x, dz = b.z - a.z;
+    const dy = (cableY(t + 0.01) - cableY(t - 0.01)) / 0.02;
+    // (it faces up the cable, and swings round to the road's own heading as it comes in to the top station)
+    const line = Math.atan2(dx, dz), turn = Math.atan2(Math.sin(b.rotationY - line), Math.cos(b.rotationY - line)), late = Math.max(0, (t - 0.85) / 0.15);
+    return { x: a.x + dx * t, y: cableY(t), z: a.z + dz * t, rotationY: line + turn * late * late, pitch: -Math.atan2(dy, Math.hypot(dx, dz)) * (1 - late),
+      speed: Math.hypot(dx, dy, dz) * dt / launch.duration };
+  }
+
+  const cpCount = Math.round(LENGTH / CHECKPOINT_SPACING), every = [];
+  for (let c = 0; c < cpCount; c++) { const i = wrapIndex(Math.round(c * N / cpCount)); every.push({ index: c, sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] }); }
+  // (none on the climb nobody runs; one at the foot of the lift, and one at the top that only a ride up it reaches)
+  const checkpoints = every.filter(cp => cp.s < launch.padStart - 8 || cp.s > launch.landingS + 20);
+  for (const [s, launchLanding] of [[launch.padStart - 8, false], [launch.landingS, true]]) {
+    const p = pointAt(s);
+    checkpoints.push({ s, launchLanding, sampleIndex: p.index, position: [p.x, p.y, p.z], rotationY: p.rotationY, halfWidth: p.halfWidth, section: p.section });
+  }
+  checkpoints.sort((a, b) => a.s - b.s).forEach((cp, index) => { cp.index = index; });
   const gi = wrapIndex(N - 4), spacing = Math.min(2.6, (W[gi] - 3) / 4), startPositions = [];
   for (let k = 0; k < 5; k++) { const lat = (2 - k) * spacing; startPositions.push({ slot: k, position: [X[gi] + NX[gi] * lat, Y[gi], Z[gi] + NZ[gi] * lat], rotationY: yawAt(gi), s: S[gi] - LENGTH, lateral: lat }); }
   // (the sixth dog: a row back, in the middle)
@@ -293,11 +337,11 @@ function buildTrack() {
   const boardIdx = []; for (let i = 0; i < N; i++) if (BOARD[i]) boardIdx.push(i);
 
   return {
-    id: MODBURY_ID, name: 'Modbury Heights', laps: 3, maxDogs: 5, difficulty: 'medium', seaLevel: SEA_LEVEL,
+    id: MODBURY_ID, name: 'Modbury Heights', laps: 2, maxDogs: 5, difficulty: 'medium', seaLevel: SEA_LEVEL,
     length: LENGTH, sampleCount: N, sampleSpacing: LENGTH / N, minY: Math.min(...Y), maxY: Math.max(...Y),
     samples: { x: X, y: Y, z: Z, width: W, s: S, tangentX: TX, tangentZ: TZ, normalX: NX, normalZ: NZ, grade: GRADE, curvature: KAPPA, section: SEC,
       shoulder: SH, bank: BANK, exposed: dropRaw, boardwalk: BOARD },
-    sections, checkpoints, startPositions,
+    sections, checkpoints, startPositions, launch,
     startFinish: { position: [X[0], Y[0], Z[0]], rotationY: yawAt(0), halfWidth: W[0] / 2 },
     waterCrossing: { firstIndex: wet[0], lastIndex: wet[wet.length - 1], sStart: S[wet[0]], sEnd: S[wet[wet.length - 1]], maxDepth: SEA_LEVEL - Math.min(...wet.map(i => Y[i])) },
     exposedEdge: { firstIndex: exposedIdx[0], lastIndex: exposedIdx[exposedIdx.length - 1], sStart: S[exposedIdx[0]], sEnd: S[exposedIdx[exposedIdx.length - 1]] },
@@ -310,7 +354,7 @@ function buildTrack() {
     // a dog in mid-jump is higher and carries over
     rules: { hasBarriers: false, fallStartsBelow: 1.5, respawnDelaySeconds: 1.0, respawnPenaltySeconds: 1.5, respawnSpeedMultiplier: 0.55, gravity: 24, killPlaneY: -60,
       gapClearance: 0.2 },
-    query, pointAt, indexAtS, terrainHeight, naturalHeight: (x, z) => Math.max(-8, natural(x, z)), speedFactor, shorelineZ,
+    query, pointAt, indexAtS, isGap, isGapSegment, launchPoint, terrainHeight, naturalHeight: (x, z) => Math.max(-8, natural(x, z)), speedFactor, shorelineZ,
   };
 }
 

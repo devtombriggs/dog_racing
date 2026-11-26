@@ -99,6 +99,6 @@ export function woodlandDistanceAt(x,z) {
 // Water reaches just below each model's shoulders; size alone does not describe
 // a dachshund's short legs or a greyhound's long ones.
 export function woodlandDogY(water, dogId) {
-  const draft = { gsp: 1.3, second_dog: 1.65, black_lab: 1.3, pablo: 0.9, ralph: 0.42, kombu: 1.2, rocky: 1.25, enzo: 1.5, baz_naz: 0.7, jazz: 1.9, casper: 0.85, jimmy: 0.7 }[dogId] ?? 1.3;
+  const draft = { gsp: 1.3, second_dog: 1.65, black_lab: 1.3, pablo: 0.9, ralph: 0.42, kombu: 1.2, rocky: 1.25, enzo: 1.5, baz_naz: 0.7, jazz: 1.9, casper: 0.85, jimmy: 0.7, ziggy: 1.35, barney: 0.55, merlin: 0.6 }[dogId] ?? 1.3;
   return water.swimming ? Math.max(water.groundY, water.waterY - draft) : water.groundY;
 }

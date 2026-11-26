@@ -28,6 +28,7 @@ import { createPheasantFlock } from './pheasants.js';
 import { createSurfWave } from './wave.js';
 import { createRugbyKit } from './rugby.js';
 import { createDragon } from './dragon.js';
+import { createLightning, createEarCopter } from './shopDogs.js';
 
 const FILES = {
   second_dog: { clips: '/models/specials/meela_zoomies_clips.glb' },
@@ -39,6 +40,8 @@ const SLED = { summon: 1.6, ram: 0.8, dismiss: 1.2 };      // special_abilities/
 const ZOOMIES = { windup: 0.6, whirlFrom: 0.42, hit: 2 / 3, end: 1.5, endRate: 1.5 };
 const WAVE = { flop: 0.8, waveFrom: 0.4, hit: 0.8, end: 1.6, endRate: 1.6 };
 const RUGBY = { runRate: 2.2, dive: 0.5, diveRate: 1.6, spin: 1.2 };     // ...and spin: seconds of the slow turn he starts with, to show off the shirt and ball     // how fast his upright run is played; the dive back to all fours is the leap of his Jump clip
+const FLASH = { rate: 1.7 };                                // Ziggy's Lightning Run: how much faster his sprint is played
+const HEX_SPIN = 0.9;                                       // Merlin's flourish: seconds of one quick turn on the spot as he casts
 const FLUSH = { birdsAt: 0.3 };                             // of the cue clip: the first bark
 
 export function createSpecials({ scene, resolve }) {
@@ -73,6 +76,8 @@ export function createSpecials({ scene, resolve }) {
     if (e.state?.kind === 'bounce' && e.model) e.model.rotation.x = 0;      // (level again)
     if (e.state?.kind === 'rugby') { e.rugby?.off(); if (e.model) e.model.rotation.y = 0; }      // Casper's shirt comes off (the ball has gone)
     if (e.state?.kind === 'dragon') { e.dragon?.hide(); if (e.model) e.model.visible = true; }      // Jimmy is himself again
+    if (e.state?.kind === 'hex' && e.model) e.model.rotation.y = 0;
+    e.lightning?.setActive(false); e.copter?.setActive(false);
     e.override = false;
     e.state = null;
   }
@@ -107,13 +112,15 @@ export function createSpecials({ scene, resolve }) {
     e.jets?.setActive(false);
     e.whirl?.setActive(false);
     e.wave?.setActive(false);
+    e.lightning?.setActive(false);
+    e.copter?.setActive(false);
   }
 
   return {
     register(id, { dogId, group, model, mixer, animations = [], getAction, setAction, own = false }) {
       const spec = SPECIALS[dogId];
       if (!spec) return;
-      const e = { id, dogId, spec, group, model, mixer, getAction, setAction, own, dragon: null, rugby: null, clips: Object.fromEntries(animations.map(c => [c.name, c])),
+      const e = { id, dogId, spec, group, model, mixer, getAction, setAction, own, dragon: null, rugby: null, lightning: null, copter: null, clips: Object.fromEntries(animations.map(c => [c.name, c])),
         state: null, override: false, jets: null, whirl: null, wave: null, flock: null, team: null, teamGltf: null, birdGltf: null };
       entries.set(id, e);
       const files = FILES[dogId] ?? {};
@@ -128,7 +135,7 @@ export function createSpecials({ scene, resolve }) {
       if (!e) return;
       hideTeam(e);
       if (e.state) release(e);
-      e.jets?.dispose(); e.whirl?.dispose(); e.wave?.dispose(); e.flock?.dispose(); e.dragon?.dispose(); e.rugby?.dispose();
+      e.jets?.dispose(); e.whirl?.dispose(); e.wave?.dispose(); e.flock?.dispose(); e.dragon?.dispose(); e.rugby?.dispose(); e.lightning?.dispose(); e.copter?.dispose();
       entries.delete(id);
     },
 
@@ -137,7 +144,20 @@ export function createSpecials({ scene, resolve }) {
       if (!e || e.spec.kind !== kind) return;
       if (e.state) { stopEffects(e); hideTeam(e); release(e); }
       e.state = { kind, t: 0, phase: 'start', active: true, duration: durationMs / 1000, hitLeft: 0, targets, birdsOut: false };
-      if (kind === 'jet') {
+      if (kind === 'jet' && e.spec.look === 'ears') {
+        // Barney: his ears are the rotors (no rocket paws); he flies in the pose Ralph does
+        e.copter ??= createEarCopter({ model: e.model });
+        e.copter.setActive(true);
+        playClip(e, 'JetFly', { loop: true, fade: 0.2 });
+      } else if (kind === 'flash') {
+        // Ziggy: his own sprint, played much faster, with lightning behind him
+        e.lightning ??= createLightning({ scene });
+        e.lightning.setActive(true);
+        playClip(e, 'Sprint', { loop: true, fade: 0.1, rate: FLASH.rate });
+      } else if (kind === 'hex') {
+        // Merlin: nothing happens to him but the flourish (a turn on the spot, in update); the server does the rest
+        e.state.spun = false;
+      } else if (kind === 'jet') {
         e.jets ??= createJetPaws({ dog: e.model, size: 1 });
         e.jets.setActive(true);
         playClip(e, 'JetFly', { loop: true, fade: 0.2 });
@@ -226,6 +246,13 @@ export function createSpecials({ scene, resolve }) {
               e.model.rotation.y = k < 1 ? Math.PI * 2 * (k * k * (3 - 2 * k)) : 0;
               s.spun = k >= 1;
             }
+          } else if (s.kind === 'hex') {
+            if (e.model && !s.spun) {
+              const k = Math.min(1, s.t / HEX_SPIN);
+              e.model.rotation.y = k < 1 ? Math.PI * 2 * (k * k * (3 - 2 * k)) : 0;
+              s.spun = k >= 1;
+            }
+            if (s.t >= s.duration) release(e);
           } else if (s.kind === 'dragon') {
             if (e.model) e.model.visible = false;
           } else if (s.kind === 'flush') {
@@ -248,13 +275,15 @@ export function createSpecials({ scene, resolve }) {
         e.flock?.update(delta);
         e.teamMixer?.update(delta);
         e.dragon?.update(delta, e.group);
+        e.lightning?.update(delta, e.group);
+        e.copter?.update(delta);
         e.rugby?.update(e.group);
       }
     },
 
     physics(id) {
       const s = entries.get(id)?.state;
-      return s?.active && s.kind !== 'flush' ? entries.get(id).spec : null;
+      return s?.active && s.kind !== 'flush' && s.kind !== 'hex' ? entries.get(id).spec : null;
     },
     animating(id) { return entries.get(id)?.override ?? false; },
     busy(id) { return Boolean(entries.get(id)?.state); },

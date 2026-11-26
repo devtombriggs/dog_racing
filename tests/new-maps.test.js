@@ -77,6 +77,35 @@ test('Dune Dash: soft sand is slow, whirlwinds cannot be jumped, tumbleweed can;
   assert.ok(Math.min(longest, N) * step < 170, `longest straight ${Math.round(longest * step)} m`);
 });
 
+test('Dune Dash: boulders roll down the great dune\'s climb and the sandworm comes up through the far side (Tom, 2026-11-26)', async () => {
+  const { DESERT: T } = await import('../shared/desertData.js');
+  const kinds = kind => T.hazardsAt(12).filter(h => h.kind === kind);
+  assert.equal(kinds('boulder').length, 2); assert.equal(kinds('sandworm').length, 2);
+  let boulderHits = 0, wormUp = 0, wormDown = 0, warned = 0;
+  for (let t = 0; t < 40; t += 0.1) for (const h of T.hazardsAt(t)) {
+    if (h.kind !== 'boulder' && h.kind !== 'sandworm') continue;
+    const q = T.query(h.x, h.z);
+    assert.ok(Math.abs(q.lateral) + h.radius < q.halfWidth, `${h.id} is on the road at ${t.toFixed(1)}`);
+    if (h.kind === 'boulder') {
+      // (rolling down: against the way the dogs run, on the climb, and too big to jump)
+      assert.ok(q.s > T.boulderRun.bottom - 1 && q.s < T.boulderRun.top + 1);
+      if (h.active) { boulderHits++; assert.equal(T.hazardHit([h.x, h.y + 2.5, h.z], t)?.id, h.id); }
+    } else {
+      if (h.active) { wormUp++; assert.equal(T.hazardHit([h.x, h.y + 6, h.z], t)?.id, h.id); } else wormDown++;
+      if (!h.active && h.rumble > 0.2) warned++;                 // the sand heaves first: that is the warning
+      // a third of the road or more is always clear beside it
+      assert.ok(q.halfWidth * 2 - h.radius * 2 > 6);
+    }
+  }
+  assert.ok(boulderHits > 100 && wormUp > 50 && wormDown > wormUp && warned > 50);
+  const later = T.hazardsAt(20).find(h => h.id === 'boulder-0'), sooner = T.hazardsAt(19).find(h => h.id === 'boulder-0');
+  assert.ok(T.query(later.x, later.z).s < T.query(sooner.x, sooner.z).s || later.fade < 1, 'down the hill, towards the dogs');
+  // nothing to pick up in among them
+  const { BOX_ROW_S, BONE_S } = await import('../shared/pickupSpots.js');
+  for (const s of [...BOX_ROW_S.desert_dunes, ...BONE_S.desert_dunes]) assert.ok(!(s > T.boulderRun.bottom && s < T.boulderRun.top) && T.worms.every(w => Math.abs(s - w) > 10), `pickup at ${s}`);
+});
+
+
 test('Kombu\'s House: up the drive, in at the glass doors, the living room, round the pool room and out of the same doorway, the kitchen, up in the lift, the hallway, the computer room, the dog pen, the hill, the back drive and the road', () => {
   const T = KOMBU_HOUSE, S = T.samples, P = T.places;
   // the rooms come in the order the dogs go through them

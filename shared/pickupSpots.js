@@ -37,6 +37,7 @@ export const PICKUP_PATHS = {
   modbury_heights: {
     length: MODBURY_HEIGHTS.length, pointAt: MODBURY_HEIGHTS.pointAt,
     hazards: [
+      [MODBURY_HEIGHTS.launch.padStart - 30, MODBURY_HEIGHTS.launch.landingS + 30],          // the mountain lift, and the climb nobody runs now
       [MODBURY_HEIGHTS.waterCrossing.sStart - 30, MODBURY_HEIGHTS.waterCrossing.sEnd + 30],
       [MODBURY_HEIGHTS.exposedEdge.sStart - 10, MODBURY_HEIGHTS.exposedEdge.sEnd + 10],
       [MODBURY_HEIGHTS.samples.s[MODBURY_HEIGHTS.boardwalk.firstIndex] - 15, MODBURY_HEIGHTS.samples.s[MODBURY_HEIGHTS.boardwalk.lastIndex] + 15],
@@ -250,12 +251,10 @@ const PLAN = {
   water_park:      { rows: [0.06, 0.32, 0.415, 0.575, 0.705],          bones: [0.105, 0.52, 0.64, 0.955], even: true },
   // (shares of the lap as it was before the Seabed Tunnel made it longer, 3121 m, so that every spot up to the cove stays where it
   // was; the last row and bone of the lap are now in the tunnel, and one more of each further along it)
-  modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91, 0.985].map(share => share * 3121.28 / MODBURY_HEIGHTS.length),
-                     bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.945].map(share => share * 3121.28 / MODBURY_HEIGHTS.length), even: true,
-                     // The Cliff Climb (340 to 960 m) is a long slow pull: more to go for on the way up.
-                     // These are distances round the lap in metres, fitted between the spots above (which
-                     // stay exactly where they were) so that something comes up about every 75 m of the climb.
-                     extra: { rows: [448, 880], bones: [370, 522, 795, 955] } },
+  // (2026-11-26: the Cliff Climb, 340 to 960 m, is the mountain lift now and nobody runs it: its rows and bones are gone,
+  //  and a row waits just past the top station instead)
+  modbury_heights: { rows: [0.05, 1012 / 3121.28, 0.42, 0.54, 0.66, 0.79, 0.91, 0.985].map(share => share * 3121.28 / MODBURY_HEIGHTS.length),
+                     bones: [0.075, 0.36, 0.48, 0.60, 0.72, 0.85, 0.945].map(share => share * 3121.28 / MODBURY_HEIGHTS.length), even: true },
 };
 
 /** { mapId: [s, ...] } for box rows and for bones */

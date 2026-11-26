@@ -13,6 +13,7 @@ import { createFireworks } from '../pickups/firework.js';
 import { createShields } from '../pickups/collar.js';
 import { createSpecials } from '../abilities/specials.js';
 import { createQuake } from '../abilities/quake.js';
+import { createFrogs, createPuffs } from '../abilities/shopDogs.js';
 import { createMinimap } from '../minimap.js';
 import { formatTime } from '../utils/format.js';
 import { RaceScene } from './RaceScene.js';
@@ -93,6 +94,9 @@ export class Race {
     this.sheep = createSheep({ scene });
     // Jazz's stomp (shared/specials.js QUAKE)
     this.quake = createQuake({ scene });
+    // Merlin's frogs and puffs of magic (shared/specials.js HEX)
+    this.frogs = createFrogs({ scene });
+    this.puffs = createPuffs({ scene });
     // Special abilities: each dog's own move (the server decides when and who is hit; shared/specials.js)
     this.specials = createSpecials({
       scene,
@@ -305,10 +309,11 @@ export class Race {
 
       playerBurrowEntered: (data) => {
         if (data.kelp) this.kelp.burst(data.tunnel.entry);       // the seaweed that takes him
+        if (data.spell) { this.puffs.burst(data.tunnel.entry, 1.3); this.frogs.release(data.playerId); }      // Merlin's shuffle: gone in a puff
         if (mine(data.playerId)) {
           // (one of Ralph's burrows, or Kombu's kelp, which says where it is itself)
           const tunnel = data.tunnel ?? BURROWS[this.mapId]?.find(t => t.id === data.tunnelId);
-          this.burrowOverlay.textContent = data.kelp ? 'KELP DIVE' : 'BURROW BOOST';
+          this.burrowOverlay.textContent = data.spell ? 'HOCUS CROAKUS!' : data.kelp ? 'KELP DIVE' : 'BURROW BOOST';
           if (tunnel) local.enteredBurrow(tunnel);
         } else {
           remotes.get(data.playerId)?.hide();
@@ -317,6 +322,7 @@ export class Race {
 
       playerBurrowExited: (data) => {
         if (data.kelp) this.kelp.burst(data.position);            // up he comes
+        if (data.spell) this.puffs.burst(data.position, 1.3);
         playerRespawned({ ...data, rescued: true, penaltySeconds: 0 });
         if (mine(data.playerId)) local.leftBurrow(data);
       },
@@ -403,6 +409,7 @@ export class Race {
 
       // Golden collar: a shield round the dog that put it on; anything that bounces off makes it flare
       shieldStarted: ({ playerId, durationMs }) => shields.start(playerId, durationMs),
+      shieldEnded: ({ playerId }) => shields.stop(playerId),           // (Jazz's Earthquake shakes it off)
       hitBlocked: ({ playerId }) => shields.blocked(playerId),
 
       // ---------------------------------
@@ -417,6 +424,15 @@ export class Race {
         const shaken = slowed.filter(avatarOf);
         this.quake.stomp({ position, avatar: avatarOf(playerId), slowed: shaken.map(avatarOf), slowedFor: shaken.map(id => secondsFor[id] ?? seconds), seconds });
         if (slowed.includes(this.myId)) local.shaken(secondsFor[this.myId] ?? seconds, speed);
+      },
+      // Merlin's spell has reached a dog: a puff, and (unless it missed) a frog for a few seconds
+      hexed: ({ playerId, hit, seconds, speed }) => {
+        const avatar = mine(playerId) ? local : remotes.get(playerId);
+        if (!avatar) return;
+        this.puffs.burst(avatar.group.position.toArray());
+        if (!hit) return;
+        this.frogs.frog(playerId, avatar, seconds);
+        if (mine(playerId)) local.shaken(seconds, speed, 'RIBBIT! YOU’RE A FROG');
       },
       sheepMoved: ({ sheep }) => this.sheep.move(sheep),
       sheepGone: ({ id, position }) => this.sheep.gone(id, position),
@@ -485,6 +501,8 @@ export class Race {
     this.fireworks.update(delta);
     this.#warnIncoming(player.position);
     this.kelp.update(delta);
+    this.frogs.update(delta);
+    this.puffs.update(delta);
     this.sheep.update(delta);
     this.shields.update(delta, id => (id === this.myId ? local : remotes.get(id)));
     local.spinIfStunned();
@@ -612,6 +630,8 @@ export class Race {
     this.sheep.dispose();
     this.specials.dispose();
     this.quake.dispose();
+    this.frogs.dispose();
+    this.puffs.dispose();
     this.minimap.dispose();
     this.goldenBones.dispose();
     this.local.skid.dispose();

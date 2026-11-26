@@ -232,6 +232,8 @@ function buildRoute(mapId) {
     // the farm's tractor, sheep, pigs, sails and rolling bales: where they are is a matter of the race clock
     hazardHit: track?.hazardHit ?? null,
     hazardZones: Object.values(track?.hazardZones ?? {}).flat(),
+    // stretches where what is coming comes fast and head on (the desert's boulders): [from, to, seconds to look ahead]
+    farSight: track?.farSight ?? [],
     // the Water Park's rubber rings, and what one does to a dog that lands on it
     // how slippery the road is at s (the mud run), 0 to 1
     slipAt: track?.slipAt ?? (() => 0),
@@ -506,7 +508,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   function watchHazards(world, top) {
     if (!route.hazardHit || world.shielded || world.special || world.raceSeconds == null) return { cap: top, jump: false };       // (nothing knocks a dog out of its special)
     if (!route.hazardZones.some(zone => Math.abs(route.ahead(zone, s)) < 45)) return { cap: top, jump: false };
-    for (let ahead = 0.15; ahead <= L.foresight + 1e-6; ahead += 0.15) {
+    const sight = Math.max(L.foresight, ...route.farSight.filter(([from, to]) => s > from - 25 && s < to).map(([, , seconds]) => seconds * (L.pace >= 0.9 ? 1 : 0.7)));
+    for (let ahead = 0.15; ahead <= sight + 1e-6; ahead += 0.15) {
       // where it will be then: at the speed it is going, or having picked up speed on the way, and how high
       // (a dog already in the air, off a kicker ramp, is over what it is going to clear: no braking for that)
       const quicker = Math.min(top, speed + acceleration * ahead);

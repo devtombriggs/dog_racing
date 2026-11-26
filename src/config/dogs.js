@@ -283,6 +283,64 @@ export const DOGS = {
       Sprint: 5.598
     }
   },
+  // ---------- the three dogs from the Shop (Tom, 2026-11-26; built by ../new_dogs/create_dog.py) ----------
+  ziggy: {
+    name: 'Ziggy (Whippet)',
+    displayName: DOG_NAMES.ziggy,
+    breed: 'Whippet',
+    portrait: '/portraits/ziggy.png',
+    accent: '#c0c8d4',
+    model: '/models/ziggy.glb',
+    stats: DOG_STATS.ziggy,
+    skid: CROUCH_SKID,
+    // (Meela's frame, a fifth smaller: a whippet is a greyhound in small.  At the same pace his legs turn over quicker)
+    scale: 2.4,
+    size: 0.85,
+    maxStrideRate: 1.6,
+    cameraOffset: [0, 3.6, -7.2],
+    cameraLookHeight: 1.4,
+    // new_dogs/ziggy/clip_info.json (Meela's captured gallop)
+    gaitSpeed: { Walk: 1.52, Trot: 2.587, Run: 3.9, Sprint: 5.5 }
+  },
+  barney: {
+    name: 'Barney (Basset Hound)',
+    displayName: DOG_NAMES.barney,
+    breed: 'Basset Hound',
+    portrait: '/portraits/barney.png',
+    accent: '#9a5a22',
+    model: '/models/barney.glb',
+    stats: DOG_STATS.barney,
+    skid: CROUCH_SKID,
+    // (Ralph's frame made heavy.  Bigger than a dachshund: about 1.3 m at the top of his head here.  Too big for the
+    //  small-dog tunnel, and the burrows are Ralph's alone)
+    scale: 3.5,
+    size: 0.6,
+    strideBands: DOG_STRIDE_BANDS.barney,
+    maxStrideRate: 1.9,
+    cameraOffset: [0, 2.8, -6.0],
+    cameraLookHeight: 1.0,
+    // new_dogs/barney/clip_info.json (Ralph's strides)
+    gaitSpeed: { Walk: 0.39, Trot: 0.66, Run: 1.16, Sprint: 1.8 }
+  },
+  merlin: {
+    name: 'Merlin (Brussels Griffon)',
+    displayName: DOG_NAMES.merlin,
+    breed: 'Brussels Griffon',
+    portrait: '/portraits/merlin.png',
+    accent: '#5b2bd6',
+    model: '/models/merlin.glb',
+    stats: DOG_STATS.merlin,
+    skid: CROUCH_SKID,
+    // (Poppy's frame on short legs, in a wizard's hat and cape.  A small dog: about 1.1 m at the back here, his hat half as much again)
+    scale: 2.0,
+    size: 0.6,
+    strideBands: DOG_STRIDE_BANDS.merlin,
+    maxStrideRate: 1.9,
+    cameraOffset: [0, 3.0, -6.2],
+    cameraLookHeight: 1.15,
+    // new_dogs/merlin/clip_info.json (Poppy's captured strides on legs 62% as long)
+    gaitSpeed: { Walk: 0.95, Trot: 1.62, Run: 2.85, Sprint: 4.43 }
+  },
   ralph: {
     name: 'Ralph (Dachshund)',
     displayName: DOG_NAMES.ralph,

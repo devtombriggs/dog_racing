@@ -190,8 +190,13 @@ export function createKitWorld(T, look) {
       : new THREE.MeshStandardMaterial({ color: edge.color ?? 0xffffff, map: tex, roughness: edge.roughness ?? 0.9, side: THREE.DoubleSide, alphaTest: edge.cutout ? 0.5 : 0 }));      // (cutout: the texture has holes in it)
     if (tex) D.push(tex);
     for (const side of [1, -1]) {
+      // A wall that is for some sections only runs on to the first sample of the next section, to meet that section's own
+      // wall: otherwise there is a slit one sample wide between them, floor to ceiling, and the outdoors shows through it
+      // (Tom, 2026-11-26: "not all the walls are connecting, have a gap so you can see outside")
+      const own = i => Boolean(edge.skip?.(S.s[i], side, S.section[i]));
+      const meets = i => { const j = (i + N - 1) % N; return S.section[j] !== S.section[i] && !own(j); };
       const at = lift => i => ({ lat: side * (S.width[i] / 2 + (edge.out ?? 0.25)), y: S.y[i] + lift });
-      const wall = add(`Edge_${n}`, band(T, 0, N, at(edge.from ?? 0), at((edge.from ?? 0) + edge.height), { every: edge.every ?? 4, skip: i => T.isGapSegment(i) || T.isGapSegment((i + N - 1) % N) || joined(i, side) || edge.skip?.(S.s[i], side, S.section[i]) }), mat);
+      const wall = add(`Edge_${n}`, band(T, 0, N, at(edge.from ?? 0), at((edge.from ?? 0) + edge.height), { every: edge.every ?? 4, skip: i => T.isGapSegment(i) || T.isGapSegment((i + N - 1) % N) || joined(i, side) || (own(i) && !meets(i)) }), mat);
       wall.castShadow = Boolean(edge.shadow);
     }
   }

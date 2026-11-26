@@ -142,7 +142,7 @@ test('specials: never for the leader, more likely the further back, and a rammin
   assert.ok(chances.every((c, i) => i === 0 || c > chances[i - 1]), `rising with place: ${chances}`);
   assert.ok(Math.abs(chances[0] - 0.1) < 1e-9 && Math.abs(chances[3] - 0.3) < 1e-9, '2nd 10 %, last 30 %');
   assert.ok(Math.abs(specialChance(2, 2) - 0.3) < 1e-9, '2nd of two is last');
-  assert.deepEqual(Object.keys(SPECIALS).sort(), ['baz_naz', 'black_lab', 'casper', 'enzo', 'gsp', 'jazz', 'jimmy', 'kombu', 'pablo', 'ralph', 'rocky', 'second_dog'], 'every dog has one');
+  assert.deepEqual(Object.keys(SPECIALS).sort(), ['barney', 'baz_naz', 'black_lab', 'casper', 'enzo', 'gsp', 'jazz', 'jimmy', 'kombu', 'merlin', 'pablo', 'ralph', 'rocky', 'second_dog', 'ziggy'], 'every dog has one');
   // Pablo's team runs ahead of him: a dog 7 m in front is hit, one 7 m behind or beside is not
   const sled = SPECIALS.pablo;
   assert.ok(specialTouches(sled, [0, 0, 0], 0, [0, 0, 7]));
@@ -212,7 +212,7 @@ test('Ralph\'s Rocket Paws last fifteen seconds from last place and a second and
   assert.equal(specialDurationMs(ralph, 2, 2), 15000, 'last of two is last');
   assert.equal(specialDurationMs(ralph, 3, 4), 13500, 'one place off last, in any size of race');
   assert.ok(specialDurationMs(ralph, 1, 6) >= 3000);
-  for (const [dog, spec] of Object.entries(SPECIALS)) if (dog !== 'ralph' && dog !== 'jimmy') assert.equal(specialDurationMs(spec, 2, 6), spec.durationMs, dog);
+  for (const [dog, spec] of Object.entries(SPECIALS)) if (!['ralph', 'jimmy', 'barney'].includes(dog)) assert.equal(specialDurationMs(spec, 2, 6), spec.durationMs, dog);       // (Barney's flight goes by place as Ralph's does)
 });
 
 test('Casper: Pablo and a little less; his Try Time is a six-second charge that knocks dogs over, and ends in a pass', async () => {

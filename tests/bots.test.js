@@ -192,7 +192,7 @@ test('computer dogs drift: at some bends, not for long, into the turn, with a bo
 test('in a special a dog can still jump (Tom, 2026-11-21: it could not get over anything), but for Ralph flying and Enzo bouncing', async () => {
   const { SPECIALS, jumpsInSpecial } = await import('../shared/specials.js');
   assert.ok(jumpsInSpecial(null));
-  for (const [dog, spec] of Object.entries(SPECIALS)) assert.equal(jumpsInSpecial(spec), !['ralph', 'enzo'].includes(dog), dog);
+  for (const [dog, spec] of Object.entries(SPECIALS)) assert.equal(jumpsInSpecial(spec), !['ralph', 'enzo', 'barney'].includes(dog), dog);          // (Barney flies as Ralph does)
   // a computer dog in one jumps what lies across the road, as it does out of one
   // (Modbury's broken bridges: a jump every dog has to make.  Wendover's fallen logs went with its old model: Tom, 2026-11-21)
   const route = botRoute('modbury_heights'), log = route.jumps.find(jump => jump.must) ?? route.jumps[0];

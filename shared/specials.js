@@ -20,6 +20,13 @@
 //   Poppy  — Surf's Up:      belly-flops onto her own wave: the fastest of the lot, but it steers itself for five
 //                            seconds, so it only hits who happens to be in the way
 //
+//   Ziggy  — Lightning Run:  four and a half seconds faster than any dog can run, lightning at his heels; he steers it himself
+//   Barney — Ear-copter:     his ears spin like rotor blades and lift him over everyone, fast, and nothing can hit him: Ralph's
+//                            flight in every way but its looks, a little shorter
+//   Merlin — Hocus Croakus:  one by one, leader first, every other dog is turned into a frog that can only hop slowly for
+//                            three seconds; then the whole field is shuffled, each dog put where another was, and Merlin
+//                            always comes down in 2nd place
+//
 // The dog in first place never gets one; for everyone else the chance rises the further back they are.
 // Nothing knocks a dog out of its special: while it lasts, whatever is thrown, dropped or driven at
 // the dog (another dog's special included) bounces off.  A fall or a catapult still ends it.
@@ -61,6 +68,12 @@ export const SPECIALS = {
   // back half of the field, how far apart, and `front` from the front half (dragonFireworks below).  They are the
   // Treat Box firework (shared/firework.js, FIREWORK in shared/items.js) in every way but who lights them
   jimmy: { kind: 'dragon', name: 'Dragon Dance', durationMs: 7000, lessPerPlaceMs: 1000, speed: 1.8, fireworks: { count: 2, front: 1, everyMs: 2000 } },
+  // The Shop's three (Tom, 2026-11-26).  Ziggy: "super run like the flash": faster than Poppy's wave, shorter, and he steers
+  ziggy: { kind: 'flash', name: 'Lightning Run', durationMs: 4500, speed: 2.0 },
+  // Barney: "his ears fly like a helicopter".  As Ralph's flight (`look`: what the game draws instead of rocket paws)
+  barney: { kind: 'jet', name: 'Ear-copter', look: 'ears', durationMs: 13000, lessPerPlaceMs: 1500, speed: 1.5, flyHeight: 3.2, immune: true },
+  // Merlin: the server runs the spell (HEX below); durationMs is only how long his own flourish lasts
+  merlin: { kind: 'hex', name: 'Hocus Croakus', durationMs: 900 },
   black_lab: { kind: 'wave', name: 'Surf’s Up', durationMs: 5000, speed: 1.9, hitRadius: 2.8, reach: 2, steerLocked: true, wander: 0.5 },
 };
 
@@ -119,6 +132,14 @@ export const QUAKE = {
   stompAt: 0.45,         // seconds into her stomp that her paws come down (when the ring goes out and the screen shakes)
   stompSeconds: 0.9,
 };
+
+// Merlin's Hocus Croakus (Tom, 2026-11-26: "he basically teleports to every dog and turns them into a frog one by one, then
+// he swaps all 6 characters positions with each other by random but he always goes into 2nd").  Leader first, a dog every
+// `everyMs`: each becomes a frog for `frogSeconds`, keeping only `speed` of its pace (not one that is flying, shielded or
+// underground: it is missed).  `swapAfterMs` after the last, the shuffle: every dog still racing (and not in mid-air or
+// underground) is put where another of them was, lap and checkpoints and all, at random, but for Merlin, who is put where the
+// dog in 2nd was.  Each is `rideSeconds` in the going.
+export const HEX = { everyMs: 450, frogSeconds: 3, speed: 0.25, swapAfterMs: 600, rideSeconds: 0.9 };
 
 /** How long Jazz's Earthquake slows the dog in `place` (1 = leading), whatever place Jazz is in */
 export function quakeSeconds(place) {

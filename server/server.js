@@ -8,7 +8,7 @@ import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGolde
 import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
 import { launchFrisbee, stepFrisbee, roadAhead } from '../shared/frisbee.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, quakeSeconds, kelpDistance, specialDurationMs, specialChance, comebackGain, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, HEX, quakeSeconds, kelpDistance, specialDurationMs, specialChance, comebackGain, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
@@ -50,7 +50,7 @@ const io = new Server(httpServer, {
   }
 });
 
-const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo', 'baz_naz', 'jazz', 'casper', 'jimmy'];
+const DOGS = ['gsp', 'second_dog', 'black_lab', 'ralph', 'pablo', 'kombu', 'rocky', 'enzo', 'baz_naz', 'jazz', 'casper', 'jimmy', 'ziggy', 'barney', 'merlin'];
 const MAX_PLAYERS = RACE_DOGS;
 const LOCAL_SEATS = LOCAL_PLAYERS;       // the most players at one split screen
 const LOBBY_BROWSER = 'lobby-browser';
@@ -134,7 +134,8 @@ function rideBurrow(room, player, data) {
     broadcastProgress(room, player);
     io.to(room.code).emit('playerBurrowExited', {
       playerId: player.id, position: player.position, rotation: player.rotation,
-      respawnRevision: state?.revision ?? 0, boostSeconds: tunnel.boostSeconds, speedMultiplier: tunnel.speedMultiplier, kelp: Boolean(tunnel.kelp)
+      respawnRevision: state?.revision ?? 0, boostSeconds: tunnel.boostSeconds, speedMultiplier: tunnel.speedMultiplier,
+      kelp: Boolean(tunnel.kelp && !tunnel.spell), spell: Boolean(tunnel.spell)
     });
     return true;
   }
@@ -284,9 +285,10 @@ function updateProceduralRace(room, player, data) {
   for (const pad of track.launches ?? (track.launch ? [track.launch] : [])) {
     // (a lift up from the level below takes only a dog that is down there; a catapult only one up on the road)
     if ((pad.under ? ground.level !== pad.under : Boolean(ground.level))) continue;
-    if (previous.onTrack && previous.s >= pad.padStart && previous.s < pad.takeoffS
+    // (reach: Modbury's mountain lift takes a dog that far off the side of the road too, so that there is no running round it)
+    if ((previous.onTrack || pad.reach) && previous.s >= pad.padStart && previous.s < pad.takeoffS
       && ground.s >= pad.takeoffS && ground.s <= pad.gapStart + 8
-      && Math.abs(ground.lateral) <= ground.halfWidth
+      && Math.abs(ground.lateral) <= ground.halfWidth + (pad.reach ?? 0)
       && y > ground.y - 1.2 && (y < ground.y + 2.5 || flying(player))) {   // a dog jumping across the pad still launches, and so does Ralph flying over it
       const halfWidth = Math.min(ground.halfWidth, track.pointAt(pad.landingS).halfWidth) - 1;
       state.launch = { startedAt: now, lateral: Math.max(-halfWidth, Math.min(halfWidth, ground.lateral)), index: pad.index ?? 0 };
@@ -490,6 +492,7 @@ function startSpecial(room, player) {
   if (spec.kind === 'kelp') { kelpDive(room, player); return; }       // (over in a moment: nothing to keep track of)
   if (spec.kind === 'sheep') { releaseSheep(room, player); return; }  // (the flock is on its own from here: he just runs on)
   if (spec.kind === 'quake') { earthquake(room, player); return; }    // (one stomp, and it is everyone else's problem)
+  if (spec.kind === 'hex') { hexSpell(room, player); return; }        // (the server runs the whole spell: frogs, then the shuffle)
   clearTimeout(activeSpecials.get(player)?.timer);
   // (Ralph's rocket paws last longer the further back he is)
   const standings = raceStandings(room), place = standings.find(entry => entry.playerId === player.id)?.place ?? 1;
@@ -538,16 +541,88 @@ function dragonFire(room, player, spec, count) {
 // the nearer the front it is (quakeSeconds),
 // its own special or not (only Ralph, flying, is out of it).  Each dog's own game
 // slows it (the server says who); the computer's dogs are slowed here (slowUntil, read in tickBots).
+// And it clears the board (Tom, 2026-11-26: "when he uses it, all ults, items etc... disappear as well to buff it"): every
+// other dog's special stops where it is (Ralph and Barney drop out of the air), its golden collar's shield goes, and
+// whatever it was carrying is lost; and everything loose on the road or in the air goes too (chew toys, balls, fireworks,
+// Rocky's sheep).  So nothing is out of it any more but a dog underground.
 function earthquake(room, player) {
-  const now = Date.now(), slowed = [], secondsFor = {};
+  const now = Date.now(), slowed = [], secondsFor = {}, cleared = [];
+  for (const victim of room.players.values()) {
+    if (victim === player || victim.finished) continue;
+    if (activeSpecials.has(victim)) { endSpecial(room, victim, 'quake'); cleared.push(victim.id); }
+    if (now < victim.shieldUntil) { victim.shieldUntil = 0; io.to(room.code).emit('shieldEnded', { playerId: victim.id }); }
+    if (victim.item) { victim.item = null; io.to(room.code).emit('itemChanged', { playerId: victim.id, item: null, lost: true }); }
+  }
+  for (const toy of room.hazards.values()) io.to(room.code).emit('hazardRemoved', { id: toy.id, hitBy: 'special' });
+  room.hazards.clear();
+  for (const ball of room.balls.values()) io.to(room.code).emit('ballHit', { id: ball.id, position: ballPositionAt(ball, (now - ball.firedAt) / 1000, BALL_GROUND[room.mapId]) });
+  room.balls.clear();
+  for (const f of room.fireworks?.values() ?? []) io.to(room.code).emit('fireworkGone', { id: f.id, position: f.position });
+  room.fireworks?.clear();
+  for (const sheep of room.sheep?.values() ?? []) io.to(room.code).emit('sheepGone', { id: sheep.id, position: sheep.position });
+  room.sheep?.clear();
   const places = new Map(raceStandings(room).map(entry => [entry.playerId, entry.place]));
   for (const victim of room.players.values()) {
-    if (victim === player || victim.finished || activeSpecials.get(victim)?.spec.flyHeight || now < victim.shieldUntil || burrowRides.has(victim)) continue;
+    if (victim === player || victim.finished || burrowRides.has(victim)) continue;
     const seconds = secondsFor[victim.id] = quakeSeconds(places.get(victim.id));      // (by its own place: the leader longest)
-    victim.slowUntil = now + seconds * 1000;
+    victim.slowUntil = now + seconds * 1000; victim.slowSpeed = QUAKE.speed;
     slowed.push(victim.id);
   }
   io.to(room.code).emit('earthquake', { playerId: player.id, position: player.position, slowed, secondsFor, seconds: QUAKE.seconds, speed: QUAKE.speed });
+}
+
+// Merlin's Hocus Croakus (shared/specials.js HEX): every other dog a frog, one at a time from the leader back, then the
+// whole field shuffled with Merlin put down in 2nd.
+function hexSpell(room, player) {
+  const later = (ms, work) => {
+    const timer = setTimeout(() => {
+      room.specialTimers.delete(timer);
+      if (rooms.get(room.code) === room && room.status === 'racing') work();
+    }, ms);
+    room.specialTimers.add(timer);
+  };
+  const victims = raceStandings(room).map(entry => room.players.get(entry.playerId)).filter(victim => victim && victim !== player && !victim.finished);
+  const castMs = victims.length * HEX.everyMs + HEX.swapAfterMs;
+  io.to(room.code).emit('specialStarted', { playerId: player.id, kind: 'hex', durationMs: castMs });
+  victims.forEach((victim, k) => later(k * HEX.everyMs, () => {
+    if (room.players.get(victim.id) !== victim || victim.finished) return;
+    const now = Date.now();
+    // (missed: flying, under a golden collar's shield, or underground)
+    const hit = !(activeSpecials.get(victim)?.spec.flyHeight || now < victim.shieldUntil || burrowRides.has(victim));
+    if (hit) { victim.slowUntil = Math.max(victim.slowUntil ?? 0, now + HEX.frogSeconds * 1000); victim.slowSpeed = HEX.speed; }
+    io.to(room.code).emit('hexed', { playerId: victim.id, by: player.id, hit, seconds: HEX.frogSeconds, speed: HEX.speed });
+  }));
+  later(castMs, () => { if (room.players.get(player.id) === player && !player.finished) shuffleField(room, player); });
+}
+
+// The shuffle: every dog still racing, and neither in mid-air nor underground, is put where another of them was (place on the
+// road, lap, checkpoints), at random; the caster always where the dog in 2nd was.  Each is taken like Kombu by his kelp (the
+// same ride), so each dog's own game, and the computer's dogs, are moved the way they already know.
+function shuffleField(room, caster, random = Math.random) {
+  const movable = dog => dog && !dog.finished && !burrowRides.has(dog) && !raceStateOf(room, dog)?.launch && !raceStateOf(room, dog)?.fall;
+  const field = raceStandings(room).map(entry => room.players.get(entry.playerId)).filter(movable);
+  if (field.length < 2 || !field.includes(caster)) return null;
+  const route = fireworkRoute(room.mapId);
+  const slots = field.map(dog => ({ position: [...dog.position], rotation: dog.rotation, lap: dog.lap, checkpoint: dog.checkpoint, was: dog.id }));
+  const others = field.filter(dog => dog !== caster), rest = slots.filter((_, k) => k !== 1);
+  for (let k = rest.length - 1; k > 0; k--) { const j = Math.floor(random() * (k + 1)); [rest[k], rest[j]] = [rest[j], rest[k]]; }
+  const now = Date.now(), moves = {};
+  for (const [dog, slot] of [[caster, slots[1]], ...others.map((dog, k) => [dog, rest[k]])]) {
+    moves[dog.id] = slot.was;
+    if (slot.was === dog.id) continue;                    // (it stays where it is)
+    const tunnel = {
+      id: 'spell', kelp: true, spell: true, name: 'Hocus Croakus', entry: [...dog.position], entryYaw: dog.rotation,
+      exit: slot.position, exitYaw: slot.rotation, exitS: route.sAt(slot.position), lap: slot.lap, checkpoint: slot.checkpoint,
+      landed: MAPS[room.mapId].checkpoints.slice(0, slot.checkpoint).some(cp => cp.launchLanding),
+      duration: HEX.rideSeconds, boostSeconds: 0, speedMultiplier: 1,
+    };
+    endSpecial(room, dog, 'moved');                       // (whatever it was in the middle of does not come with it)
+    burrowRides.set(dog, { tunnel, startedAt: now });
+    dog.animation = 'Jump';
+    io.to(room.code).emit('playerBurrowEntered', { playerId: dog.id, tunnelId: tunnel.id, duration: tunnel.duration, spell: true,
+      tunnel: { id: tunnel.id, name: tunnel.name, entry: tunnel.entry, entryYaw: tunnel.entryYaw, exit: tunnel.exit } });
+  }
+  return moves;
 }
 
 // Rocky's Sheep Stampede (shared/specials.js SHEEP): the server runs five sheep up the road, telling
@@ -1857,7 +1932,7 @@ function tickBots(room) {
         special: activeSpecials.get(player)?.spec ?? null,
         burrowOpen: burrowOpen(room, player),
         shielded: now < player.shieldUntil,
-        slowed: now < (player.slowUntil ?? 0) ? QUAKE.speed : 1,
+        slowed: now < (player.slowUntil ?? 0) ? (player.slowSpeed ?? QUAKE.speed) : 1,
         threat: threatTo(room, player),
         raceSeconds: (now - room.startedAt) / 1000
       });
@@ -2548,4 +2623,4 @@ io.on('connection', (socket) => {
 if (env.NO_LISTEN !== '1') httpServer.listen(PORT, () => console.log(`Multiplayer server running on port ${PORT}${env.DB_PATH ? ` (database: ${env.DB_PATH})` : ' (database in memory)'}${accounts.google ? ' · Google sign-in on' : ''}`));
 
 // (for the tests: the database and sign-in the server is using)
-export const forTests = { db, accounts, rooms };
+export const forTests = { db, accounts, rooms, shuffleField };

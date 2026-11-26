@@ -47,7 +47,10 @@ export const SLOTS = { head: 'Head', body: 'Body' };
 export const SHOP_ITEMS = [
   { id: 'hat_santa', kind: 'accessory', slot: 'head', name: 'Santa Hat', blurb: 'Red, fluffy, and it stays on round every corner.', price: 300 },
   { id: 'coat_pippa', kind: 'accessory', slot: 'body', dogs: ['gsp'], name: 'Pippa’s Winter Coat', blurb: 'A quilted red coat, made to measure for Pippa.', price: 500 },
-  { id: 'dog_jimmy', kind: 'character', dog: 'jimmy', name: 'Jimmy', blurb: 'The Chinese Crested on wheels. Unlocks him for every race.', price: 5000 },
+  // (the characters: Tom, 2026-11-26.  Jimmy was the first, while there was nobody else; he is free again)
+  { id: 'dog_ziggy', kind: 'character', dog: 'ziggy', name: 'Ziggy', blurb: 'The whippet. Lightning Run: a few seconds faster than anything on four legs.', price: 5000 },
+  { id: 'dog_barney', kind: 'character', dog: 'barney', name: 'Barney', blurb: 'The basset hound. Ear-copter: his ears spin and he flies over everyone.', price: 5000 },
+  { id: 'dog_merlin', kind: 'character', dog: 'merlin', name: 'Merlin', blurb: 'The Brussels griffon wizard. Hocus Croakus: frogs for all, then a shuffle that lands him in 2nd.', price: 5000 },
 ];
 export const SHOP_ITEM = Object.fromEntries(SHOP_ITEMS.map(item => [item.id, item]));
 

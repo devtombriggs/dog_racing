@@ -481,9 +481,65 @@ function buildTunnel(group, D, animated) {
 }
 
 /** Build the whole Modbury Heights scene graph. */
+
+// ---------- the mountain lift (shared/modburyData.js `launch`): a station at the end of the beach, one at the top of the
+// cliff, pylons where the cable bends, and a gondola round every dog that is riding up.  The old path up the cliff is
+// fenced off at both ends.
+function buildLift(group, D, riders) {
+  const L = T.launch, a = T.pointAt(L.takeoffS), b = T.pointAt(L.landingS), line = Math.atan2(b.x - a.x, b.z - a.z);
+  const col = (g, hex) => { const c = new THREE.Color(hex), n = g.getAttribute('position').count, arr = new Float32Array(n * 3); for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(arr, 3)); return g.index ? g.toNonIndexed() : g; };
+  const box = (w, h, d, hex, x = 0, y = 0, z = 0, ry = 0) => { const g = col(new THREE.BoxGeometry(w, h, d), hex); if (ry) g.rotateY(ry); return g.translate(x, y, z); };
+  const cyl = (r, h, hex, x = 0, y = 0, z = 0, rx = 0, rz = 0) => { const g = col(new THREE.CylinderGeometry(r, r, h, 10), hex); if (rx) g.rotateX(rx); if (rz) g.rotateZ(rz); return g.translate(x, y, z); };
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.05 }); D.push(mat);
+  const place = (name, parts, x, y, z, ry) => { const g = mergeGeometries(parts); const mesh = new THREE.Mesh(g, mat); mesh.name = name; mesh.position.set(x, y, z); mesh.rotation.y = ry; mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh); D.push(g); return mesh; };
+  const TIMBER = 0x8a5a34, ROOF = 0xc8452f, STEEL = 0x8d98a6, DARK = 0x39424e, CABIN = 0xe9483a, CREAM = 0xf3ead6;
+  // a station: a timber hall the road runs through, open at both ends, with the big wheel the cable turns on over the door
+  const station = (name, p, half, toward) => place(name, [
+    ...[-1, 1].flatMap(k => [box(1.2, 9, 14, TIMBER, k * (half + 1.6), 4.5, 0), box(0.5, 9.2, 0.5, DARK, k * (half + 0.9), 4.6, 7), box(0.5, 9.2, 0.5, DARK, k * (half + 0.9), 4.6, -7)]),
+    box(half * 2 + 5.6, 0.8, 15, CREAM, 0, 9.2, 0),
+    ...[-1, 1].map(k => { const g = col(new THREE.BoxGeometry(half + 4.2, 0.5, 16.4), ROOF); g.rotateZ(-k * 0.5); return g.translate(k * (half + 2.6) / 2, 11.4, 0); }),
+    cyl(3.2, 0.5, STEEL, 0, 10.2, toward * 5, 0, 0), cyl(0.5, 3, DARK, 0, 10.5, toward * 5),
+  ], p.x, p.y - 0.2, p.z, p.rotationY);
+  station('Modbury_LiftStation_Low', a, a.halfWidth, 1);
+  station('Modbury_LiftStation_High', b, b.halfWidth, -1);
+  // the cable: two lines side by side along the ride, and a pylon wherever it bends
+  const along = t => { const p = T.launchPoint(t * L.duration); return p; };
+  const tAt = k => { /* launchPoint eases time: find the time for a share k of the way */ let lo = 0, hi = 1; for (let n = 0; n < 24; n++) { const m = (lo + hi) / 2; const p = along(m); const done = Math.hypot(p.x - a.x, p.z - a.z) / Math.hypot(b.x - a.x, b.z - a.z); if (done < k) lo = m; else hi = m; } return (lo + hi) / 2; };
+  const rope = [];
+  for (let k = 0; k < 60; k++) { const p = along(tAt(k / 60)), q = along(tAt((k + 1) / 60)), len = Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z);
+    for (const side of [-1.6, 1.6]) { const g = col(new THREE.CylinderGeometry(0.07, 0.07, len, 5), DARK); g.rotateX(Math.PI / 2); g.lookAt(new THREE.Vector3(q.x - p.x, q.y - p.y, q.z - p.z)); g.translate((p.x + q.x) / 2 + Math.cos(line) * side, (p.y + q.y) / 2 + 5.2, (p.z + q.z) / 2 - Math.sin(line) * side); rope.push(g); } }
+  place('Modbury_LiftCable', rope, 0, 0, 0, 0).castShadow = false;
+  const bends = []; for (const k of [...(L.pylons ?? []), 0.33]) if (k > 0.06 && k < 0.94 && bends.every(o => Math.abs(o - k) > 0.07)) bends.push(k);
+  for (const k of bends) { const p = along(tAt(k)), foot = T.terrainHeight(p.x, p.z), tall = p.y + 5.6 - foot;
+    place('Modbury_LiftPylon', [cyl(0.55, tall, STEEL, 0, tall / 2, 0), box(5, 0.5, 0.7, STEEL, 0, tall, 0), box(1.8, 0.6, 1.8, DARK, 0, 0.3, 0)], p.x, foot - 0.3, p.z, line); }
+  // the old path: a gate across it just past the bottom station, and another short of the top one
+  for (const s of [L.gapStart + 14, L.gapEnd - 14]) { const p = T.pointAt(s), w = p.halfWidth * 2 + 6;
+    place('Modbury_PathClosed', [box(w, 0.35, 0.3, TIMBER, 0, 1.0, 0), box(w, 0.35, 0.3, TIMBER, 0, 1.9, 0), ...[-1, -0.33, 0.33, 1].map(k => box(0.45, 2.5, 0.45, TIMBER, k * w / 2, 1.25, 0)),
+      box(w * 0.9, 0.3, 0.25, TIMBER, 0, 1.45, 0.05, 0).rotateZ(0.12)], p.x, p.y, p.z, p.rotationY); }
+  // the gondolas: one for each dog on its way up (a floor, four posts, a red roof, and the arm it hangs by)
+  const cabin = mergeGeometries([box(3.6, 0.25, 4.6, DARK, 0, -0.15, 0), ...[-1, 1].flatMap(k => [-1, 1].map(j => box(0.18, 3.4, 0.18, STEEL, k * 1.7, 1.7, j * 2.2))), box(3.9, 0.3, 4.9, CABIN, 0, 3.5, 0), box(3.6, 0.9, 0.12, CABIN, 0, 0.45, 2.25), box(3.6, 0.9, 0.12, CABIN, 0, 0.45, -2.25),
+    ...[-1, 1].map(k => box(0.12, 0.9, 4.6, CABIN, k * 1.75, 0.45, 0)), cyl(0.12, 1.8, DARK, 0, 4.4, 0), box(3.6, 0.2, 0.3, DARK, 0, 5.2, 0)]); D.push(cabin);
+  const cars = Array.from({ length: 6 }, () => { const mesh = new THREE.Mesh(cabin, mat); mesh.name = 'Modbury_Gondola'; mesh.visible = false; mesh.castShadow = true; group.add(mesh); return mesh; });
+  // a dog is riding when it is in the air on the line of the cable
+  const dx = b.x - a.x, dz = b.z - a.z, len2 = dx * dx + dz * dz;
+  riders.push((dogs) => {
+    let n = 0;
+    for (const dog of dogs ?? []) {
+      if (!dog || n >= cars.length) continue;
+      const t = ((dog.x - a.x) * dx + (dog.z - a.z) * dz) / len2;
+      if (t < 0.004 || t > 0.996) continue;
+      const off = Math.hypot(dog.x - (a.x + dx * t), dog.z - (a.z + dz * t));
+      if (off > 9 || dog.y < T.terrainHeight(dog.x, dog.z) + 1.5) continue;
+      const car = cars[n++]; car.visible = true; car.position.set(dog.x, dog.y - 0.05, dog.z); car.rotation.y = line;
+    }
+    for (; n < cars.length; n++) cars[n].visible = false;
+  });
+}
+
 export function createModburyHeights() {
   const group = new THREE.Group(); group.name = 'ModburyHeights';
-  const D = [], animated = [];
+  const D = [], animated = [], riders = [];
+  buildLift(group, D, riders);
   buildSky(group, D, animated); buildTerrain(group, D); buildTrail(group, D); buildBridges(group, D, animated); buildSea(group, D, animated); buildTunnel(group, D, animated); buildNature(group, D);
   const hemi = new THREE.HemisphereLight(0xbfdcff, 0xcdb78a, 1.0), sun = new THREE.DirectionalLight(0xfff1d6, 3.4);
   sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 600 }); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.5;
@@ -492,7 +548,7 @@ export function createModburyHeights() {
   return {
     group, track: T, sun,
     /** t = seconds (cosmetic only). focus = optional {x,y,z} of the dog to keep the shadow box around. */
-    update(t, focus) { for (const f of animated) f(t); if (focus) { sun.target.position.set(focus.x, focus.y, focus.z); sun.position.set(focus.x, focus.y, focus.z).addScaledVector(SUN_DIRECTION, 300); } },
+    update(t, focus, sinceGo, dogs) { for (const f of animated) f(t); for (const f of riders) f(dogs ?? (focus ? [focus] : [])); if (focus) { sun.target.position.set(focus.x, focus.y, focus.z); sun.position.set(focus.x, focus.y, focus.z).addScaledVector(SUN_DIRECTION, 300); } },
     /** Summer daylight: fog, tone mapping, optional sun shadows. Returns a function that undoes it. */
     applyEnvironment(scene, renderer, { shadows = true } = {}) {
       const prev = { fog: scene.fog, bg: scene.background, tm: renderer?.toneMapping, ex: renderer?.toneMappingExposure, sh: renderer?.shadowMap.enabled };

@@ -3,7 +3,7 @@
 // shared/desertData.js; the parts every kit map shares are in ../trackKit3d.js.
 import * as THREE from 'three';
 import { DESERT as T } from '../../../shared/desertData.js';
-import { createKitWorld, rng, cyl, ball, cone, merge, canvasTexture } from '../trackKit3d.js';
+import { createKitWorld, rng, cyl, ball, cone, torus, merge, canvasTexture } from '../trackKit3d.js';
 
 const S = T.samples;
 const SAND = 0xe2c285, ROCK = 0xa9683f;
@@ -75,6 +75,34 @@ export const createDesert = () => createKitWorld(T, {
     T.weedLanes.forEach((_, k) => {
       const weed = new THREE.Mesh(weedG, weedM); weed.rotation.order = 'YZX'; weed.name = 'Tumbleweed'; group.add(weed);
       movers[`weed-${k}`] = h => { weed.visible = h.fade > 0.01; weed.position.set(h.x, h.y + T.weedRun.radius, h.z); weed.rotation.set(0, h.rotationY, h.spin); weed.scale.setScalar(0.5 + 0.5 * h.fade); };
+    });
+    // the boulders rolling down the great dune
+    const boulderG = new THREE.IcosahedronGeometry(T.boulders.radius, 1); D.push(boulderG);
+    { const at = boulderG.getAttribute('position'), lump = rng(5); for (let i = 0; i < at.count; i++) { const k = 0.86 + 0.24 * lump(); at.setXYZ(i, at.getX(i) * k, at.getY(i) * k, at.getZ(i) * k); } boulderG.computeVertexNormals(); }
+    const boulderM = keep(new THREE.MeshStandardMaterial({ color: 0x8f6a4c, roughness: 1, flatShading: true }));
+    for (let k = 0; k < T.boulders.count; k++) {
+      const boulder = new THREE.Mesh(boulderG, boulderM); boulder.name = 'Rolling_Boulder'; boulder.castShadow = true; boulder.rotation.order = 'YXZ'; group.add(boulder);
+      movers[`boulder-${k}`] = h => { boulder.visible = h.fade > 0.02; boulder.position.set(h.x, h.y + T.boulders.radius * h.fade, h.z); boulder.rotation.set(-h.spin, h.rotationY, 0); boulder.scale.setScalar(0.3 + 0.7 * h.fade); };
+    }
+    // the sandworm: a ringed body as thick as a tree, a round mouth full of teeth, and the sand heaving before it comes
+    const wormM = keep(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true }));
+    // (it leans over the road towards the dogs coming down at it, mouth open: local -z is up the road)
+    const TALL = 9, bend = n => -0.05 * n * n, wormG = merge([
+      ...Array.from({ length: 9 }, (_, n) => ball(1, 1, n % 2 ? 0xc9794a : 0xb5653a, 0, 0.5 + n * 1.0, bend(n), 1.55 - n * 0.035, 0.72, 1.55 - n * 0.035)),
+      ...Array.from({ length: 9 }, (_, n) => ball(1, 1, 0xe8b48a, 0, 0.5 + n * 1.0, bend(n) - 0.75, 0.9, 0.6, 0.9)),          // a paler belly, on the side it shows
+      ball(1.5, 1, 0xb5653a, 0, TALL + 0.4, bend(9) - 0.5, 1, 0.95, 1),
+      torus(1.15, 0.36, 0xd98a5a, 0, TALL + 0.3, bend(9) - 1.75, 0.25, 14), ball(1.0, 1, 0x2a0d0a, 0, TALL + 0.3, bend(9) - 1.5, 1, 1, 0.5),
+      ...Array.from({ length: 12 }, (_, n) => cone(0.15, 0.75, 5, 0xfff4dc, Math.cos(n * 0.5236) * 0.86, TALL + 0.3 + Math.sin(n * 0.5236) * 0.86, bend(9) - 1.95, -Math.PI / 2)),
+    ]); D.push(wormG);
+    const moundG = new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(2.6, 0.7, 2.6), moundM = keep(new THREE.MeshStandardMaterial({ color: 0xe0bd7c, roughness: 1 })); D.push(moundG);
+    T.worms.forEach((_, k) => {
+      const worm = new THREE.Mesh(wormG, wormM), mound = new THREE.Mesh(moundG, moundM); worm.name = 'Sandworm'; mound.name = 'Sandworm_Mound'; worm.castShadow = true; group.add(worm, mound);
+      movers[`worm-${k}`] = h => {
+        // the sand heaves and shivers where it is coming; then up it comes, swaying, and the sand settles
+        const heave = h.rise > 0 ? 0.5 + 0.5 * h.rise : h.rumble;
+        mound.visible = heave > 0.02; mound.position.set(h.x + (h.rise > 0 ? 0 : Math.sin(h.sway * 23) * 0.12 * h.rumble), h.y - 0.05, h.z); mound.scale.set(0.5 + 0.5 * heave, heave * (1 + 0.25 * Math.sin(h.sway * 17)), 0.5 + 0.5 * heave);
+        worm.visible = h.rise > 0.01; worm.position.set(h.x, h.y - (TALL + 1.4) * (1 - h.rise), h.z); worm.rotation.set(Math.sin(h.sway) * 0.09, h.rotationY + Math.sin(h.sway * 0.7) * 0.25, Math.cos(h.sway * 0.8) * 0.1);
+      };
     });
     void prop;
   },

@@ -12,7 +12,9 @@
 //   B  The Dune Sea     S-bends up and over dune after dune, with soft sand that drags a dog down to a plod
 //   C  Twister Flats    a long, wide sweeping bend, with three whirlwinds wandering across it: nothing jumps a whirlwind
 //   D  Rattle Canyon    tumbleweed blowing across the mouth of it (jump it), a hairpin, then a chicane through the boulders
-//   E  The Great Dune   the long climb, over the crest, and a fast sweeping run down the far side
+//   E  The Great Dune   the long climb with boulders rolling down it at you, over the crest, and a fast sweeping run down the
+//                       far side, where the sandworm comes up through the road (Tom, 2026-11-26: the map "is boring, can we add
+//                       something that makes it more exciting?  I trust your advice": so the dune is the set piece now)
 //   S  The Sinkhole     a wide bowl of sand with the pit in the middle of it
 //   F  Home             a last bend into the oasis
 import { makeTrack } from './trackKit.js';
@@ -21,6 +23,12 @@ const SOFT_SAND = 0.6;                  // share of top speed in soft sand
 const TWISTER = { radius: 2.3, wander: 14 };
 const WEED = { period: 5, roll: 3.4, from: 17, to: -17, radius: 0.8 };
 // the sinkhole: slowed inside `radius` metres of its middle and dragged towards it, swallowed inside `core`
+// the boulders: `count` of them rolling down the climb one after another, each in a different third of the road; too big to jump
+// (two at 10 m/s: three at 15 knocked the computer's dogs over twice a lap)
+const BOULDER = { count: 2, speed: 10, radius: 1.4, height: 3.4 };
+// the sandworm: at each spot it comes up through one third of the road or another every `period` seconds: the sand heaves for
+// `rumble` seconds first (that is the warning), then it is up for `up` seconds
+const WORM = { period: 5.2, rumble: 1.4, up: 1.7, radius: 1.7 };
 const SINKHOLE = { radius: 10, core: 2.6, pull: 6, speed: 0.55 };
 
 // [x, z, height, width, section, name?]: a name marks a point the features below are placed by
@@ -62,8 +70,26 @@ export const DESERT = makeTrack({
   const pit = sAtU(AT.pit);
   const sinkholes = [{ id: 'sinkhole', kind: 'sinkhole', s: pit, lateral: 0, ...SINKHOLE }];
 
+  // the great dune: boulders down the climb, the worm on the way down the far side
+  const climb = { top: sAtU(AT.crest - 0.12), bottom: sAtU(AT.crest - 2.45) }, run = climb.top - climb.bottom;
+  const worms = [sAtU(AT.crest + 0.75), sAtU(AT.crest + 1.55)];
+  const THIRDS = [-0.58, 0.58, 0];
+
   function hazardsAt(t) {
     const out = [];
+    for (let k = 0; k < BOULDER.count; k++) {
+      const gone = t * BOULDER.speed + k * run / BOULDER.count, trip = Math.floor(gone / run), down = gone - trip * run, s = climb.top - down;
+      const c = pointAt(s), p = pointAt(s, THIRDS[(trip + k * 2) % 3] * (c.halfWidth - BOULDER.radius - 0.4)), fade = Math.min(1, down / 8, (run - down) / 8);
+      out.push({ id: `boulder-${k}`, kind: 'boulder', x: p.x, y: p.y, z: p.z, rotationY: c.rotationY, radius: BOULDER.radius, height: BOULDER.height, active: fade > 0.5, fade, spin: down / BOULDER.radius });
+    }
+    worms.forEach((s, k) => {
+      const at = t + k * WORM.period * 0.45 + 60, n = Math.floor(at / WORM.period), ph = at - n * WORM.period, c = pointAt(s);
+      const p = pointAt(s, THIRDS[(n * 2 + k) % 3] * (c.halfWidth - WORM.radius - 0.6)), since = ph - WORM.rumble;
+      // rise: 0 under the sand, 1 right up.  It comes up fast and goes down slower
+      const rise = since < 0 ? 0 : since < WORM.up ? Math.min(1, since / 0.3) : Math.max(0, 1 - (since - WORM.up) / 0.7);
+      out.push({ id: `worm-${k}`, kind: 'sandworm', x: p.x, y: p.y, z: p.z, rotationY: c.rotationY, radius: WORM.radius, height: 99, active: rise > 0.35, rise,
+        rumble: since < 0 ? ph / WORM.rumble : 0, sway: at * 2.3 + k });
+    });
     // the whirlwinds: each wanders from side to side of the flats, and up and down them a little
     twisters.forEach((base, k) => {
       const m = pingPong(t + k * 2.7, 8 + k, 0.04), s = base + TWISTER.wander * Math.sin(t * 0.5 + k * 2), c = pointAt(s);
@@ -81,8 +107,12 @@ export const DESERT = makeTrack({
   }
   return {
     patches, obstacles, sinkholes, hazardsAt,
-    keepClear: [[twisters[0] - TWISTER.wander - 12, twisters[2] + TWISTER.wander + 12], [weeds[0] - 14, weeds[2] + 12]],
-    extras: { twisters, twisterWander: TWISTER.wander, weedLanes: weeds, weedRun: WEED, crest: sAtU(AT.crest) },
+    keepClear: [[twisters[0] - TWISTER.wander - 12, twisters[2] + TWISTER.wander + 12], [weeds[0] - 14, weeds[2] + 12], [climb.bottom - 6, climb.top + 6], ...worms.map(s => [s - 12, s + 12])],
+    extras: { farSight: [[climb.bottom, climb.top, 1.6]],
+      // (where the computer's dogs look out for something coming: server/bots.js.  Until 2026-11-26 this map had none, and they
+      //  ran straight into the whirlwinds)
+      hazardZones: { twisters, weeds, boulders: [climb.bottom, (climb.bottom + climb.top) / 2, climb.top], worms },
+      boulders: BOULDER, boulderRun: climb, worms, worm: WORM, twisters, twisterWander: TWISTER.wander, weedLanes: weeds, weedRun: WEED, crest: sAtU(AT.crest) },
   };
 });
 export default DESERT;
