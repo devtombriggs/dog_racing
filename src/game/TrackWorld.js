@@ -11,6 +11,7 @@ const GENERATED_WORLDS = {
   modbury_heights: () => import('../tracks/modburyHeights/ModburyHeightsTrack.js').then(module => module.createModburyHeights),
   farmyard: () => import('../tracks/farm/FarmTrack.js').then(module => module.createFarm),
   mud_park: () => import('../tracks/mudPark/MudParkTrack.js').then(module => module.createMudPark),
+  bypass_dash: () => import('../tracks/bypass/BypassTrack.js').then(module => module.createBypass),
   desert_dunes: () => import('../tracks/desert/DesertTrack.js').then(module => module.createDesert),
   speed_bowl: () => import('../tracks/speedBowl/SpeedBowlTrack.js').then(module => module.createSpeedBowl),
   kombu_house: () => import('../tracks/kombuHouse/KombuHouseTrack.js').then(module => module.createKombuHouse),
@@ -48,7 +49,7 @@ export class TrackWorld {
     // The supplied coastal map has its own surfaces (mud, verges, water) and speeds for them
     this.coastalTrack = this.proceduralTrack?.speedFactor ? this.proceduralTrack : null;
     // Dogs cast shadows on the maps lit for them
-    this.castsShadows = this.woodland || mapId === 'modbury_heights' || mapId === 'farmyard' || mapId === 'water_park' || mapId === 'pet_mall' || mapId === 'mud_park'
+    this.castsShadows = this.woodland || mapId === 'modbury_heights' || mapId === 'farmyard' || mapId === 'water_park' || mapId === 'pet_mall' || mapId === 'mud_park' || mapId === 'bypass_dash'
       || mapId === 'desert_dunes' || mapId === 'speed_bowl' || mapId === 'kombu_house'
       || mapId === 'yorkshire_dales' || mapId === 'boneyard' || mapId === 'the_vets' || mapId === 'monkey_jungle';       // (not Neon Nexus: it is night there)
 
@@ -121,6 +122,9 @@ export class TrackWorld {
     gltf.scene.updateMatrixWorld(true);
     this.#sortMeshes(gltf.scene);
     if (woodlandModule) this.woodlandWorld = woodlandModule.createWendoverWorld(scene, renderer, gltf.scene);
+    // (no signs saying what is coming, on any map: Tom, 2026-11-26.  Frostpeak's model has chevron boards on the outside of its
+    // bends: not drawn)
+    gltf.scene.traverse((object) => { if (object.name === 'Scenery_Signs') object.visible = false; });
     // Frostpeak's slalom gates and snowmen: drawn one by one, so that each can be knocked down (the model's own, all in one
     // piece, are hidden, and their collision boxes left out: they slow a dog now, they do not stop it)
     if (slalomModule) {

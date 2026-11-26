@@ -14,7 +14,7 @@ import { MODBURY_HEIGHTS as T, fbm } from '../../../shared/modburyData.js';
 
 const S = T.samples, N = T.sampleCount;
 export const SUN_DIRECTION = new THREE.Vector3(0.38, 0.80, 0.46).normalize();
-const BOUNDS = { x0: -820, x1: 540, z0: -600, z1: 172, step: 4 };
+const BOUNDS = { x0: -820, x1: 540, z0: -600, z1: 228, step: 4 };       // (z1: out past the Seabed Tunnel, which goes 175 m out to sea)
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
@@ -76,13 +76,13 @@ function buildTerrain(group, D) {
 
 // ---------- the trail, cut into the terrain
 function buildTrail(group, D) {
-  const secCol = { A: C.firm, F: C.firm, E: C.firm, B: C.dirt, D: C.dirt, C: C.gravel };
+  const secCol = { A: C.firm, F: C.firm, E: C.firm, B: C.dirt, D: C.dirt, C: C.gravel, T: [0.50, 0.56, 0.62] };       // (T: the tunnel's floor)
   const raw = S.section.map(s => secCol[s]), cols = [];
   for (let i = 0; i < N; i++) { let c = [0, 0, 0]; for (let k = -8; k <= 8; k++) { const r = raw[(i + k + N) % N]; c = [c[0] + r[0] / 17, c[1] + r[1] / 17, c[2] + r[2] / 17]; } cols.push(c); }
   const pos = [], col = [], uv = [], idx = [], K = 7, vRep = Math.round(T.length / 6) / T.length;
   for (let r = 0; r <= N; r++) {
     const i = r % N, hw = S.width[i] / 2, lat = [-hw - 1.9, -hw, -hw * 0.5, 0, hw * 0.5, hw, hw + 1.9], dy = [-0.55, 0, 0.03, 0.04, 0.03, 0, -0.55];
-    const wetK = sstep(0.5, -0.2, S.y[i]), base = mix(cols[i], C.sandSub, wetK * 0.6);
+    const wetK = S.section[i] === 'T' ? 0 : sstep(0.5, -0.2, S.y[i]), base = mix(cols[i], C.sandSub, wetK * 0.6);       // (the tunnel is dry)
     for (let k = 0; k < K; k++) {
       const x = S.x[i] + S.normalX[i] * lat[k], z = S.z[i] + S.normalZ[i] * lat[k];
       const edge = k === 0 || k === K - 1, c = edge ? groundColor(x, z, S.y[i], 1) : (k === 1 || k === K - 2 ? mix(base, groundColor(x, z, S.y[i], 1), 0.35) : base);
@@ -141,7 +141,6 @@ function buildBridges(group, D, animated) {
   o.rotation.order = 'YXZ';
   const planks = [], posts = [], rails = [], legs = [], flags = [];
   for (const c of T.chasms) {
-    const i0 = T.indexAtS(c.s), inland = S.exposed[0][i0] ? -1 : 1;       // the side away from the cliff edge, for the sign
     for (const [from, to, towardsBreak] of [[c.ravineStart, c.gapStart, 1], [c.gapEnd, c.ravineEnd, -1]]) {
       const n = Math.max(1, Math.round((to - from) / 0.5));
       for (let k = 0; k < n; k++) {
@@ -169,7 +168,6 @@ function buildBridges(group, D, animated) {
         if (q.y - ground > 0.6) legs.push({ q, height: q.y - ground + 0.6 });
       }
     }
-    flags.at(-1).sign = { p: T.pointAt(c.ravineStart - 26, inland * (T.pointAt(c.ravineStart - 26).halfWidth + 1.3)), yaw: T.pointAt(c.ravineStart - 26).rotationY };
   }
   const wood = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88 });
   const instanced = (name, geo, list, place, shadow = false) => {
@@ -194,24 +192,14 @@ function buildBridges(group, D, animated) {
     o.position.set(q.x, q.y - height / 2, q.z); o.scale.set(1, height, 1); ic.setRGB(0.42, 0.32, 0.22);
   }, true);
 
-  // a red flag on each of the four posts at the break, and a JUMP sign on the way in
+  // a red flag on each of the four posts at the break
   const flagG = new THREE.BufferGeometry(); flagG.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, -0.9, 0, 0, -0.45, -1.4], 3)); flagG.computeVertexNormals();
   const flagM = new THREE.MeshBasicMaterial({ color: 0xe5352b, side: THREE.DoubleSide });
-  const sc = document.createElement('canvas'); sc.width = 256; sc.height = 128; const sg = sc.getContext('2d');
-  sg.fillStyle = '#f4e7c4'; sg.fillRect(0, 0, 256, 128); sg.strokeStyle = '#d9372b'; sg.lineWidth = 12; sg.strokeRect(6, 6, 244, 116);
-  sg.fillStyle = '#d9372b'; sg.font = 'bold 76px sans-serif'; sg.textAlign = 'center'; sg.textBaseline = 'middle'; sg.fillText('JUMP!', 128, 68);
-  const signT = new THREE.CanvasTexture(sc); signT.colorSpace = THREE.SRGBColorSpace;
-  const signM = new THREE.MeshBasicMaterial({ map: signT, side: THREE.DoubleSide }), signG = new THREE.PlaneGeometry(2.6, 1.3);
-  const signPostG = new THREE.CylinderGeometry(0.1, 0.12, 2.6, 7), signPostM = new THREE.MeshStandardMaterial({ color: 0x8b6a45, roughness: 0.9 });
-  D.push(flagG, flagM, signT, signM, signG, signPostG, signPostM);
+  D.push(flagG, flagM);
   const flying = [];
   for (const f of flags) {
     const flag = new THREE.Mesh(flagG, flagM); flag.position.set(f.q.x, f.q.y + 3.25, f.q.z); flag.rotation.y = f.yaw; flag.name = 'Modbury_BridgeFlag'; group.add(flag);
     flying.push({ flag, yaw: f.yaw, phase: f.phase });
-    if (f.sign) {
-      const post = new THREE.Mesh(signPostG, signPostM); post.position.set(f.sign.p.x, f.sign.p.y + 1.2, f.sign.p.z); post.castShadow = true; group.add(post);
-      const board = new THREE.Mesh(signG, signM); board.position.set(f.sign.p.x, f.sign.p.y + 2.6, f.sign.p.z); board.rotation.y = f.sign.yaw + Math.PI; board.name = 'Modbury_JumpSign'; group.add(board);
-    }
   }
   animated.push(t => { for (const f of flying) f.flag.rotation.y = f.yaw + 0.35 * Math.sin(t * 3.1 + f.phase) + 0.12 * Math.sin(t * 7.3 + f.phase); });
 }
@@ -228,8 +216,10 @@ function buildSea(group, D, animated) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
   const bump = noiseTexture(256, 0.0, 1.0, 12);
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.80, roughness: 0.14, metalness: 0.05, bumpMap: bump, bumpScale: 1.4 });
+  cutForTunnel(mat);
   const sea = new THREE.Mesh(g, mat); sea.name = 'Modbury_Sea'; sea.renderOrder = 2; group.add(sea);
   const dg = new THREE.PlaneGeometry(26000, 26000).rotateX(-Math.PI / 2), dm = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.04, 0.40, 0.66), roughness: 0.2 });
+  cutForTunnel(dm);
   const deep = new THREE.Mesh(dg, dm); deep.position.set(0, -0.5, 0); deep.name = 'Modbury_DeepSea'; group.add(deep);
   // foam where the gentle waves meet the sand
   const fp = [], fi = []; let n = 0;
@@ -345,11 +335,156 @@ function buildSky(group, D, animated) {
   animated.push(t => { for (const q of gulls) { const a = q.ph + t * q.sp; q.b.position.set(q.cx + Math.cos(a) * q.rad, q.y + Math.sin(t * 0.4 + q.ph) * 3, q.cz + Math.sin(a) * q.rad); q.b.rotation.y = -a + (q.sp > 0 ? 0 : Math.PI); const f = Math.sin(t * 5 + q.ph) * 0.5; q.l.rotation.z = f; q.rr.rotation.z = -f; } });
 }
 
+// ---------- the Seabed Tunnel (Tom, 2026-11-26: "an underwater bit with fish swimming about")
+// The tube comes up through the surface of the sea at both ends.  The sea is one flat sheet, so where the tube is at the
+// surface the sheet is not drawn inside it: these are the middles of the tube there, and how far out its glass is.
+const TUBE = (() => {
+  const K = T.tunnel, segs = []; let prev = null;
+  // (wherever any of the inside of the tube is at the height of the sea, with a little to spare)
+  for (let i = K.firstIndex - 2; i <= K.lastIndex + 2; i += 2) {
+    const at = S.y[i] < 1.4 && S.y[i] + K.height > -0.7;
+    if (at && prev !== null) segs.push([S.x[prev], S.z[prev], S.x[i], S.z[i], (S.width[prev] + S.width[i]) / 4 + 0.12]);
+    prev = at ? i : null;
+  }
+  return { segs, max: 48 };
+})();
+/** A material of the sea's: nothing of it is drawn inside the tube where the tube breaks the surface. */
+function cutForTunnel(material) {
+  const flat = []; for (const seg of TUBE.segs.slice(0, TUBE.max)) flat.push(new THREE.Vector4(seg[0], seg[1], seg[2], seg[3]));
+  const half = TUBE.segs.slice(0, TUBE.max).map(seg => seg[4]);
+  while (flat.length < TUBE.max) { flat.push(new THREE.Vector4(0, 1e6, 0, 1e6)); half.push(0); }
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.tubeSegs = { value: flat }; shader.uniforms.tubeHalf = { value: half };
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vTubeWorld;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvTubeWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>\nvarying vec3 vTubeWorld;\nuniform vec4 tubeSegs[${TUBE.max}];\nuniform float tubeHalf[${TUBE.max}];`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        for (int k = 0; k < ${TUBE.max}; k++) { vec2 a = tubeSegs[k].xy, b = tubeSegs[k].zw, ab = b - a, ap = vTubeWorld.xz - a; float h = clamp(dot(ap, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0); if (length(ap - ab * h) < tubeHalf[k]) discard; }`);
+  };
+  material.customProgramCacheKey = () => 'modbury-tube-cut';
+}
+
+function buildTunnel(group, D, animated) {
+  // (shapes of different kinds put together as one: some come with their corners shared and some do not)
+  const merged = list => mergeGeometries(list.map(g => (g.index ? g.toNonIndexed() : g)));
+  const K = T.tunnel, a = K.firstIndex, b = K.lastIndex, H = K.height, r = rng(2611), o = new THREE.Object3D(), ic = new THREE.Color();
+  // the shape of the tube across the road: [share of the half width, height]: upright sides, an arch over
+  const SHAPE = [[-1, 0], [-1, 1.5], [-0.82, 2.75], [-0.5, 3.75], [0, H], [0.5, 3.75], [0.82, 2.75], [1, 1.5], [1, 0]];
+  const out = i => S.width[i] / 2 + 0.12;
+  const place = (i, share, up) => [S.x[i] + S.normalX[i] * share * out(i), S.y[i] + up, S.z[i] + S.normalZ[i] * share * out(i)];
+
+  // ----- the glass
+  { const pos = [], idx = [], P = SHAPE.length;
+    for (let i = a; i <= b; i++) for (const [share, up] of SHAPE) pos.push(...place(i, share, up));
+    for (let n = 0; n < b - a; n++) for (let k = 0; k < P - 1; k++) { const p = n * P + k, q = p + 1, u = p + P, v = u + 1; idx.push(p, u, q, q, u, v); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+    const m = new THREE.MeshStandardMaterial({ color: 0xbfefff, transparent: true, opacity: 0.16, roughness: 0.05, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false });
+    const glass = new THREE.Mesh(g, m); glass.name = 'Modbury_Tunnel_Glass'; glass.renderOrder = 4; group.add(glass); D.push(g, m); }
+
+  // ----- the frame: a steel rib every 8 m, a rail along the foot of the glass each side and one along the top
+  { const ribs = []; for (let i = a; i <= b; i += 4) ribs.push(i); if (ribs.at(-1) !== b) ribs.push(b);
+    const bg = new THREE.BoxGeometry(1, 1, 1), bm = new THREE.MeshStandardMaterial({ color: 0xe9eef2, roughness: 0.45, metalness: 0.35 });
+    const mesh = new THREE.InstancedMesh(bg, bm, ribs.length * (SHAPE.length - 1)); let n = 0;
+    const va = new THREE.Vector3(), vb = new THREE.Vector3(), up = new THREE.Vector3(0, 0, 1);
+    for (const i of ribs) {
+      const mouth = i === a || i === b, thick = mouth ? 0.9 : 0.3;
+      for (let k = 0; k < SHAPE.length - 1; k++) {
+        va.set(...place(i, SHAPE[k][0], SHAPE[k][1])); vb.set(...place(i, SHAPE[k + 1][0], SHAPE[k + 1][1]));
+        o.position.copy(va).add(vb).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(up, vb.clone().sub(va).normalize()); o.scale.set(thick, thick, va.distanceTo(vb) + thick * 0.6); o.updateMatrix();
+        mesh.setMatrixAt(n, o.matrix); mesh.setColorAt(n, ic.set(mouth ? 0xffc83a : 0xe9eef2)); n++;
+      }
+    }
+    mesh.name = 'Modbury_Tunnel_Ribs'; mesh.castShadow = true; group.add(mesh); D.push(bg, bm, mesh);
+    const rail = (share, up, wide, high, color, name) => { const pos = [], idx = [];
+      for (let i = a; i <= b; i++) { const [x, y, z] = place(i, share, up), nx = S.normalX[i] * wide / 2, nz = S.normalZ[i] * wide / 2; pos.push(x - nx, y, z - nz, x + nx, y, z + nz, x - nx, y + high, z - nz, x + nx, y + high, z + nz); }
+      for (let n2 = 0; n2 < b - a; n2++) { const p = n2 * 4, q = p + 4; idx.push(p + 2, q + 2, p + 3, p + 3, q + 2, q + 3, p, q, p + 2, p + 2, q, q + 2, p + 1, p + 3, q + 1, q + 1, p + 3, q + 3); }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+      const m = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide }), mesh2 = new THREE.Mesh(g, m); mesh2.name = name; group.add(mesh2); D.push(g, m); };
+    rail(-0.97, 0, 0.5, 0.45, 0x2b6ea8, 'Modbury_Tunnel_Kerb'); rail(0.97, 0, 0.5, 0.45, 0x2b6ea8, 'Modbury_Tunnel_Kerb'); rail(0, H - 0.1, 0.22, 0.16, 0xe9eef2, 'Modbury_Tunnel_Spine');
+    // a line of lights along the floor either side, so the way through shows
+    const lg = new THREE.BoxGeometry(0.5, 0.08, 1.2), lm = new THREE.MeshBasicMaterial({ color: 0xbff6ff }), lights = new THREE.InstancedMesh(lg, lm, Math.floor((b - a) / 3 + 1) * 2); let ln = 0;
+    for (let i = a; i <= b; i += 3) for (const side of [-0.8, 0.8]) { const [x, y, z] = place(i, side, 0.07); o.position.set(x, y, z); o.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(S.tangentX[i], S.tangentZ[i])); o.scale.set(1, 1, 1); o.updateMatrix(); lights.setMatrixAt(ln++, o.matrix); }
+    lights.count = ln; lights.name = 'Modbury_Tunnel_Lights'; group.add(lights); D.push(lg, lm, lights); }
+
+  // ----- under the sea: the water all round (a box seen from inside it: deep blue below, lighter towards the surface), and the
+  // surface overhead from below
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let i = a; i <= b; i++) if (S.y[i] < -0.3) { x0 = Math.min(x0, S.x[i]); x1 = Math.max(x1, S.x[i]); z0 = Math.min(z0, S.z[i]); z1 = Math.max(z1, S.z[i]); }
+  x0 -= 95; x1 += 95; z0 -= 30; z1 += 95;
+  { const top = -0.56, floor = -11, g = new THREE.BoxGeometry(x1 - x0, top - floor, z1 - z0).translate((x0 + x1) / 2, (top + floor) / 2, (z0 + z1) / 2), p = g.getAttribute('position'), col = new Float32Array(p.count * 3);
+    for (let k = 0; k < p.count; k++) { const c = mix([0.03, 0.22, 0.42], [0.16, 0.62, 0.78], sstep(floor, top, p.getY(k))); col[k * 3] = c[0]; col[k * 3 + 1] = c[1]; col[k * 3 + 2] = c[2]; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const m = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }); cutForTunnel(m);
+    const water = new THREE.Mesh(g, m); water.name = 'Modbury_Underwater'; group.add(water); D.push(g, m);
+    // (the surface from below: bright, with the light coming through it)
+    const cg = new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(Math.PI / 2).translate((x0 + x1) / 2, top - 0.02, (z0 + z1) / 2);
+    const rip = noiseTexture(128, 0.55, 1.0, 10); rip.repeat.set(14, 9);
+    const cm = new THREE.MeshBasicMaterial({ color: 0x8fe6f2, map: rip, fog: false }); cutForTunnel(cm);
+    const under = new THREE.Mesh(cg, cm); under.name = 'Modbury_Surface_From_Below'; group.add(under); D.push(cg, cm, rip);
+    animated.push(t => { rip.offset.set(t * 0.02, t * 0.013); }); }
+
+  // ----- places out on the sea bed, beside the tube: [x, sea bed, z, how far along the tube]
+  const beside = (count, near, far) => { const list = []; let tries = 0;
+    while (list.length < count && tries++ < count * 40) { const i = a + Math.floor(r() * (b - a)); if (S.y[i] > -4.5) continue; const side = r() < 0.5 ? -1 : 1, d = S.width[i] / 2 + near + r() * (far - near), x = S.x[i] + S.normalX[i] * side * d, z = S.z[i] + S.normalZ[i] * side * d;
+      if (T.query(x, z).distance < S.width[i] / 2 + near - 0.5) continue; list.push([x, T.terrainHeight(x, z), z, i]); }
+    return list; };
+
+  // ----- kelp, coral and rocks on the sea bed
+  { const blade = new THREE.ConeGeometry(0.22, 1, 5).translate(0, 0.5, 0), bm = new THREE.MeshStandardMaterial({ color: 0x2f8f4a, roughness: 0.8 }), spots = beside(150, 2.2, 40);
+    const kelp = new THREE.InstancedMesh(blade, bm, spots.length), tall = spots.map(() => 1.6 + r() * 3.4), lean = spots.map(() => r() * 6.28);
+    const sway = t => { spots.forEach(([x, y, z], k) => { o.position.set(x, y - 0.1, z); o.rotation.set(0.16 * Math.sin(t * 0.9 + lean[k]), lean[k], 0.16 * Math.cos(t * 0.7 + lean[k])); o.scale.set(1 + (k % 3) * 0.4, tall[k], 1); o.updateMatrix(); kelp.setMatrixAt(k, o.matrix); }); kelp.instanceMatrix.needsUpdate = true; };
+    spots.forEach((_, k) => kelp.setColorAt(k, ic.set(k % 3 ? 0x2f8f4a : 0x4aa03a))); sway(0); animated.push(sway);
+    kelp.name = 'Modbury_Kelp'; group.add(kelp); D.push(blade, bm, kelp);
+    const coralG = merged([new THREE.IcosahedronGeometry(0.7, 1).translate(0, 0.5, 0), new THREE.IcosahedronGeometry(0.45, 1).translate(0.6, 0.9, 0.2), new THREE.IcosahedronGeometry(0.4, 1).translate(-0.5, 0.8, -0.3), new THREE.CylinderGeometry(0.12, 0.2, 1.4, 5).translate(0.2, 1.2, -0.4)]);
+    const coralM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 }), cs = beside(70, 2.5, 34), coral = new THREE.InstancedMesh(coralG, coralM, cs.length);
+    cs.forEach(([x, y, z], k) => { o.position.set(x, y - 0.15, z); o.rotation.set(0, r() * 6.28, 0); o.scale.setScalar(0.7 + r() * 1.3); o.updateMatrix(); coral.setMatrixAt(k, o.matrix); coral.setColorAt(k, ic.set([0xff6f91, 0xff9a3c, 0xc86bff, 0xffd166, 0x4fd1c5][k % 5])); });
+    coral.name = 'Modbury_Coral'; group.add(coral); D.push(coralG, coralM, coral); }
+
+  // ----- fish.  One is a body, a tail and a fin, nose along +z.  They go round in shoals, each round a place beside the tube or
+  // over the top of it
+  const fishG = merged([new THREE.IcosahedronGeometry(0.5, 1).scale(0.42, 0.62, 1.15), new THREE.ConeGeometry(0.34, 0.6, 4).rotateX(-Math.PI / 2).scale(0.35, 1, 1).translate(0, 0, -0.78), new THREE.ConeGeometry(0.16, 0.4, 3).translate(0, 0.42, 0)]);
+  const fishM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, emissive: 0x333333 });
+  const shoals = [];
+  { const centres = [...beside(9, 6, 20), ...[0.22, 0.4, 0.56, 0.72].map(share => { const i = a + Math.round((b - a) * share); return [S.x[i], S.y[i], S.z[i], i]; })];
+    centres.forEach(([x, y, z, i], k) => {
+      const over = k >= 9, count = 9 + (k * 5) % 9, hue = [0xff8a1f, 0xffd23a, 0xc9d6e2, 0x3aa0ff, 0xff5a7a, 0x8ff0d0][k % 6];
+      // (those over the tube go across it, above the glass; the others stay out at the side, between the sea bed and the surface)
+      const yaw = Math.atan2(S.tangentX[i], S.tangentZ[i]) + (over ? Math.PI / 2 : r() * 6.28), height = over ? Math.min(-1.3, S.y[i] + H + 1.1) : Math.min(-1.6, y + 1.6 + r() * 2.2);
+      shoals.push({ x, z, height, yaw, rx: over ? 15 : 7 + r() * 6, rz: over ? 5 : 4 + r() * 4, pace: (0.32 + r() * 0.3) * (k % 2 ? 1 : -1), count, hue, phase: r() * 6.28, size: 0.55 + r() * 0.5 });
+    }); }
+  const total = shoals.reduce((n, shoal) => n + shoal.count, 0), fish = new THREE.InstancedMesh(fishG, fishM, total);
+  { let n = 0; for (const shoal of shoals) for (let k = 0; k < shoal.count; k++) fish.setColorAt(n++, ic.set(shoal.hue).offsetHSL(0, 0, (k % 3 - 1) * 0.05)); }
+  const swim = (t) => { let n = 0;
+    for (const shoal of shoals) { const cy = Math.cos(shoal.yaw), sy = Math.sin(shoal.yaw);
+      for (let k = 0; k < shoal.count; k++) {
+        // (each a little behind the last, and a little in or out of the ring, and bobbing)
+        const ang = t * shoal.pace + shoal.phase - k * 0.22 * Math.sign(shoal.pace), ring = 1 + 0.22 * Math.sin(k * 2.4), lx = Math.cos(ang) * shoal.rx * ring, lz = Math.sin(ang) * shoal.rz * ring;
+        const tx = -Math.sin(ang) * shoal.rx * Math.sign(shoal.pace), tz = Math.cos(ang) * shoal.rz * Math.sign(shoal.pace);
+        o.position.set(shoal.x + lx * cy + lz * sy, shoal.height + 0.45 * Math.sin(k * 1.7) + 0.2 * Math.sin(t * 1.3 + k), shoal.z - lx * sy + lz * cy);
+        o.rotation.set(0, Math.atan2(tx * cy + tz * sy, -tx * sy + tz * cy) + 0.25 * Math.sin(t * 7 + k), 0); o.scale.setScalar(shoal.size); o.updateMatrix(); fish.setMatrixAt(n++, o.matrix);
+      } }
+    fish.instanceMatrix.needsUpdate = true; };
+  swim(0); animated.push(swim);
+  fish.name = 'Modbury_Fish'; fish.frustumCulled = false; group.add(fish); D.push(fishG, fishM, fish);
+
+  // ----- a shark, going slowly round the far bend of the tube and over the top of it
+  { const sharkG = merged([new THREE.IcosahedronGeometry(1, 2).scale(0.75, 0.8, 3.4), new THREE.ConeGeometry(0.9, 1.6, 4).rotateX(-Math.PI / 2).scale(0.3, 1.5, 1).translate(0, 0.2, -3.6), new THREE.ConeGeometry(0.5, 1.5, 4).scale(0.35, 1, 1.2).translate(0, 1.2, 0.2),
+      new THREE.ConeGeometry(0.4, 1.5, 3).rotateZ(Math.PI / 2).scale(1, 0.25, 1).translate(1.1, -0.2, 0.9), new THREE.ConeGeometry(0.4, 1.5, 3).rotateZ(-Math.PI / 2).scale(1, 0.25, 1).translate(-1.1, -0.2, 0.9)]);
+    const sharkM = new THREE.MeshStandardMaterial({ color: 0x7d8b99, roughness: 0.6 }), shark = new THREE.Mesh(sharkG, sharkM); shark.name = 'Modbury_Shark'; group.add(shark); D.push(sharkG, sharkM);
+    const mid = a + Math.round((b - a) * 0.5), cx = S.x[mid], cz = S.z[mid] - 6, top = Math.min(-1.5, S.y[mid] + H + 1.3);
+    animated.push(t => { const ang = t * 0.16, x = cx + Math.cos(ang) * 46, z = cz + Math.sin(ang) * 20; shark.position.set(x, top + 0.3 * Math.sin(t * 0.5), z); shark.rotation.y = Math.atan2(-Math.sin(ang) * 46, Math.cos(ang) * 20) + 0.12 * Math.sin(t * 2.2); }); }
+
+  // ----- jellyfish, rising and sinking
+  { const bell = merged([new THREE.SphereGeometry(0.6, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), ...[0, 1, 2, 3, 4].map(k => new THREE.CylinderGeometry(0.03, 0.02, 1.3, 4).translate(Math.cos(k * 1.257) * 0.35, -0.65, Math.sin(k * 1.257) * 0.35))]);
+    const jm = new THREE.MeshStandardMaterial({ color: 0xff9ad5, transparent: true, opacity: 0.7, roughness: 0.3, emissive: 0x7a2a5a }), spots = beside(14, 4, 22), jelly = new THREE.InstancedMesh(bell, jm, spots.length);
+    const bob = t => { spots.forEach(([x, y, z], k) => { const pulse = 1 + 0.12 * Math.sin(t * 2 + k); o.position.set(x, Math.min(-1.4, y + 2.6 + 1.1 * Math.sin(t * 0.4 + k * 1.9)), z); o.rotation.set(0, k, 0); o.scale.set(pulse, 2 - pulse, pulse); o.updateMatrix(); jelly.setMatrixAt(k, o.matrix); }); jelly.instanceMatrix.needsUpdate = true; };
+    bob(0); animated.push(bob); jelly.name = 'Modbury_Jellyfish'; jelly.renderOrder = 3; group.add(jelly); D.push(bell, jm, jelly); }
+}
+
 /** Build the whole Modbury Heights scene graph. */
 export function createModburyHeights() {
   const group = new THREE.Group(); group.name = 'ModburyHeights';
   const D = [], animated = [];
-  buildSky(group, D, animated); buildTerrain(group, D); buildTrail(group, D); buildBridges(group, D, animated); buildSea(group, D, animated); buildNature(group, D);
+  buildSky(group, D, animated); buildTerrain(group, D); buildTrail(group, D); buildBridges(group, D, animated); buildSea(group, D, animated); buildTunnel(group, D, animated); buildNature(group, D);
   const hemi = new THREE.HemisphereLight(0xbfdcff, 0xcdb78a, 1.0), sun = new THREE.DirectionalLight(0xfff1d6, 3.4);
   sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 600 }); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.5;
   const lights = new THREE.Group(); lights.name = 'Modbury_Lights'; lights.add(hemi, sun, sun.target); group.add(lights);

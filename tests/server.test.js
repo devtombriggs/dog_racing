@@ -1720,7 +1720,7 @@ test('Grand Prix: four races in order with the same dogs, 10-8-6-4-2 points a ra
   order.forEach((mapId, round) => {
     const start = events('raceStarted').at(-1);
     assert.equal(start.mapId, mapId, `race ${round + 1}`);
-    assert.deepEqual(start.grandPrix, { id: 'gp1', name: 'Grand Prix 1', round: round + 1, of: 4 });
+    assert.deepEqual(start.grandPrix, { id: 'gp1', name: 'Puppy Cup', round: round + 1, of: 4 });
     assert.equal(start.players.length, 3);
     const bot = start.players.find(player => player.bot);
     botId ??= bot.id;
@@ -1751,7 +1751,7 @@ test('Grand Prix: four races in order with the same dogs, 10-8-6-4-2 points a ra
   assert.equal(final.reduce((sum, row) => sum + row.points, 0), 4 * (10 + 8 + 6));
   for (let i = 1; i < final.length; i++) assert.ok(final[i - 1].points >= final[i].points);
   assert.ok([tom.id, berri.id].includes(final[0].playerId) && final[0].points >= 32);
-  assert.deepEqual(events('raceEnded').at(-1), { returnMs: 30000, grandPrix: { id: 'gp1', name: 'Grand Prix 1', round: 4, of: 4 }, final: true });
+  assert.deepEqual(events('raceEnded').at(-1), { returnMs: 30000, grandPrix: { id: 'gp1', name: 'Puppy Cup', round: 4, of: 4 }, final: true });
   // then the lobby, the computer dog gone, and a single race is a single race again
   context.mock.timers.tick(30000);
   const lobby = latest(room.code, 'lobbyUpdated');
@@ -1776,7 +1776,7 @@ test('Grand Prix: it can win the map vote like any map', context => {
   context.mock.timers.tick(120000);
   const start = latest(room.code, 'raceStarted');
   assert.equal(start.mapId, 'farmyard');
-  assert.deepEqual(start.grandPrix, { id: 'gp2', name: 'Grand Prix 2', round: 1, of: 4 });
+  assert.deepEqual(start.grandPrix, { id: 'gp2', name: 'Treat Cup', round: 1, of: 4 });
   for (const p of [tom, berri]) p.call('leaveGame');
 });
 

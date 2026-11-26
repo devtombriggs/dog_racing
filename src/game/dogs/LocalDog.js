@@ -500,6 +500,16 @@ export class LocalDog extends DogAvatar {
     return Boolean(this.fall || this.launchFlight || this.tunnelRide);
   }
 
+  // A short cut over rough ground does not slow a dog that is on a Golden Bone's boost, nor one that was on it at any time since
+  // it came on to the cut: the bone carries it the whole way across (Tom, 2026-11-26: short cuts on every map; a bone's boost is
+  // 2.5 s, about 55 m, and most cuts are longer).  Without one the cut is slower than the road.
+  #onBoneOverRough(ground) {
+    const cut = ground?.rough ? ground.lane?.id ?? null : null;
+    if (!cut) { this.cutPass = null; return false; }
+    if (this.race.goldenBones.isBoosting()) this.cutPass = cut;
+    return this.cutPass === cut;
+  }
+
   // How wide the camera should see: wider when flying or boosted
   get fov() {
     const { goldenBones, specials } = this.race;
@@ -620,7 +630,7 @@ export class LocalDog extends DogAvatar {
     const terrainMultiplier = inWater && woodlandSurface
       ? woodlandSwimMultiplier(stats.swimming)
       : coastalGround
-      ? coastalTrack.speedFactor(coastalGround, this.coastalStats, this.isJumping)
+      ? coastalTrack.speedFactor(coastalGround, Object.assign(this.coastalStats, { boosted: this.#onBoneOverRough(coastalGround) }), this.isJumping)
       : this.inBog
       ? BOG_SPEED
       : inWater

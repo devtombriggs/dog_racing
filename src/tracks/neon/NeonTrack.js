@@ -10,7 +10,7 @@ const CYAN = 0x29e6ff, PINK = 0xff3df0, CITY_Y = -170, RED = 0xff2a3a;
 // The Undercity: the dark road under each crossing (shared/neonData.js).  Its deck, walls of light, steam, a sign at each
 // end; the lift shaft up to the road; and the robots, each a chunky droid on one wheel with one big eye, that glows red before
 // it fires its ring of lightning
-function buildUndercity({ group, D, add, keep, band, span, movers, animated, sign }) {
+function buildUndercity({ group, D, add, keep, band, span, movers, animated }) {
   const S = T.samples;
   // (lit by its own glow: shiny metal renders black in this game's light, so the deck is matt, with lit lines in it)
   const deckTex = canvasTexture(64, 64, (g) => { g.fillStyle = '#1a1f3a'; g.fillRect(0, 0, 64, 64); g.strokeStyle = '#3d4d9a'; g.lineWidth = 3; g.strokeRect(1, 1, 62, 62); g.fillStyle = '#ff3df0'; g.fillRect(0, 29, 8, 6); g.fillRect(56, 29, 8, 6); g.fillStyle = '#2a3366'; g.fillRect(30, 0, 4, 64); }, true);
@@ -31,10 +31,8 @@ function buildUndercity({ group, D, add, keep, band, span, movers, animated, sig
     { const p = T.pointAt(u.sStart), w = p.halfWidth * 2 + 1, endG = new THREE.PlaneGeometry(w, 4.4); D.push(endG);
       const end = new THREE.Mesh(endG, sideM); end.position.set(p.x, p.y - u.depth + 1, p.z); end.rotation.y = p.rotationY; end.name = 'Undercity_End'; group.add(end);
       const stripeG = new THREE.PlaneGeometry(w, 0.5); D.push(stripeG); const stripe = new THREE.Mesh(stripeG, glowM[0]); stripe.position.set(p.x, p.y - u.depth + 2.4, p.z); stripe.rotation.y = p.rotationY; stripe.translateZ(0.05); group.add(stripe); }
-    // signs down there: where you are, and the way out
-    sign('UNDERCITY', u.sStart + 24, 1, '#12051f', '#ff3df0', { under: u.depth });
     const lift = T.launches.find(l => l.under === u.id);
-    sign('LIFT ▲', lift.padStart - 26, -1, '#12051f', '#29e6ff', { under: u.depth });
+
     // the lift: four posts from the deck to above the road, rings of light running up them, and a glowing floor
     const top = T.launchPoint(lift.duration * 0.86, 0, lift), bottom = T.launchPoint(lift.duration * 0.16, 0, lift), mid = { x: (top.x + bottom.x) / 2, z: (top.z + bottom.z) / 2 };
     const high = top.y - bottom.y + 4, postG = new THREE.CylinderGeometry(0.25, 0.25, high, 8).translate(0, high / 2, 0), ringG = new THREE.TorusGeometry(1, 0.08, 6, 32).rotateX(Math.PI / 2); D.push(postG, ringG);
@@ -109,7 +107,7 @@ export const createNeon = () => createKitWorld(T, {
   lights: { hemi: [0x9fb4ff, 0x4a2a70, 1.5], sun: [0xc8d6ff, 1.4] },
 
   build(ctx) {
-    const { group, D, animated, herd, sign, add, keep, S } = ctx;
+    const { group, D, animated, herd, add, keep, S } = ctx;
     const r = rng(77), o = new THREE.Object3D();
     // is (x, z) within `margin` of the road, or of a second road beside it?
     const nearRoad = (x, z, margin) => { const q = T.query(x, z), br = T.branchAt(q.s, q.halfWidth); return q.distance < q.halfWidth + margin + (br ? br.centre + br.half : 0); };
@@ -167,10 +165,9 @@ export const createNeon = () => createKitWorld(T, {
         const [a, b] = ctx.span(T, launch.padStart, launch.takeoffS + 3);
         add('Accelerator_Rail', ctx.band(T, a, b, i => ({ lat: side * (S.width[i] / 2 + 0.4), y: S.y[i] + 1.9 }), i => ({ lat: side * (S.width[i] / 2 + 0.4), y: S.y[i] + 2.6 })), keep(new THREE.MeshBasicMaterial({ color: gold, side: THREE.DoubleSide })));
       }
-      sign(launch.index ? 'CATAPULT!' : 'ACCELERATOR!', launch.padStart - 40, 1, '#12051f', '#29e6ff');
+
     }
 
-    for (const zone of T.platforms) sign('JUMP!', zone.sStart - 34, 1, '#12051f', '#ffd23a');
     buildUndercity(ctx);
     void herd;
   },

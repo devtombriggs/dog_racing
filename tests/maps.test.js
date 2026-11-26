@@ -142,9 +142,32 @@ test('Frostpeak: the cannon fires off the pad and flies way up to the top of a s
 });
 
 
+test('Modbury: the Seabed Tunnel (Tom, 2026-11-26) is under the sea, dry, walled in glass, with bends, and everything before the cove is where it was', () => {
+  const K = COAST.tunnel, s = COAST.samples;
+  assert.ok(K.sEnd - K.sStart > 380 && K.depth > 6);
+  let under = 0, turned = 0, bends = 0, way = 0;
+  for (let i = K.firstIndex + 1; i < K.lastIndex; i++) {          // (the first and last places are its mouths)
+    const q = COAST.query(s.x[i], s.z[i]);
+    assert.ok(q.inTunnel && !q.inWater && q.movement === 'run' && q.onTrack && !q.blocked, `at ${s.s[i].toFixed(0)} m`);
+    // no way out by the side: a dog against the glass is held inside the road
+    for (const side of [-1, 1]) { const out = COAST.pointAt(s.s[i], side * (s.width[i] / 2 + 3)), w = COAST.query(out.x, out.z); if (w.inTunnel) { assert.ok(w.blocked && !w.inWater); assert.ok(Math.hypot(w.clampX - s.x[i], w.clampZ - s.z[i]) < s.width[i] / 2); } }
+    if (s.y[i] + K.height < COAST.seaLevel - 0.5) under += COAST.sampleSpacing;         // the whole tube is under the sea here
+    assert.ok(Math.abs(s.grade[i]) < 0.13);
+    const turn = s.curvature[i] * COAST.sampleSpacing; turned += Math.abs(turn);
+    if (Math.abs(s.curvature[i]) > 1 / 70 && Math.sign(turn) !== way) { way = Math.sign(turn); bends += 1; }
+    assert.ok(Math.abs(s.curvature[i]) < 1 / 20, `a bend ${Math.abs(1 / s.curvature[i]).toFixed(0)} m round at ${s.s[i].toFixed(0)} m`);
+  }
+  assert.ok(under > 250, `${under.toFixed(0)} m of it wholly under water`);
+  assert.ok(bends >= 4 && turned > Math.PI, `${bends} bends, ${(turned * 180 / Math.PI).toFixed(0)} degrees of turning`);
+  // out of the tunnel there is dry land before the start line, and the cove is still the only swim
+  assert.ok(COAST.waterCrossing.sEnd < K.sStart && COAST.length - K.sEnd > 90);
+  assert.deepEqual(COAST.chasms.map(c => c.s), [1070, 1175, 1570, 1680, 1975]);
+  assert.ok(Math.hypot(COAST.startFinish.position[0], COAST.startFinish.position[2] - 8) < 1.5, 'the start line has not moved');
+});
+
 test('Modbury has supported spawns, continuous terrain, water and open cliff edges', () => {
   assert.equal(MAPS.modbury_heights.startPositions.length, 6);
-  assert.ok(Math.abs(COAST.length - 3121) < 5);
+  assert.ok(Math.abs(COAST.length - 3251) < 8);        // (3121 m before the Seabed Tunnel, 2026-11-26)
   for (const { position } of COAST.startPositions) {
     const q = COAST.query(position[0], position[2]);
     assert.ok(q.onTrack && !q.blocked && !q.inWater);
@@ -282,7 +305,7 @@ test('Muddy Paws Farm: a fenced lap with a barn to run through, things standing 
   const T = FARM, s = T.samples;
   assert.equal(MAPS.farmyard.procedural, true);
   assert.equal(MAPS.farmyard.startPositions.length, 6);
-  assert.ok(Math.abs(T.length - 1648) < 10, `lap of ${T.length.toFixed(0)} m`);        // (the maze since Tom, 2026-11-21)
+  assert.ok(Math.abs(T.length - 1684) < 10, `lap of ${T.length.toFixed(0)} m`);        // (the maze since Tom, 2026-11-21; 1648 m before the bends of 2026-11-26)
   assert.deepEqual(T.sections.map(sec => sec.id).join(''), 'ABCDEFGHIJA', 'all ten parts of the farm, in order');
   const bridge = T.chasms[0];
   for (let i = 0; i < T.sampleCount; i++) {
@@ -356,7 +379,7 @@ test('Muddy Paws Farm hazards: the same for everyone at the same moment, they cr
     total[h.kind] = (total[h.kind] ?? 0) + 1;
     if (h.active && Math.abs(q.lateral) < q.halfWidth) onRoad[h.kind] = (onRoad[h.kind] ?? 0) + 1;
   }
-  for (const kind of ['tractor', 'sheep', 'rolling', 'sails']) {
+  for (const kind of ['tractor', 'sheep', 'rolling']) {          // (the sails are placed by their hub, off the road: they have their own checks below)
     const share = onRoad[kind] / total[kind];
     assert.ok(share > 0.08 && share < 0.6, `${kind}: on the road ${(share * 100).toFixed(0)} % of the time`);
   }
@@ -375,14 +398,33 @@ test('Muddy Paws Farm hazards: the same for everyone at the same moment, they cr
   const sheep = at('sheep', 3);
   assert.equal(T.hazardHit([sheep.x, sheep.y, sheep.z], 3).kind, 'sheep');
   assert.equal(T.hazardHit([sheep.x, sheep.y + 1.4, sheep.z], 3), null, 'a jump clears a sheep');
-  // the sails: only the inside of the road, and only while a blade is passing the bottom
-  const mill = T.pointAt(T.mill.s), inside = T.pointAt(T.mill.s, T.mill.side * (mill.halfWidth - 1.7)), outside = T.pointAt(T.mill.s, -T.mill.side * (mill.halfWidth - 1.7));
-  let swept = 0;
-  for (let t = 0; t < 12; t += 0.1) {
-    if (T.hazardHit([inside.x, inside.y, inside.z], t)?.kind === 'sails') swept++;
-    assert.equal(T.hazardHit([outside.x, outside.y, outside.z], t), null, 'the outside of the bend is always safe');
+  // the sails (Tom, 2026-11-26: "should only damage you if you hit the spinning bit, you should be able to go under it all other
+  // times"): a dog is hit only where a blade is.  Blade 0 hangs straight down from the hub at angle 0; they turn across the road
+  const mill = T.pointAt(T.mill.s), sails = t => T.hazardsAt(t).find(h => h.kind === 'sails');
+  const spot = lateral => { const p = T.pointAt(T.mill.s, lateral); return [p.x, p.y, p.z]; };
+  const inside = spot(T.mill.side * (mill.halfWidth - 1.5)), middle = spot(0), outside = spot(-T.mill.side * (mill.halfWidth - 1.7));
+  let swept = 0, runs = 0, was = false;
+  for (let t = 0; t < 12; t += 0.02) {
+    const hit = T.hazardHit(inside, t)?.kind === 'sails';
+    if (hit) {
+      swept += 1;
+      // ...and when it is hit there is a blade there: one of the four is within half a radian of pointing at the dog from the hub
+      const a = sails(t).angle, toDog = Math.atan2(Math.hypot(inside[0] - T.mill.x, inside[2] - T.mill.z), T.mill.hubHeight - 0.75);
+      const off = Math.min(...[0, 1, 2, 3].flatMap(b => [1, -1].map(way => Math.abs(Math.atan2(Math.sin(a + b * Math.PI / 2 - way * toDog), Math.cos(a + b * Math.PI / 2 - way * toDog))))));
+      assert.ok(off < 0.5, `hit with no blade near (${off.toFixed(2)} rad) at ${t.toFixed(2)} s`);
+    }
+    if (hit && !was) runs += 1; was = hit;
+    assert.equal(T.hazardHit(middle, t), null, 'the middle of the road is never swept: the blades do not reach it');
+    assert.equal(T.hazardHit(outside, t), null, 'the outside of the bend is always safe');
   }
-  assert.ok(swept > 30 && swept < 70, `the inside is swept ${swept} tenths of a second in twelve`);
+  assert.equal(runs, 4, 'four blades a turn, and clear between them');
+  assert.ok(swept > 600 * 0.15 && swept < 600 * 0.4, `the inside is swept ${(swept / 6).toFixed(0)} % of the time`);
+  // a few metres before or after the mill, under the same blade: nothing (the sails are thin)
+  for (const ds of [-3, 3]) { const p = T.pointAt(T.mill.s + ds, T.mill.side * (mill.halfWidth - 1.5)); for (let t = 0; t < 12; t += 0.05) assert.equal(T.hazardHit([p.x, p.y, p.z], t), null); }
+  // a jump puts a dog up into blades it would have run under
+  const inner = spot(T.mill.side * (mill.halfWidth - 4.5)); let low = 0, high = 0;
+  for (let t = 0; t < 12; t += 0.02) { if (T.hazardHit(inner, t)) low += 1; if (T.hazardHit([inner[0], inner[1] + 1.4, inner[2]], t)) high += 1; }
+  assert.ok(low === 0 && high > 50, `4.5 m in from the edge: hit ${low} on the ground, ${high} in a jump`);
 });
 
 test('Muddy Paws Farm\'s maize maze (Tom, 2026-11-21): rows of corn with gaps in different places, dead ends, and a way through', () => {
@@ -402,4 +444,26 @@ test('Muddy Paws Farm\'s maize maze (Tom, 2026-11-21): rows of corn with gaps in
   const scarecrow = T.obstacles.find(o => o.kind === 'scarecrow');
   assert.ok(Math.abs(scarecrow.lateral - laneMid(deadEnd)) < 0.01 && scarecrow.s > m.sStart + m.cell && scarecrow.s < m.sStart + 2 * m.cell);
   assert.ok(m.sEnd - m.sStart >= 200 && T.pointAt((m.sStart + m.sEnd) / 2).halfWidth > 22, 'a big field');
+});
+
+// Tom, 2026-11-26: "more bends" on Muddy Paws Farm and Pet Mall Mayhem, which each had one tight corner in the lap.
+test('Muddy Paws Farm and Pet Mall weave: several real corners each, no long straight but the start and the maze, and the barn is still straight', async () => {
+  const { PROCEDURAL_TRACKS } = await import('../shared/maps.js');
+  const shape = (T) => {
+    const step = 2, n = Math.floor(T.length / step), P = Array.from({ length: n }, (_, i) => T.pointAt(i * step));
+    const H = P.map((p, i) => { const q = P[(i + 3) % n], r = P[(i - 3 + n) % n]; return Math.atan2(q.x - r.x, q.z - r.z); }), dif = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+    let corners = 0, acc = 0, total = 0, tightest = Infinity;
+    for (let i = 0; i < n; i++) { const d = dif(H[(i + 1) % n], H[i]), R = Math.abs(step / d); total += Math.abs(d); tightest = Math.min(tightest, R); if (R < 90) acc += Math.abs(d); else { if (acc > Math.PI / 4) corners += 1; acc = 0; } }
+    if (acc > Math.PI / 4) corners += 1;
+    let longest = 0; for (let i = 0; i < n; i++) { let j = 0; while (j < n && Math.abs(dif(H[(i + j) % n], H[i])) < 12 * Math.PI / 180) j++; longest = Math.max(longest, j * step); }
+    return { corners, perKm: total * 180 / Math.PI / (T.length / 1000), tightest, longest };
+  };
+  const farm = shape(PROCEDURAL_TRACKS.farmyard), mall = shape(PROCEDURAL_TRACKS.pet_mall);
+  assert.ok(farm.corners >= 4 && farm.perKm > 440 && farm.tightest > 20 && farm.longest < 240, JSON.stringify(farm));        // (it was 1 corner, 343 degrees a km, 362 m straight)
+  assert.ok(mall.corners >= 6 && mall.perKm > 540 && mall.tightest > 20 && mall.longest < 200, JSON.stringify(mall));        // (it was 1 corner, 283 degrees a km, 260 m straight)
+  // the barn: the road through it does not bend
+  const F = PROCEDURAL_TRACKS.farmyard;
+  for (let s = F.barn.start; s <= F.barn.end; s += 2) assert.ok(Math.abs(F.samples.curvature[F.indexAtS(s)]) < 1 / 120, `the road bends in the barn at ${s.toFixed(0)} m`);
+  // no checkpoint is in among the corn of the maze
+  for (const cp of F.checkpoints) assert.ok(!F.query(cp.position[0], cp.position[2]).blocked, `checkpoint ${cp.index} is in the corn`);
 });

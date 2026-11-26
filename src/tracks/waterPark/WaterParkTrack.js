@@ -312,13 +312,6 @@ function buildScenery(group, D, animated) {
   const ducks = Array.from({ length: 5 }, (_, k) => { const m = new THREE.Mesh(duckG, prop); m.name = 'Park_Duck'; m.castShadow = true; group.add(m); return { m, rad: splash.radius * (0.35 + 0.5 * r()), sp: (0.05 + r() * 0.05) * (k % 2 ? 1 : -1), ph: r() * 6.28 }; });
   animated.push(t => { for (const d of ducks) { const a = d.ph + t * d.sp; d.m.position.set(splash.x + Math.cos(a) * d.rad, 0.2 + 0.12 * Math.sin(t * 1.6 + d.ph), splash.z + Math.sin(a) * d.rad); d.m.rotation.y = -a + (d.sp > 0 ? 0 : Math.PI); d.m.rotation.z = 0.06 * Math.sin(t * 1.2 + d.ph); } });
 
-  // signs on the way in to each part of the park
-  const postG = new THREE.CylinderGeometry(0.12, 0.14, 3.4, 6), postM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), boardG = new THREE.PlaneGeometry(3.2, 1.6); D.push(postG, postM, boardG);
-  for (const [text, s] of [['RINGS!', T.pools[0].sStart - 22], ['BEACH BALLS!', T.ballLanes[0] - 26], ['JETS!', T.hazardZones.jets[0] - 26], ['LAZY RIVER', T.pools[1].sStart - 22], ['SLIDE', T.slide.sStart - 60], ['JUMP!', T.launch.padStart - 40]]) {
-    const c = T.pointAt(s), p = beside(s, c.halfWidth + 1.4), tex = signTexture(text), mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }); D.push(tex, mat);
-    const post = new THREE.Mesh(postG, postM); post.position.set(p.x, p.y + 1.7, p.z); group.add(post);
-    const board = new THREE.Mesh(boardG, mat); board.position.set(p.x, p.y + 3.6, p.z); board.rotation.y = c.rotationY + Math.PI; board.name = 'Park_Sign'; group.add(board);
-  }
 }
 
 /** Build the whole park. */

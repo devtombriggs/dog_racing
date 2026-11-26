@@ -42,7 +42,7 @@ Map definitions live in `shared/maps.js`. `shared/frostpeak.json` is copied from
 
 Treat Road uses `shared/treatRoadData.js` for geometry and `src/tracks/treatRoad/TreatRoadTrack.js` for visuals, originally copied from `../treat_road/src/tracks/treatRoad/` and now adapted in-game for the compact catapult layout (the visual module's data import points into `shared/`). The standalone demo remains the original long circuit; do not overwrite the game copies when refreshing that demo. The scene is built on demand; no GLB or CDN is needed. `server/server.js` uses the existing lap/checkpoint system plus Treat Road's fall/respawn rules. The standalone `treatRoadRace.js` demo controller is not used by the game. Map/server tests cover the five spawns, road edges, three laps, recovery and stale movement after respawn.
 
-Modbury Heights is a 3.12 km coastal circuit with a beach start, switchback climb, exposed clifftops, shallow-water crossing and boardwalk return. It uses the same three-lap race and server-controlled checkpoint recovery as Treat Road. Banks and dunes constrain movement; exposed cliff edges trigger falls. Water and soft shoulders slow dogs, swimming stats affect water speed, and climbs use the map's default stamina value until dogs have stamina stats. Water entry is automatic, with floating height and existing stride animations (the dogs have no separate swim clip).
+Modbury Heights is a 3.25 km coastal circuit with a beach start, switchback climb, exposed clifftops, shallow-water crossing, and (since 2026-11-26) the **Seabed Tunnel**: 420 m of glass tube out under the sea and back, with bends, in place of the long straight run home along the beach; it comes up on to a short boardwalk before the start line. The tunnel is section `T` in `shared/modburyData.js`: dry however deep (`query().inTunnel`), glass either side (no way out), floor 6.8 m down. In `ModburyHeightsTrack.js`, `buildTunnel` draws the glass and frame, the water seen from inside, kelp, coral, shoals of fish, a shark and jellyfish, and `cutForTunnel` stops the flat sheet of the sea being drawn inside the tube where it breaks the surface. A lap takes a hard computer dog about 3 minutes 10 seconds, so three laps is over nine minutes. It uses the same three-lap race and server-controlled checkpoint recovery as Treat Road. Banks and dunes constrain movement; exposed cliff edges trigger falls. Water and soft shoulders slow dogs, swimming stats affect water speed, and climbs use the map's default stamina value until dogs have stamina stats. Water entry is automatic, with floating height and existing stride animations (the dogs have no separate swim clip).
 
 Its shared data is `shared/modburyData.js`, and its on-demand scenery is `src/tracks/modburyHeights/ModburyHeightsTrack.js`, copied from `../modbury_heights/src/tracks/modburyHeights/` with the visual data import redirected to `shared/`. Refresh both when regenerating the source map. Tests cover supported spawns, terrain continuity, water, natural boundaries, cliff recovery, stale movement, and a complete three-lap multiplayer race.
 
@@ -175,8 +175,10 @@ On the map screen, above the single maps, are two Grand Prix: four races in a ro
 
 | | Races, in order |
 |---|---|
-| Grand Prix 1 | Wendover Woods, Water Park, Pet Mall Mayhem, Treat Road |
-| Grand Prix 2 | Muddy Paws Farm, Modbury Heights, Squelch Hollow Mud Run, Frostpeak Alpine Circuit |
+| Puppy Cup (`gp1`) | Wendover Woods, Water Park, Pet Mall Mayhem, Treat Road |
+| Treat Cup (`gp2`) | Muddy Paws Farm, Modbury Heights, Bypass Dash, Frostpeak Alpine Circuit |
+| Bone Cup (`gp3`) | Dune Dash, The Speed Bowl, Kombu's House, Neon Nexus |
+| Top Dog Cup (`gp4`) | Yorkshire Dales, The Boneyard, The Vets, Monkey Jungle |
 
 - **Points:** 10, 8, 6, 4, 2 for 1st to 5th. A dog that had not finished when the race ended scores for the place it was in.
 - **Between races:** the points table shows for 15 seconds (`LOBBY_RETURN_MS`), then the next race loads by itself.
@@ -240,7 +242,7 @@ A beach ball or a jet knocks a dog over like a tennis ball does (1.1 s). The par
 
 ## Pet Mall Mayhem
 
-A 1.33 km lap of a big pet shopping mall on the day every cage came open, generated at runtime like the farm and the Water Park (about 56,000 triangles, no model file).
+A 1.41 km lap (1.33 km before the bends of 2026-11-26: the same eighteen control points, moved to weave through Cat Alley, the Aquarium, the Trolley Run and the Upper Gallery) of a big pet shopping mall on the day every cage came open, generated at runtime like the farm and the Water Park (about 56,000 triangles, no model file).
 
 | Part | What happens there |
 |---|---|
@@ -259,7 +261,22 @@ A cat, a trolley or a hamster ball knocks a dog over like a tennis ball does (1.
 - **Map card:** `public/maps/pet_mall.jpg`.  **Tests:** `tests/pet-mall.test.js`.
 - **Music:** `public/audio/pet_mall.mp3`.
 
+## Bypass Dash
+
+`bypass_dash` (`shared/bypassData.js`, `src/tracks/bypass/BypassTrack.js`, tests in `tests/bypass.test.js`). It took Squelch Hollow's place in the Treat Cup on 2026-11-26. A 1.43 km lap of the roads round a town, three laps, no boost pads.
+
+- **The Motorway:** three lanes of cars and lorries going the dogs' way at 7 m/s. Nothing in it can be jumped; there is always a gap at least 3.5 m wide.
+- **The Roadworks:** five barriers to weave through, then two patches of wet tar.
+- **The Roundabout:** half way round it. (It had a short cut across the grass for a dog on a Golden Bone, as did the Speed Bowl and The Boneyard; Tom had them all taken out on 2026-11-26: they did not feel right. The builder still understands a `rough` branch: nothing uses it.)
+- **The Underpass:** 9 m wide.
+- **The Crossing:** four lanes of traffic across the road, two each way, with Golden Bones between the lanes. **The Footbridge** beside it is narrow and a little longer; nothing reaches a dog on it.
+- **Traffic** is a function of the race clock (`hazardsAt`), like every moving hazard, so the server and every player agree on it.
+- **Still owed:** proper art for `public/maps/icons/bypass_dash.webp` and `public/maps/bypass_dash.jpg` (they are screenshots with the name on), and music of its own (it plays the Speed Bowl's).
+
 ## Squelch Hollow Mud Run
+
+**Retired 2026-11-26:** not offered in the menus, the vote or the leaderboards (`RETIRED_MAPS` in `shared/maps.js`; the lists go by `MAP_IDS`). Its files and tests are kept and it still runs.
+
 
 A 1.45 km mud run in the pouring rain, generated at runtime like the other built maps (about 43,000 triangles, no model file). It is the slippery map: everywhere is wet, so a dog slides a little wherever it turns, and a lot on the clay.
 
@@ -291,7 +308,7 @@ Four maps made from one shared builder, so each is a short description and its s
 | **Dune Dash** | `desert_dunes` | Rolling dunes with soft sand (60% speed), three whirlwinds wandering Twister Flats (nothing jumps one), tumbleweed (jump it), boulders in the canyon, and a leap off the great dune |
 | **The Speed Bowl** | `speed_bowl` | A 500 m kart oval, **five laps**, nothing in the way. Six rows of five Treat Boxes a lap (going into and coming out of each bend, and the middle of each straight) and a pair of Golden Bones between every two rows |
 | **Kombu's House** | `kombu_house` | A way through the house, not round it (it replaced Enzo's House). Up the drive, in at the conservatory's double glass doors on the left (they slide open as the dog being followed comes up to them; the front door is scenery on the right), the living room (a red toy car driving a figure of eight: nothing jumps it), left into the pool room and round through the pool and back out of the same doorway (in on one side of its pillar, out on the other), left into the kitchen (knives and forks drop where a red shadow shows, a kettle slides about), left to the lift, which fires dogs up the shaft to the floor above, the hallway (five doors swinging both ways, hinged on alternate walls), the computer room (desks, and a man in a wheelchair going from wall to wall), out of a second pair of glass doors, left into the dog pen, over the hill past the chickens, right down the back drive (parked vans, bins), right along the main road and right into the drive. The house is built into the hill, so the floor above comes out at ground level behind it. The lap passes close beside itself at the pool room doorway: `tests/new-maps.test.js` checks that every place on the road is found on its own stretch. In the game a dog running +z has +x on its LEFT, and a positive distance across a kit road is to its RIGHT; the plan in `shared/kombuHouseData.js` is drawn as a map (east, north) and turned into x and z there |
-| **Neon Nexus** | `neon_nexus` | 4.95 km above a city at night, **three laps of about two minutes**, there and back across the city four times. **Mega boost pads** (pink; 2.6 times top speed, and the boost stays with the dog for 3 seconds after the pad) wherever there is one road. Four times a second road leaves the main one and joins it again; one of each pair is the longer and has the mega pads and a trail of Golden Bones, the other has ordinary pads (blue; 1.8 times). Three platform crossings: no road, three 40 m platforms sliding from side to side with 8 m breaks to jump; a dog that drops goes back to the checkpoint just before the crossing. **Three catapults** (run on to the pad): over the second hairpin, up the ramp, and the accelerator, 260 m back to the start. A landing boost and a pad's boost do not add up. No bombs. Numbers: `MEGA`, `PAD`, `CROSSING`, `FLIGHT` in `shared/neonData.js`; `PAD_KICK` in `shared/items.js` |
+| **Neon Nexus** | `neon_nexus` | 4.95 km above a city at night, **two laps of about two minutes**, there and back across the city four times. **Mega boost pads** (pink; 2.6 times top speed, and the boost stays with the dog for 3 seconds after the pad) wherever there is one road. Four times a second road leaves the main one and joins it again; one of each pair is the longer and has the mega pads and a trail of Golden Bones, the other has ordinary pads (blue; 1.8 times). Three platform crossings: no road, three 40 m platforms sliding from side to side with 8 m breaks to jump; a dog that drops goes back to the checkpoint just before the crossing. **Three catapults** (run on to the pad): over the second hairpin, up the ramp, and the accelerator, 260 m back to the start. A landing boost and a pad's boost do not add up. No bombs. Numbers: `MEGA`, `PAD`, `CROSSING`, `FLIGHT` in `shared/neonData.js`; `PAD_KICK` in `shared/items.js` |
 
 Laps per map: `lapsFor(mapId)` in `shared/maps.js` (three, unless the track says otherwise). Computer dogs take the open side of a fork if they are good enough to be paying attention (`forks` in `server/bots.js`). Tests: `tests/new-maps.test.js`.
 

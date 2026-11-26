@@ -30,7 +30,7 @@ export const createBoneyard = () => createKitWorld(T, {
   env: { fog: [0x79808a, 70, 700], background: 0x79808a, exposure: 1.08 },
   lights: { hemi: [0xdfe6f0, 0x8a7458, 2.1], sun: [0xe6ebf2, 1.5] },
 
-  build({ group, D, movers, herd, clear, beside, sign, keep, prop, rain, animated }) {
+  build({ group, D, movers, herd, clear, beside, keep, prop, rain, animated }) {
     const r = rng(613);
     const scatter = (count, margin, far, make) => { const list = []; let tries = 0; while (list.length < count && tries++ < count * 40) { const x = (r() - 0.5) * far * 2, z = (r() - 0.5) * far * 1.3; if (clear(x, z, margin)) list.push(make(x, z)); } return list; };
     rain({ count: 2600, color: 0xd6e2f0, opacity: 0.7 });
@@ -87,6 +87,5 @@ export const createBoneyard = () => createKitWorld(T, {
       };
     });
     void animated; void cone; void box;
-    for (const [text, s, side] of [['PUDDLE', T.water[0].sStart - 16, 1], ['SWIM!', T.water[1].sStart - 16, -1], ['ROLLING BONES', T.rollers[0] - 22, 1], ['MUD SPOUTS', T.spouts[0].s - 18, -1], ['SWIM!', T.water[2].sStart - 16, 1], ['MUD SPOUTS', T.spouts[3].s - 18, 1]]) sign(text, s, side, '#3a2f24', '#e9e2cc');
   },
 });

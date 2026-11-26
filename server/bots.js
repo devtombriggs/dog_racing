@@ -211,7 +211,9 @@ function buildRoute(mapId) {
       const q = track.query(x, z, hint, y);         // (y: how high it is, where there is a level below)
       return {
         y: q.dogY ?? q.y, hint: q.index, swimming: q.movement === 'swim', inWater: Boolean(q.inWater),
-        speed: track.speedFactor ? track.speedFactor(q, { stamina: 0.5, swimming: clamp(swimming / 10, 0, 1) }, airborne) : 1,
+        // (boosted: the rough ground of a short cut is counted apart, in topSpeed: it does not slow a dog on a Golden Bone)
+        speed: track.speedFactor ? track.speedFactor(q, { stamina: 0.5, swimming: clamp(swimming / 10, 0, 1), boosted: true }, airborne) : 1,
+        rough: q.rough ?? null,
         hills: Boolean(track.speedFactor),
         kick: airborne ? null : q.kick ?? null,       // a boost pad whose boost stays with the dog
         hop: airborne ? null : q.hop ?? null,         // a kicker ramp (Squelch Hollow): it throws the dog up
@@ -276,6 +278,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   const perks = driftPerks(dog), drifting = L.drift ?? { chance: 0, seconds: 0, wall: 0 };
   const arc = driftArc({ agility: stats.agility, control: perks.control });
   let skid = null, skidBoost = null, inBend = false, wide = null;
+  let roughPass = false;         // on a rough short cut, and not slowed by it
+  let roughChoice = null;        // { key, take }: whether it is taking the rough short cut it is beside, made up once each lap
   let time = 0, startAt = between(L.reaction), stunUntil = 0, boneUntil = -1, effect = null, kick = null;       // kick: { speed, until, quick } from a held boost pad
   let progressAt = 0, progressS = 0, travelled = 0, finishing = false;
   // how it is driving
@@ -318,6 +322,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       // (a landing boost and a boost pad's do not add up: the greater of the two; a slow-down after a fall still counts)
       * (padBoost > 1 && !(effect && time < effect.until && effect.speed < 1) ? Math.max(padBoost, effect && time < effect.until ? effect.speed : 1) : effect && time < effect.until ? effect.speed : 1)
       * (1 + (BONE_BOOST.speedMultiplier - 1) * bone)
+      * (ground.rough && !roughPass ? ground.rough : 1)          // (a short cut over rough ground: slow, but for a dog that came on to it on a Golden Bone)
       * (world.special?.speed ?? 1)
       * (world.slowed ?? 1)                                      // (Jazz's Earthquake)
       * downhillSpeed(stats, slope)                              // (Jimmy's wheels, where the road drops)
@@ -453,6 +458,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     }
     return clamp(target, -limit, limit);
   }
+
+  const ROUGH_CUT_BONE = 0.9;      // seconds of a Golden Bone's boost a dog wants left as it comes to a rough short cut, to take it (enough to be on the bone still when it is on the cut)
 
   // ----- jumping
   // The farthest it must be from the start of something to take off and be `height` up when it gets there
@@ -605,6 +612,8 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       // (a weaker pad never cuts short a stronger boost: a platform after a mega pad)
       if (!(kick && kick.until > time && kick.speed > ground.kick.speed)) kick = { speed: ground.kick.speed, until: time + ground.kick.hold + PAD_KICK.easeOut, quick: ground.kick.quick ?? PAD_KICK.quick };
     }
+    // (on a Golden Bone at any time since it came on to a rough short cut: carried the whole way across, as a player's dog is)
+    if (!ground.rough) roughPass = false; else if (boneUntil > time) roughPass = true;
     driftRound(dt, ground, world);
     const top = topSpeed(ground, world);
     let cap = finishing ? 0 : top * L.pace;
@@ -615,7 +624,9 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     // a second road leaving this one: a dog makes up its mind once a lap whether to take it, and one that
     // does is carried across with it (down the middle of it, a little to its own side)
     const branch = finishing || !route.branchAt ? null : route.branchAt(s);
-    const riding = branch && decide(`branch-${branch.id}:${lap()}`, branch.branch.bots ?? 0.5) ? branch : null;
+    // (a short cut over rough ground only pays on a Golden Bone: taken by a dog that has one's boost as it comes to it, and then kept to)
+    if (branch?.branch.rough && roughChoice?.key !== `${branch.id}:${lap()}`) roughChoice = { key: `${branch.id}:${lap()}`, take: boneUntil - time > ROUGH_CUT_BONE && decide(`cut-${branch.id}:${lap()}`, L.pace >= 0.9 ? 0.9 : 0.5) };
+    const riding = branch && (branch.branch.rough ? roughChoice.take : decide(`branch-${branch.id}:${lap()}`, branch.branch.bots ?? 0.5)) ? branch : null;
     if (riding) target = riding.side * riding.centre + lane * riding.half;
     // the farm's maze (Tom, 2026-11-21): the quickest way through, a little ahead of where it is, and not too fast to turn through the gaps
     const inMaze = route.maze && !finishing && route.ahead(s, route.maze.sStart - route.maze.from) >= 0 && route.ahead(s, route.maze.sEnd + 24) <= 0;

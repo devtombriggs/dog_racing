@@ -24,7 +24,7 @@ export const createMudPark = () => createKitWorld(T, {
   env: { fog: [0xb9c2c8, 90, 900], background: 0xb9c2c8, exposure: 0.95 },
   lights: { hemi: [0xdde6ee, 0x5a5a40, 1.5], sun: [0xe8eef4, 1.4] },
 
-  build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, terrain, rain }) {
+  build({ group, D, movers, herd, clear, beside, add, keep, prop, terrain, rain }) {
     const r = rng(23), field = new THREE.Color();
     const ground = terrain({ size: 900, cell: 8, centre: [0, 10], height: (x, z) => 0.4 * Math.sin(x / 37) * Math.cos(z / 41) - 0.4, blend: 30,
       color: (x, z) => field.setRGB(0.27 + 0.05 * Math.sin(x * 0.07), 0.38 + 0.04 * Math.cos(z * 0.05), 0.2) });
@@ -46,7 +46,7 @@ export const createMudPark = () => createKitWorld(T, {
       void long; void a;
       // its sides boarded up, and a banner over the lip
       for (const side of [-1, 1]) { const p = T.pointAt(L.gapStart - 3, side * (b.halfWidth + 0.4)); add('Ramp_Board', new THREE.BoxGeometry(0.3, 3, 10), keep(new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.9 }))).position.set(p.x, b.y - 0.5, p.z); }
-      sign('BIG JUMP!', L.padStart - 30, 1, '#f3ead2', '#e2303a'); }
+ }
 
     // ---------- stacks of tyres standing in the trail
     const stack = []; for (let k = 0; k < 4; k++) stack.push(new THREE.TorusGeometry(0.78, 0.32, 7, 14).rotateX(Math.PI / 2).translate(0.06 * Math.sin(k * 2), 0.32 + k * 0.6, 0.06 * Math.cos(k * 3)));
@@ -81,6 +81,5 @@ export const createMudPark = () => createKitWorld(T, {
     void start;
 
     // ---------- signs on the way in to each part of the course
-    for (const [text, s, side] of [['SLIPPERY!', T.clay.sStart - 16, 1], ['KICKERS!', T.strips.find(x => x.hop).sStart - 26, -1], ['DEEP MUD', T.mud[0].s - 24, 1], ['QUAD BIKE!', T.quadLane.s - 26, -1], ['LOGS!', T.logLanes[0] - 24, 1], ['TYRES', T.obstacles[0].s - 14, -1], ['MUDSLIDE', T.slide.sStart - 6, 1], ['MUD PIT', T.pit.sStart - 22, -1]]) sign(text, s, side, '#f3ead2', '#5a3a1a');
   },
 });

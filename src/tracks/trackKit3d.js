@@ -165,7 +165,10 @@ export function createKitWorld(T, look) {
     return mesh;
   };
   /** is (x, z) this far clear of the road? */
-  const clear = (x, z, margin) => { const q = T.query(x, z); return q.distance > q.halfWidth + margin; };
+  // (nor on a short cut across a bend: the second roads of the older maps keep their own clear, as they always did)
+  const clear = (x, z, margin) => { const q = T.query(x, z); if (q.distance <= q.halfWidth + margin) return false;
+    const br = T.branches.length ? T.branchAt(q.s, q.halfWidth) : null, L = br?.branch.rough ? br.side * q.lateral : null;
+    return !(L !== null && L > br.centre - br.half - margin && L < br.centre + br.half + margin); };
   /** [x, y, z, rotationY] beside the road at s, `out` metres beyond its edge on the given side (+1 or -1) */
   const beside = (s, side, out = 2) => { const c = T.pointAt(s), p = T.pointAt(s, side * (c.halfWidth + out)); return [p.x, p.y, p.z, c.rotationY]; };
 

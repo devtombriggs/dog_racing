@@ -36,7 +36,7 @@ export const createWendoverWoods = () => createKitWorld(T, {
   env: { fog: [0xd6e8d8, 140, 1300], background: 0xd6e8d8, exposure: 1.0 },
   lights: { hemi: [0xeaf6ff, 0x5a7a3a, 1.6], sun: [0xfff2d6, 2.1] },
 
-  build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, terrain, animated }) {
+  build({ group, D, movers, herd, clear, beside, add, keep, prop, terrain, animated }) {
     const r = rng(1466), field = new THREE.Color();
     const ground = terrain({ size: 1100, cell: 7, centre: [6, -237], height: woodsHill, blend: 34,
       color: (x, z) => { const n = 0.5 + 0.5 * Math.sin(x * 0.09) * Math.cos(z * 0.11); return field.setRGB(0.2 + 0.05 * n, 0.33 + 0.07 * n, 0.15 + 0.03 * n); } });
@@ -154,7 +154,5 @@ export const createWendoverWoods = () => createKitWorld(T, {
     });
     void animated;
 
-    for (const [text, s, side] of [['DEER!', T.deer[0] - 26, 1], ['SPEED TUNNEL', T.hollow.sStart - 26, -1], ['THE BECK', T.beck.sStart - 24, 1], ['THE OLD OAK', T.trunks[0].s + 22, -1],
-      ['HIGH PATH', T.treetop.sStart - 18, -1], ['LOW PATH', T.treetop.sStart - 18, 1], ['THE RIDGE', T.sections.find(sec => sec.id === 'R').sStart - 10, 1], ['LONG DRIFT', T.sections.find(sec => sec.id === 'G').sStart - 20, 1], ['JUMP THE LOG!', T.kicker - 30, 1], ['NARROW TRAIL', T.sections.find(sec => sec.id === 'I').sStart - 16, -1]]) sign(text, s, side, '#efe4c8', '#2f5a28');
   },
 });

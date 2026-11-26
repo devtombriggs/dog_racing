@@ -31,7 +31,7 @@ import { swimSpeed } from './dogStats.js';
 //                                           //  meanwhile; branch: the id of the second road it lies on; mega: drawn as a mega pad)
 //     water: [{ sStart, sEnd, depth, ramp }],                    // a pool right across the road: dogs wade, then swim
 //     dividers: [{ sStart, sEnd, half, taper }],                 // an island down the middle: the road is two roads for a while
-//     branches: [{ id, sStart, sEnd, side, offset, half, rise, ramp }],   // a second road that leaves the main one on `side` (+1 the
+//     branches: [{ id, sStart, sEnd, side, offset, half, rise, ramp, rough }],   // a second road that leaves the main one on `side` (+1 the
 //                                           // dogs' left), runs `offset` metres from its middle (and `rise` metres above it), and joins it again
 //     platforms: [{ id, sStart, sEnd, boost, pads: [{ s0, s1, half, reach, period, phase }] }],   // a stretch with no road at all, only
 //                                           // platforms sliding from side to side: a dog over nothing falls, and starts the crossing again
@@ -44,7 +44,7 @@ import { swimSpeed } from './dogStats.js';
 //     slipAt: s => 0..1,                    // how slippery (leave out for a dry track)
 //     hazardsAt: t => [{ id, kind, x, y, z, rotationY, radius, height, active }],   // everything that moves, t = seconds since GO
 //     keepClear: [[s0, s1], ...],           // stretches with no pickups or burrow mouths, besides the ones worked out here
-//     autoPickups: { rowEvery, boneEvery }, // lay the Treat Boxes and Golden Bones out by rule (see shared/pickupSpots.js `exact`)
+//     autoPickups: { rowEvery, boneEvery, also }, // lay the Treat Boxes and Golden Bones out by rule (see shared/pickupSpots.js `exact`)
 //     extras: { ... },                      // anything else the scenery or the tests want to read
 //   }));
 //
@@ -328,13 +328,16 @@ export function makeTrack(def, features = () => ({})) {
   function query(x, z, hint = -1, y = null) {
     const p = project(x, z, nearestSample(x, z, hint, y)), i = p.t < 0.5 ? p.a : p.b, hw = p.halfWidth, sec = SEC[p.a];
     // a branch beside the road here: which of the two roads is this on, and where may a dog stand?
+    // (rough: a short cut over rough ground (Tom, 2026-11-26: "add shortcuts into every map"): a dog on it keeps only that share of
+    // its speed, unless it came on to it on a Golden Bone's boost, which carries it all the way across.  So the cut only pays with a
+    // bone: speedFactor.  No Treat Boxes are put on one)
     const br = branches.length ? branchAt(p.s, hw) : null;
     let held = null, lane = null, yaw = yawAt(p.a);
     if (br) {
       const L = br.side * p.lateral, safe = holdLateral(p.s, p.lateral) * br.side;
       if (Math.abs(safe - L) > 1e-9) held = br.side * safe;
       if (onBranch(br, safe, hw)) {
-        p.trackY += br.lift; lane = { id: br.id, centre: br.side * br.centre, half: br.half };
+        p.trackY += br.lift; lane = { id: br.id, centre: br.side * br.centre, half: br.half, ...(br.branch.rough ? { rough: br.branch.rough } : {}) };
         const k = br.side * br.slope; yaw = Math.atan2(TX[p.a] + k * NX[p.a], TZ[p.a] + k * NZ[p.a]);
       }
     }
@@ -348,6 +351,7 @@ export function makeTrack(def, features = () => ({})) {
       y: depth > 0 ? waterY - depth : p.trackY,
       waterDepth: depth, waterY, inWater: depth > 0.05, movement: depth > 0.5 ? 'swim' : depth > 0.05 ? 'wade' : 'run', flow: 0,
     };
+    if (lane?.rough) { q.rough = lane.rough; q.surface = br.branch.surface ?? 'rough'; }
     // walls all the way round: the only way off is a leap
     const limit = hw - 0.3 - DOG * 0.5;
     let px = x, pz = z, lateral = p.lateral;
@@ -404,6 +408,8 @@ export function makeTrack(def, features = () => ({})) {
     const stamina = stats.stamina ?? 0.5; let f = 1;
     if (q.grade > 0) f *= 1 - Math.min(0.3, q.grade * 1.8 * (1.5 - stamina));
     else f *= 1 + Math.min(HILLS.downMax, -q.grade * HILLS.down);
+    // (rough ground, in the air over it as well: a short cut is not hopped along.  stats.boosted: on a Golden Bone's boost)
+    if (q.rough && !stats.boosted) f *= q.rough;
     if (airborne) return f;
     if (q.mud) f *= q.mudSpeed ?? 0.55;
     if (q.boost) f *= q.boost;
@@ -489,11 +495,13 @@ export function makeTrack(def, features = () => ({})) {
       if (s - lastRow >= rowEvery) { rows.push(s); lastRow = last = s; }
       else if (s - lastBone >= boneEvery) { const lat = 0.42 * pointAt(s).halfWidth; if (pairs) bones.push([s, lat], [s, -lat]); else bones.push([s, (bones.length % 2 ? -1 : 1) * lat]); lastBone = last = s; }
     }
+    // (also: bones put down by hand as well, [[s, metres across]]: the one before a short cut, wherever the rule leaves none)
+    bones.push(...(parts.autoPickups.also ?? []));
     autoPickups = { rows, bones };
   }
   /** Where across the road a row of Treat Boxes goes at s (on both roads, where there are two) */
   const boxLanes = s => { const hw = pointAt(s).halfWidth, br = branches.length ? branchAt(s, hw) : null;
-    return br?.open ? [-0.5 * hw, 0.5 * hw, br.side * (br.centre - br.half * 0.45), br.side * (br.centre + br.half * 0.45)] : (parts.boxLanes ?? [-0.66, 0, 0.66]).map(lane => lane * hw); };
+    return br?.open && !br.branch.rough ? [-0.5 * hw, 0.5 * hw, br.side * (br.centre - br.half * 0.45), br.side * (br.centre + br.half * 0.45)] : (parts.boxLanes ?? [-0.66, 0, 0.66]).map(lane => lane * hw); };
 
   return {
     id: def.id, name: def.name, laps: def.laps ?? 3, length: LENGTH, sampleCount: N, sampleSpacing: LENGTH / N,

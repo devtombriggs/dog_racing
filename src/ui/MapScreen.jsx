@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MAPS, lapsFor } from '../../shared/maps.js';
+import { MAPS, MAP_IDS, lapsFor } from '../../shared/maps.js';
 import { GRAND_PRIX, GRAND_PRIX_POINTS } from '../../shared/grandPrix.js';
 import { playerColor } from '../config/dogs.js';
 import { BotSettings } from './BotSettings.jsx';
@@ -8,7 +8,6 @@ import { Paw } from './Paw.jsx';
 import { arrowKeys, tileHandlers } from './tileGrid.js';
 
 const icon = mapId => `/maps/icons/${mapId}.webp`;
-const MAP_IDS = Object.keys(MAPS);
 const CUP_IDS = Object.keys(GRAND_PRIX);
 
 // Map vote countdown: the seconds left until the vote closes, redrawn as they pass

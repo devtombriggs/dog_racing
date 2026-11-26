@@ -13,7 +13,8 @@
 //   B  The Big Red Barn  straight through it, doors open at both ends: walls either side
 //   C  Hay Bale Alley    round bales standing in the road to weave through
 //   D  The Orchard       a flock of sheep ambles across the road and back
-//   E  Windmill Corner   the sails sweep low over the inside of the bend: cut the corner at your peril
+//   E  Windmill Corner   the sails sweep low over the inside of the bend: cut the corner at your peril.  A dog is hit only where a
+//                        blade is: between blades it runs under them (Tom, 2026-11-26)
 //   F  Tractor Lane      a tractor and trailer drive across the road and back
 //   G  The Pig Pen       mud wallows (slow) with pigs trotting round them
 //   H  The Maize Maze    a big field of corn with a maze cut through it (Tom, 2026-11-21: "where the corn field bit is, it
@@ -32,17 +33,20 @@ const SAMPLE_STEP = 2, CHECKPOINT_SPACING = 100;
 const START_U = 0.45;                   // where on the spline the start line is (between the first two control points)
 
 // [x, z, height, width, section]
+// (Tom, 2026-11-26: more bends.  The lap was a rounded square with one tight corner; the same twenty-three places, in the same
+// order, now weave from side to side all the way round but for the barn, the maze and Bale Hill, which are as they were.
+// Everything on the lap is placed by these places' numbers, so it has all moved with them)
 const CONTROL_POINTS = [
-  [-90, 160, 0, 15, 'A'], [-20, 160, 0, 15, 'A'], [50, 160, 0, 15, 'A'],
-  [120, 158, 0, 10, 'B'], [185, 145, 0, 12, 'B'],
-  [240, 105, 0, 13, 'C'], [262, 30, 0.5, 13, 'C'],
-  [245, -50, 1, 13, 'D'], [262, -125, 1.5, 13, 'D'],
+  [-92, 150, 0, 15, 'A'], [-20, 164, 0, 15, 'A'], [50, 168, 0, 15, 'A'],
+  [120, 158, 0, 10, 'B'], [190, 148, 0, 12, 'B'],
+  [224, 98, 0, 13, 'C'], [274, 34, 0.5, 13, 'C'],
+  [234, -44, 1, 13, 'D'], [272, -120, 1.5, 13, 'D'],
   [230, -195, 2, 14, 'E'],
-  [160, -240, 2, 13, 'F'], [80, -232, 1.5, 13, 'F'],
-  [0, -250, 1, 16, 'G'], [-80, -238, 1, 16, 'G'],
-  [-150, -226, 1.5, 30, 'H'], [-206, -186, 2, 48, 'H'], [-232, -116, 2.5, 48, 'H'], [-242, -40, 3, 48, 'H'], [-258, 8, 4, 26, 'H'],
+  [160, -224, 2, 13, 'F'], [84, -252, 1.5, 13, 'F'],
+  [4, -230, 1, 16, 'G'], [-78, -254, 1, 16, 'G'],
+  [-150, -226, 1.5, 30, 'H'], [-206, -186, 2, 48, 'H'], [-232, -116, 2.5, 48, 'H'], [-242, -40, 3, 48, 'H'], [-258, 8, 4, 32, 'H'],
   [-282, 65, 6, 13, 'I'], [-262, 125, 3, 13, 'I'],
-  [-225, 160, 0.5, 9, 'J'], [-160, 162, 0, 10, 'J'],
+  [-225, 160, 0.5, 9, 'J'], [-158, 164, 0, 10, 'J'],
 ];
 
 export const SECTIONS = {
@@ -60,7 +64,7 @@ export const SECTIONS = {
 // The maze: `cells` stretches of `cell` metres down the field, `lanes` lanes of `lane` metres across it.  Between one stretch and
 // the next a row of corn with gaps (open: the lanes the gaps are in); inside a stretch, walls of corn between two lanes (walls:
 // [stretch, the lane the wall is on the right of]).  A row is `thick` metres of corn
-const MAZE = { from: 26, cell: 30, cells: 7, lane: 11, lanes: 4, thick: 1.6,
+const MAZE = { from: 36, cell: 30, cells: 7, lane: 11, lanes: 4, thick: 1.6,
   open: [null, [0, 3], [1], [2, 0], [3], [1, 2], [0, 3]],
   walls: [[1, 2], [3, 1], [5, 0]] };
 // how far a dog may stray past the edge of the road before the fence (or the corn) stops it
@@ -331,12 +335,11 @@ function buildTrack() {
   const tractorS = sAtU(10.5), sheepS = sAtU(6.55), millS = sAtU(9.0), pigsS = mud.map(patch => patch.s), balesS = sAtU(19.35);
   const TRACTOR = { reach: 24, period: 13, pause: 0.07, trailer: 4.4 };
   const SHEEP = { count: 5, reach: 15, period: 17, pause: 0.06, spacing: 3.4 };
-  const MILL = { period: 12, blades: 4, window: 0.36, hubHeight: 8.2, bladeLength: 7.4 };       // window: radians either side of straight down
+  const MILL = { period: 12, blades: 4, hubHeight: 8.2, bladeLength: 7.4 };
   const BALES = { count: 3, period: 7.5, from: 26, to: -18, spacing: 15, roll: 5 };              // seconds to cross; then it waits at the top
   const millBase = pointAt(millS), millSide = -1;                                                   // the mill stands on the inside of the bend
   const mill = { s: millS, side: millSide, ...pointAt(millS, millSide * (millBase.halfWidth + 0.6)), hubHeight: MILL.hubHeight, bladeLength: MILL.bladeLength,
     blades: MILL.blades, period: MILL.period, towerLateral: millSide * (millBase.halfWidth + 0.6), axisYaw: millBase.rotationY };
-  const millZone = pointAt(millS, millSide * (millBase.halfWidth - 1.7));
   {                                                   // its tower is solid: it stands just behind the sails, at the edge of the road
     const tower = pointAt(millS - 3.4, millSide * (millBase.halfWidth + 2.2));
     mill.tower = { x: tower.x, y: tower.y, z: tower.z, radius: 2.4 };
@@ -371,13 +374,10 @@ function buildTrack() {
       const vx = -Math.sin(ang) * 1.25 * dir, vz = Math.cos(ang) * 0.8 * dir;
       out.push({ id: `pig-${k}`, kind: 'pig', x, y: patch.y, z, rotationY: Math.atan2(fx * vx + sx * vz, fz * vx + sz * vz), radius: 0.85, height: 1.0, active: true });
     });
-    // the windmill's sails: dangerous on the inside of the road whenever one is passing the bottom
-    {
-      const angle = (t / MILL.period) * Math.PI * 2, step = Math.PI * 2 / MILL.blades;
-      let nearest = Infinity;
-      for (let b = 0; b < MILL.blades; b++) { const d = Math.abs(Math.atan2(Math.sin(angle + b * step), Math.cos(angle + b * step))); nearest = Math.min(nearest, d); }
-      out.push({ id: 'sails', kind: 'sails', x: millZone.x, y: millZone.y, z: millZone.z, rotationY: mill.axisYaw, radius: 2.3, height: 9, active: nearest < MILL.window, angle });
-    }
+    // the windmill's sails, turning: `angle` is how far round they are (blade 0 hangs straight down at 0).  What they hit is worked
+    // out from the blades themselves (sailsHit): this is where the hub is, for whoever draws them
+    out.push({ id: 'sails', kind: 'sails', x: mill.x, y: mill.y, z: mill.z, rotationY: mill.axisYaw, radius: MILL.bladeLength, height: MILL.hubHeight + MILL.bladeLength, active: true,
+      angle: (t / MILL.period) * Math.PI * 2 });
     // the bales rolling down Bale Hill, one after another
     for (let k = 0; k < BALES.count; k++) {
       const ph = (((t + k * BALES.period / BALES.count) % BALES.period) + BALES.period) % BALES.period, rolling = ph < BALES.roll;
@@ -388,8 +388,31 @@ function buildTrack() {
     return out;
   }
   /** Is a dog at position [x, y, z] hit by a hazard?  Returns the hazard, or null. */
+  // The sails hit a dog only where a blade is (Tom, 2026-11-26: "the windmill should only damage you if you hit the spinning
+  // bit, you should be able to go under it all other times").  The blades turn in the upright plane across the road, about the
+  // hub; each is a spar with its sailcloth to one side of it (drawn in src/tracks/farm/FarmTrack.js: the same sizes).  A dog is
+  // DOG_TALL high: it is hit if any of it is in a blade, with a little to spare.
+  const DOG_TALL = 1.5, SAIL = { from: -0.35, to: 1.75, inner: 0.2, deep: 0.55, spare: 0.15 };       // (across a blade from its spar; inner: where the cloth starts, as a share of the blade; deep: how far along the road a blade counts)
+  function sailsHit(position, angle) {
+    const yaw = mill.axisYaw, dx = position[0] - mill.x, dz = position[2] - mill.z;
+    // (where the dog is from the hub: `across` the road, in the plane the blades turn in, and `along` it)
+    const across = dx * Math.cos(yaw) - dz * Math.sin(yaw), along = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+    if (Math.abs(along) > SAIL.deep + DOG || Math.abs(across) > MILL.bladeLength + DOG) return false;
+    const L = MILL.bladeLength, step = Math.PI * 2 / MILL.blades;
+    for (let k = 0; k <= 3; k++) {
+      const up = position[1] + DOG_TALL * k / 3 - (mill.y + MILL.hubHeight);
+      if (Math.hypot(across, up) > L + DOG) continue;
+      for (let b = 0; b < MILL.blades; b++) {
+        // (the dog as the blade sees it: the blade hangs down from the hub, its cloth to one side)
+        const a = angle + b * step, bx = across * Math.cos(a) + up * Math.sin(a), by = -across * Math.sin(a) + up * Math.cos(a);
+        if (bx > SAIL.from - SAIL.spare - DOG * 0.5 && bx < SAIL.to + SAIL.spare + DOG * 0.5 && by < -L * SAIL.inner + SAIL.spare && by > -L - SAIL.spare) return true;
+      }
+    }
+    return false;
+  }
   function hazardHit(position, t) {
     for (const h of hazardsAt(t)) {
+      if (h.kind === 'sails') { if (sailsHit(position, h.angle)) return h; continue; }
       if (!h.active || position[1] - h.y > h.height) continue;
       if (Math.hypot(position[0] - h.x, position[2] - h.z) <= h.radius + DOG) return h;
     }

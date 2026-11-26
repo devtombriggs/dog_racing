@@ -13,6 +13,7 @@ import { FARMYARD } from './farmData.js';
 import { WATER_PARK } from './waterParkData.js';
 import { PET_MALL } from './petMallData.js';
 import { MUD_PARK } from './mudParkData.js';
+import { BYPASS } from './bypassData.js';
 import { DESERT } from './desertData.js';
 import { SPEED_BOWL } from './speedBowlData.js';
 import { KOMBU_HOUSE } from './kombuHouseData.js';
@@ -60,7 +61,7 @@ export const PICKUP_PATHS = {
   },
   // (the tracks made by shared/trackKit.js say for themselves where nothing should be put)
   // (lanes: where across the road a row of boxes goes; hold: the nearest place a dog can stand, where the road has a branch)
-  ...Object.fromEntries([DESERT, SPEED_BOWL, KOMBU_HOUSE, NEON, DALES, BONEYARD, VETS, JUNGLE, MUD_PARK, WENDOVER_WOODS].map(track => [track.id, { length: track.length, pointAt: track.pointAt, hazards: track.pickupHazards,
+  ...Object.fromEntries([DESERT, SPEED_BOWL, KOMBU_HOUSE, NEON, DALES, BONEYARD, VETS, JUNGLE, MUD_PARK, WENDOVER_WOODS, BYPASS].map(track => [track.id, { length: track.length, pointAt: track.pointAt, hazards: track.pickupHazards,
     lanes: track.boxLanes, hold: track.holdLateral, pickups: track.pickups }])),
   pet_mall: {
     length: PET_MALL.length, pointAt: PET_MALL.pointAt,
@@ -234,6 +235,7 @@ const PLAN = {
   frostpeak:       { custom: true },   // see frostpeakPickups(): 4 rows + 3 bones before the cannon, 12 rows + 30 bones on the black run
   farmyard:        { rows: [0.07, 0.24, 0.42, 0.61, 0.80],             bones: [0.13, 0.33, 0.48, 0.955], even: true },      // (none in the maze, 64 to 77 % of the lap: Tom, 2026-11-21)
   // (the boxes and bones are on the dry stretches: the plaza, between the hazards, the climb to the slide, the dock)
+  bypass_dash:     { exact: true },
   mud_park:        { exact: true },        // (a kit track since Tom, 2026-11-21: it lays its own out)
   desert_dunes:    { rows: [0.07, 0.25, 0.50, 0.70, 0.93],             bones: [0.13, 0.33, 0.58, 0.80], even: true },
   // (these three say for themselves exactly where everything goes: see `pickups` in their track files)
@@ -246,8 +248,10 @@ const PLAN = {
   monkey_jungle: { exact: true },
   pet_mall:        { rows: [0.08, 0.235, 0.385, 0.66],                 bones: [0.135, 0.31, 0.60, 0.965], even: true },
   water_park:      { rows: [0.06, 0.32, 0.415, 0.575, 0.705],          bones: [0.105, 0.52, 0.64, 0.955], even: true },
-  modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91],
-                     bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.97], even: true,
+  // (shares of the lap as it was before the Seabed Tunnel made it longer, 3121 m, so that every spot up to the cove stays where it
+  // was; the last row and bone of the lap are now in the tunnel, and one more of each further along it)
+  modbury_heights: { rows: [0.05, 0.17, 0.30, 0.42, 0.54, 0.66, 0.79, 0.91, 0.985].map(share => share * 3121.28 / MODBURY_HEIGHTS.length),
+                     bones: [0.11, 0.23, 0.36, 0.48, 0.60, 0.72, 0.85, 0.945].map(share => share * 3121.28 / MODBURY_HEIGHTS.length), even: true,
                      // The Cliff Climb (340 to 960 m) is a long slow pull: more to go for on the way up.
                      // These are distances round the lap in metres, fitted between the spots above (which
                      // stay exactly where they were) so that something comes up about every 75 m of the climb.

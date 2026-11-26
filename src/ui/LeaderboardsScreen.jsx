@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MAPS } from '../../shared/maps.js';
+import { MAPS, MAP_IDS as PLAYABLE } from '../../shared/maps.js';
 import { GRAND_PRIX } from '../../shared/grandPrix.js';
 import { DOGS } from '../config/dogs.js';
 import { account } from '../session/account.js';
@@ -25,7 +25,7 @@ const BOARDS = [
   { id: 'dogs', label: 'Top Dogs' },
 ];
 // (the maps in Grand Prix order)
-const MAP_IDS = [...new Set([...Object.values(GRAND_PRIX).flatMap(gp => gp.maps), ...Object.keys(MAPS)])].filter(id => MAPS[id]);
+const MAP_IDS = [...new Set([...Object.values(GRAND_PRIX).flatMap(gp => gp.maps), ...PLAYABLE])].filter(id => MAPS[id] && PLAYABLE.includes(id));
 const portrait = dogId => DOGS[dogId]?.portrait.replace(/\.png.*$/, '.webp');
 
 /** 83.456 seconds -> "1:23.46" */

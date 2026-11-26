@@ -22,7 +22,7 @@ export const createDesert = () => createKitWorld(T, {
   env: { fog: [0xf1dcae, 160, 1900], background: 0xf1dcae, exposure: 1.0 },
   lights: { hemi: [0xfff3d6, 0xd9b26e, 1.5], sun: [0xfff1cf, 2.4] },
 
-  build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, animated }) {
+  build({ group, D, movers, herd, clear, beside, add, keep, prop, animated }) {
     const r = rng(31);
     const scatter = (count, margin, make, far = 520) => { const list = []; let tries = 0; while (list.length < count && tries++ < 6000) { const x = -far + r() * far * 2, z = -far + r() * far * 2; if (clear(x, z, margin)) list.push(make(x, z)); } return list; };
     // dunes: long low humps of sand, everywhere but on the trail
@@ -77,6 +77,5 @@ export const createDesert = () => createKitWorld(T, {
       movers[`weed-${k}`] = h => { weed.visible = h.fade > 0.01; weed.position.set(h.x, h.y + T.weedRun.radius, h.z); weed.rotation.set(0, h.rotationY, h.spin); weed.scale.setScalar(0.5 + 0.5 * h.fade); };
     });
     void prop;
-    for (const [text, s] of [['SOFT SAND', T.mud[0].s - 26], ['TWISTERS!', T.twisters[0] - 44], ['TUMBLEWEED', T.weedLanes[0] - 24], ['ROCKS', T.obstacles[0].s - 16], ['SINKHOLE!', T.sinkholes[0].s - 40]]) sign(text, s, 1, '#f4d58a', '#5a3a1a');
   },
 });

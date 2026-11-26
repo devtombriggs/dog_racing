@@ -14,16 +14,23 @@ export const SEA_LEVEL = 0;
 const SAMPLE_STEP = 2, CHECKPOINT_SPACING = 100, EDGE_TOLERANCE = 0.25;
 
 // [x, z, height, width, section, exposedCliffEdge]
+// (Tom, 2026-11-26: "add an underwater bit with fish swimming about".  The long run home along the beach from the cove, 750 m
+// of it nearly straight, is now the Seabed Tunnel: section T, a glass tube out under the sea and back, with bends in it.  It
+// comes up on to a short boardwalk just before the start line)
 const CONTROL_POINTS = [
-  [-150, 5, 1.5, 16, 'A'], [0, 8, 1.5, 16, 'A'], [150, 5, 1.5, 16, 'A'], [250, 0, 1.7, 15, 'A'],
+  [-74, 15, 1.5, 16, 'A'], [0, 8, 1.5, 16, 'A'], [150, 5, 1.5, 16, 'A'], [250, 0, 1.7, 15, 'A'],
   [330, -30, 4, 12, 'B'], [378, -110, 11, 10.5, 'B'], [312, -190, 20, 10.5, 'B'], [382, -270, 30, 10.5, 'B'], [316, -350, 40, 10.5, 'B'], [368, -425, 50, 10.5, 'B'],
   [275, -470, 56, 9.6, 'C'], [160, -390, 60, 9.6, 'C'], [118, -260, 57, 9.6, 'C'], [140, -150, 59, 9.6, 'C'],
   [60, -97, 58, 9.6, 'C', 1], [-60, -93, 57, 9.6, 'C', 1], [-180, -98, 58, 9.6, 'C', 1], [-290, -93, 56, 9.6, 'C'],
   [-390, -120, 51, 10, 'D'], [-450, -200, 43, 10, 'D'], [-540, -240, 34, 10, 'D'], [-620, -190, 25, 10, 'D'], [-600, -110, 16, 10, 'D'], [-660, -40, 8, 11, 'D'],
   [-640, 30, 2, 12, 'E'], [-580, 62, 0.9, 12, 'E'], [-500, 68, -0.95, 12, 'E'], [-430, 62, 0.8, 12, 'E'],
-  [-370, 52, 1.0, 12, 'F'], [-300, 30, 1.6, 10.5, 'F'], [-225, 8, 2.0, 10.5, 'F'],
+  // the Seabed Tunnel: down off the cove's far shore, out along the sea bed, a bend one way and a bend the other, and back up
+  [-402, 76, 0.9, 9.5, 'T'], [-376, 108, -3.2, 9.5, 'T'], [-346, 144, -6.6, 10, 'T'], [-300, 170, -6.8, 10, 'T'], [-248, 160, -6.8, 10, 'T'], [-200, 172, -6.8, 10, 'T'],
+  [-162, 146, -6.5, 10, 'T'], [-150, 100, -3.4, 9.5, 'T'], [-134, 58, 0.7, 9.5, 'T'],
+  [-106, 33, 1.3, 11, 'F'],
 ];
-const BOARDWALK_U = [29.25, 30.0];      // spline parameter range covered by the wooden boardwalk (section F)
+const TUNNEL = { clear: 0.45, height: 4.4 };      // a dog is kept this far in from the glass; how high the tube is inside
+const BOARDWALK_U = [36.1, 36.95];      // spline parameter range covered by the wooden boardwalk (section F: out of the tunnel, to the start)
 
 // Ravines cut across the clifftop trail, each crossed by a wooden bridge with its middle missing: the
 // dog has to jump the break or it falls into the ravine (and goes back to its last checkpoint).
@@ -44,10 +51,12 @@ export const SECTIONS = {
   C: { name: 'Modbury Heights', stat: null, surface: 'gravel' },
   D: { name: 'Coastal Descent', stat: null, surface: 'dirt' },
   E: { name: "Smuggler's Cove", stat: 'swimming', surface: 'sand / shallow water' },
+  T: { name: 'The Seabed Tunnel', stat: null, surface: 'glass tunnel' },
   F: { name: 'Beach Return', stat: null, surface: 'sand / boardwalk' },
 };
 // how far a dog may stray off the trail on each side before the natural boundary, per section
-const SIDE = { A: { shoulder: 12, bank: 0 }, F: { shoulder: 10, bank: 0 }, E: { shoulder: 9, bank: 0 }, B: { shoulder: 2.5, bank: 1 }, D: { shoulder: 2.5, bank: 1 }, C: { shoulder: 4, bank: 1 } };
+const SIDE = { A: { shoulder: 12, bank: 0 }, F: { shoulder: 10, bank: 0 }, E: { shoulder: 9, bank: 0 }, B: { shoulder: 2.5, bank: 1 }, D: { shoulder: 2.5, bank: 1 }, C: { shoulder: 4, bank: 1 },
+  T: { shoulder: 0, bank: 0 } };            // (the tunnel: glass either side)
 
 // ---------- deterministic noise (identical on every machine)
 const NT = 256, TAB = new Float32Array(NT * NT);
@@ -220,7 +229,12 @@ function buildTrack() {
       surface: 'trail', fall: false, blocked: false, clampX: x, clampZ: z, y: p.trackY,
     };
     const ravine = chasmAt(q.s);
-    if (ravine) {
+    if (SEC[p.a] === 'T') {
+      // the Seabed Tunnel: a glass tube, dry inside however far under the sea it is, and no way out of it by the side
+      q.surface = 'tunnel'; q.inTunnel = true; q.exposedEdge = false;
+      const glass = hw - TUNNEL.clear;
+      if (a > glass) { const sgn = sd === 0 ? 1 : -1; q.blocked = true; q.clampX = p.px + p.nx * sgn * glass; q.clampZ = p.pz + p.nz * sgn * glass; }
+    } else if (ravine) {
       // a bridge over a ravine: railed, so the dog cannot leave by the side; the planks are missing in the middle
       q.surface = 'bridge'; q.onBridge = true; q.exposedEdge = false;
       const rail = hw - 0.25;
@@ -235,7 +249,7 @@ function buildTrack() {
       } else { q.surface = 'shoulder'; q.y = heightFromProjection(x, z, p); }
     }
     q.onTrack = !q.fall;                                         // "supported" — what the race rules look at
-    q.waterDepth = Math.max(0, SEA_LEVEL - q.y);
+    q.waterDepth = q.inTunnel ? 0 : Math.max(0, SEA_LEVEL - q.y);
     q.inWater = q.waterDepth > 0.05;
     q.movement = q.waterDepth > 0.5 ? 'swim' : q.inWater ? 'wade' : 'run';
     q.dogY = q.movement === 'swim' ? SEA_LEVEL - 0.42 : q.y;     // where to draw the dog (it floats when swimming)
@@ -272,7 +286,9 @@ function buildTrack() {
   { const g6 = wrapIndex(N - 6); startPositions.push({ slot: 5, position: [X[g6], Y[g6], Z[g6]], rotationY: yawAt(g6), s: S[g6] - LENGTH, lateral: 0 }); }
   const sections = [];
   for (let i = 0, st = 0; i <= N; i++) if (i === N || SEC[i] !== SEC[st]) { sections.push({ id: SEC[st], ...SECTIONS[SEC[st]], sStart: S[st], sEnd: i === N ? LENGTH : S[i], firstIndex: st, lastIndex: i - 1 }); st = i; }
-  const wet = []; for (let i = 0; i < N; i++) if (Y[i] < SEA_LEVEL - 0.05) wet.push(i);
+  // (the water crossing is the cove: the tunnel is under the sea, but dry)
+  const wet = []; for (let i = 0; i < N; i++) if (Y[i] < SEA_LEVEL - 0.05 && SEC[i] !== 'T') wet.push(i);
+  const tube = []; for (let i = 0; i < N; i++) if (SEC[i] === 'T') tube.push(i);
   const exposedIdx = []; for (let i = 0; i < N; i++) if (dropRaw[0][i] || dropRaw[1][i]) exposedIdx.push(i);
   const boardIdx = []; for (let i = 0; i < N; i++) if (BOARD[i]) boardIdx.push(i);
 
@@ -288,6 +304,8 @@ function buildTrack() {
     // the ravines with their broken bridges: [{ s, gap, gapStart, gapEnd, ravineStart, ravineEnd, firstIndex, lastIndex, depth }]
     chasms,
     boardwalk: { firstIndex: boardIdx[0], lastIndex: boardIdx[boardIdx.length - 1] },
+    // the Seabed Tunnel: where it is, how high inside, and how deep its floor goes
+    tunnel: { firstIndex: tube[0], lastIndex: tube[tube.length - 1], sStart: S[tube[0]], sEnd: S[tube[tube.length - 1]], height: TUNNEL.height, clear: TUNNEL.clear, depth: SEA_LEVEL - Math.min(...tube.map(i => Y[i])) },
     // gapClearance: over a bridge's missing middle (query().gap) a dog lower than this above the deck falls;
     // a dog in mid-jump is higher and carries over
     rules: { hasBarriers: false, fallStartsBelow: 1.5, respawnDelaySeconds: 1.0, respawnPenaltySeconds: 1.5, respawnSpeedMultiplier: 0.55, gravity: 24, killPlaneY: -60,

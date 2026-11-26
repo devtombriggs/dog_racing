@@ -154,6 +154,7 @@ export const KOMBU_HOUSE = makeTrack({
     launch, obstacles, water: [pool], hazardsAt,
     keepClear: [[living.sStart - 4, living.sEnd + 4], [kitchen.sStart - 6, kitchen.sEnd + 6], [hall.sStart, hall.sEnd + 4], [computer.sStart - 4, computer.sEnd + 4]],
     extras: {
+      enclosed: 'BCDEFGHI',          // the sections with walls to the ceiling either side: the camera is kept inside them (game/ChaseCamera.js)
       pool, living, kitchen, hall, computer, floor: FLOOR, upstairs: UP, places: CP,
       carRun: { ...CAR, long: carLong, s: carS }, cutlery: CUTLERY, cutleryDrops: drops, kettleRun: { ...KETTLE, s: kettleS }, swingDoors: swings, swing: SWING, chairRun: { ...CHAIR, s: chairS },
       hazardZones: { car: [living.sStart, carS, living.sEnd], cutlery: [kitchen.sStart, kettleS, kitchen.sEnd], doors: swings.map(d => d.s), wheelchair: [computer.sStart, chairS, computer.sEnd] },

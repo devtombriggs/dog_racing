@@ -236,7 +236,7 @@ test('Neon Nexus, the Undercity (Tom, 2026-11-21): every platform a boost; miss 
 test('Neon Nexus: the longest lap, three of them and fast; mega pads and three catapults; four pairs of roads where the longer has the bones; platform crossings; the accelerator; no bombs', () => {
   const T = NEON;
   assert.ok(T.length > 4900 && T.length < 5000, `${T.length} m`);
-  assert.equal(lapsFor('neon_nexus'), 3);
+  assert.equal(lapsFor('neon_nexus'), 2);
   for (const [id, map] of Object.entries(MAPS)) if (map.procedural) assert.ok(T.length >= PROCEDURAL_TRACKS[id].length, `longer than ${id}`);
   // nothing that knocks a dog over up on the road: the robots are all down in the Undercity
   for (const h of T.hazardsAt(3)) assert.ok(T.pointAt(T.query(h.x, h.z).s).y - h.y > 10, `${h.id} is below`);

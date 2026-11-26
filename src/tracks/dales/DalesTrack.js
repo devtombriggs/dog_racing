@@ -34,7 +34,7 @@ export const createDales = () => createKitWorld(T, {
   env: { fog: [0xdff0fb, 260, 2600], background: 0xdff0fb, exposure: 1.0 },
   lights: { hemi: [0xf2fbff, 0x8fb86a, 1.6], sun: [0xfff6dc, 2.2] },
 
-  build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, terrain, band, animated }) {
+  build({ group, D, movers, herd, clear, beside, add, keep, prop, terrain, band, animated }) {
     const r = rng(404), c = new THREE.Color(), heather = new THREE.Color(0x8d5aa6), rock = new THREE.Color(0xb9b6a8);
     // ---------- the fells
     // (the scar: over the cave the hill stands `cover` metres higher, with a sheer face at each end of it)
@@ -203,6 +203,5 @@ export const createDales = () => createKitWorld(T, {
       const sheep = new THREE.Mesh(sheepG, prop); sheep.castShadow = true; sheep.name = 'Sheep'; group.add(sheep);
       movers[`sheep-${k}-${n}`] = h => { sheep.position.set(h.x, h.y + 0.08 * Math.abs(Math.sin(h.trot)), h.z); sheep.rotation.y = h.rotationY; };
     } });
-    for (const [text, s, side] of [['BOOST UP THE HILL', T.pull.sStart - 20, 1], ['CHEESE!', T.pull.sStart + 6, -1], ['FORD', T.ford.sStart - 18, 1], ['SHEEP', T.flocks[0] - 22, 1], ['BOOST UP THE HILL', T.bank.sStart - 16, -1], ['THE CAVE', T.cave.sStart - 34, 1], ['GOAT PATH', T.goatPath.sStart - 14, T.goatPath.side], ['ROCK TO ROCK', T.stream.sStart + 2, 1]]) sign(text, s, side, '#f3ead2', '#3c5a2a');
   },
 });

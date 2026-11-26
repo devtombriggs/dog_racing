@@ -101,15 +101,6 @@ const wheelGeometry = (r, w) => merge([cyl(r, r, w, 14, 0x1e1f22, 0, 0, 0, 0, Ma
 const baleGeometry = () => merge([cyl(1.3, 1.3, 1.7, 12, 0xdcb75a, 0, 0, 0, 0, Math.PI / 2), cyl(0.9, 0.9, 1.74, 10, 0xeacd78, 0, 0, 0, 0, Math.PI / 2), cyl(0.3, 0.3, 1.78, 6, 0xc79a3e, 0, 0, 0, 0, Math.PI / 2)]);
 
 /** a wooden sign on a post: red letters on cream */
-function signTexture(text) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 128; const g = c.getContext('2d');
-  g.fillStyle = '#f4e7c4'; g.fillRect(0, 0, 256, 128); g.strokeStyle = '#d9372b'; g.lineWidth = 12; g.strokeRect(6, 6, 244, 116);
-  g.fillStyle = '#d9372b'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  let size = 76; do { g.font = `bold ${size}px sans-serif`; size -= 4; } while (g.measureText(text).width > 220 && size > 20);
-  g.fillText(text, 128, 68);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-}
-
 // ---------- the land
 function fieldColor(x, z, h, ny) {
   const n = fbm(x / 40, z / 40, 3), n2 = fbm(x / 11 + 30, z / 11, 2);
@@ -481,18 +472,6 @@ function buildPond(group, D, animated) {
   animated.push(t => { for (const f of flying) f.flag.rotation.y = f.yaw + 0.35 * Math.sin(t * 3.1 + f.phase) + 0.12 * Math.sin(t * 7.3 + f.phase); });
 }
 
-// ---------- warning signs on the way in to each hazard
-function buildSigns(group, D) {
-  const postG = new THREE.CylinderGeometry(0.12, 0.14, 3.0, 6), postM = new THREE.MeshStandardMaterial({ color: 0x8b6a45, roughness: 0.9 }), boardG = new THREE.PlaneGeometry(3.0, 1.5); D.push(postG, postM, boardG);
-  const signs = [['JUMP!', T.chasms[0].ravineStart - 26, 1], ['BALES!', T.obstacles[0].s - 28, 1], ['SHEEP!', T.sheepLane.s - 30, 1], ['MIND THE SAILS', T.mill.s - 34, 1],
-    ['TRACTOR!', T.tractorLane.s - 32, 1], ['MUD + PIGS', T.mud[0].s - 30, 1], ['MAIZE MAZE', T.sections.find(sec => sec.id === 'H').sStart - 14, 1], ['BALE HILL', T.baleRun.s - T.baleRun.spacing - 30, -1]];
-  for (const [text, s, side] of signs) {
-    const c = T.pointAt(s), p = beside(s, side * (c.halfWidth + 1.5)), tex = signTexture(text), mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }); D.push(tex, mat);
-    const post = new THREE.Mesh(postG, postM); post.position.set(p.x, p.y + 1.4, p.z); post.castShadow = true; group.add(post);
-    const board = new THREE.Mesh(boardG, mat); board.position.set(p.x, p.y + 3.1, p.z); board.rotation.y = c.rotationY + Math.PI; board.name = 'Farm_Sign'; group.add(board);
-  }
-}
-
 // ---------- trees, the orchard, sunflowers, grass and flowers (all instanced)
 function buildNature(group, D) {
   const r = rng(17), o = new THREE.Object3D(), ic = new THREE.Color(), mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true, side: THREE.DoubleSide }); D.push(mat);
@@ -565,7 +544,7 @@ export function createFarm() {
   const D = [], animated = [], movers = {};
   buildSky(group, D, animated); buildTerrain(group, D); buildTrail(group, D); buildFences(group, D); buildBuildings(group, D, animated);
   buildWindmill(group, D, movers); buildHay(group, D, movers); buildAnimals(group, D, movers, animated); buildMaize(group, D, animated); buildPond(group, D, animated);
-  buildSigns(group, D); buildNature(group, D);
+  buildNature(group, D);
   const hemi = new THREE.HemisphereLight(0xcfe4ff, 0xb9c98a, 1.05), sun = new THREE.DirectionalLight(0xfff1d6, 3.3);
   sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 600 }); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.5;
   const lights = new THREE.Group(); lights.name = 'Farm_Lights'; lights.add(hemi, sun, sun.target); group.add(lights);

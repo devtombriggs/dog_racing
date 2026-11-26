@@ -133,7 +133,8 @@ export const VETS = makeTrack({
     slipAt: s => 0.75 * sstep(kennels.sStart, kennels.sStart + 8, s) * sstep(kennels.sEnd, kennels.sEnd - 8, s),
     keepClear: [[cones[0] - 10, cones[0] + 8], [cones[1] - 10, cones[1] + 8], [stairs.sStart - 6, stairs.sEnd + 6], [corridor.sStart - 4, corridor.sEnd + 4], [theatre.sStart, theatre.sEnd], [topStairs.sStart - 4, topStairs.sEnd + 4],
       ...trolleys.map(s => [s - 10, s + 8]), [wayOut.sStart - 4, windowS], [length - TREADMILL.before - 6, length], [0, door + 4]],
-    extras: { floor: FLOOR, first: FIRST, top: TOP, storey: STOREY, cones, stairs, corridor, theatre, topStairs, kennels, trolleys, wayOut, windowS, treadmill, pillRun: PILL, syringeRun: SYRINGE, vetRuns: runs,
+    extras: { enclosed: 'BCDEFGHIJK',       // (walls to the ceiling either side: the camera is kept inside them, game/ChaseCamera.js)
+      floor: FLOOR, first: FIRST, top: TOP, storey: STOREY, cones, stairs, corridor, theatre, topStairs, kennels, trolleys, wayOut, windowS, treadmill, pillRun: PILL, syringeRun: SYRINGE, vetRuns: runs,
       hazardZones: { cones, pills: [stairs.sStart, (stairs.sStart + stairs.sEnd) / 2, stairs.sEnd], syringes: [corridor.sStart, corridor.sStart + 40, corridor.sEnd - 40, corridor.sEnd], trolleys,
         vets: [theatre.sStart, (theatre.sStart + theatre.sEnd) / 2, theatre.sEnd, topStairs.sStart, topStairs.sEnd, wayOut.sStart, (wayOut.sStart + wayOut.sEnd) / 2, wayOut.sEnd] } },
   };

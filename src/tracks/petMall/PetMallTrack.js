@@ -300,13 +300,6 @@ function buildChaos(group, D, animated, pool) {
     const pg = merge(parts), m = new THREE.Mesh(pg, prop); m.position.set(x, 0, z); m.rotation.y = yaw; m.name = 'Mall_Pavilion'; m.castShadow = true; m.receiveShadow = true; group.add(m); D.push(pg);
   }
 
-  // signs on the way in to each part of the mall
-  const postG = new THREE.CylinderGeometry(0.1, 0.12, 2.2, 6), postM = new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.6 }), boardG = new THREE.PlaneGeometry(2.8, 1.4); D.push(postG, postM, boardG);
-  for (const [text, s] of [['CATS!', T.catLanes[0] - 26], ['WET FLOOR', T.mud[0].s - 24], ['TROLLEYS!', T.trolleyLanes[0] - 26], ['TINS!', T.obstacles[0].s - 22], ['ESCALATOR', T.escalator.sStart - 20], ['HAMSTERS!', T.hamsterLanes[0] - 24], ['LEAP!', T.launch.padStart - 30]]) {
-    const c = T.pointAt(s), p = T.pointAt(s, c.halfWidth - 0.1), tex = signTexture(text, '#ffd23a', '#202020'), mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }); D.push(tex, mat);
-    const post = new THREE.Mesh(postG, postM); post.position.set(p.x, p.y + 1.1, p.z); group.add(post);
-    const board = new THREE.Mesh(boardG, mat); board.position.set(p.x, p.y + 2.9, p.z); board.rotation.y = c.rotationY + Math.PI; board.name = 'Mall_Sign'; group.add(board);
-  }
 }
 
 /** Build the whole mall. */

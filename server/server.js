@@ -2,7 +2,7 @@
 import { Server } from 'socket.io';
 import { randomBytes } from 'node:crypto';
 import { env } from 'node:process';
-import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
+import { lapsFor, MAPS, MAP_IDS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { SLALOM, slalomHits } from '../shared/slalom.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
 import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
@@ -1265,7 +1265,7 @@ function finishMapVote(room) {
   const most = Math.max(0, ...counts.values());
   const candidates = most > 0
     ? [...counts].filter(([, n]) => n === most).map(([mapId]) => mapId)
-    : Object.keys(MAPS);
+    : MAP_IDS;
   const choice = candidates[Math.min(candidates.length - 1, Math.floor(Math.random() * candidates.length))];
   room.grandPrix = null;
   if (Object.hasOwn(GRAND_PRIX, choice)) beginGrandPrix(room, choice);      // (a vote can be for a Grand Prix as well as a map)

@@ -7,7 +7,7 @@
 // pads are on the longer and ordinary boost pads on the other.  Three times the road stops and there are only
 // platforms sliding from side to side, each a boost pad: jump from one to the next.  A dog that drops between them lands in
 // the Undercity below, races on past its robots, and takes a lift back up.  Three catapults fire the dogs on round the map: over the second hairpin, up the ramp, and
-// (the accelerator) 260 m back across the city to the start.  A lap is about two minutes; three laps.  Built by shared/trackKit.js; the scenery
+// (the accelerator) 260 m back across the city to the start.  A lap is about two minutes; two laps (Tom, 2026-11-26: three made a six-minute race).  Built by shared/trackKit.js; the scenery
 // is src/tracks/neon/NeonTrack.js.
 //
 // Round the lap:
@@ -50,7 +50,7 @@ const BONE_EVERY = 50;                  // metres between the bones down a long 
 const FLIGHT = { exitSpeedMultiplier: 2.2, boostSeconds: 3, pad: 30, landing: 14 };
 
 export const NEON = makeTrack({
-  id: 'neon_nexus', name: 'Neon Nexus', laps: 3,          // (a lap is as long as three of most tracks, and is run in about two minutes)
+  id: 'neon_nexus', name: 'Neon Nexus', laps: 2,          // (a lap is as long as three of most tracks, and is run in about two minutes)
   // [x, z, height, width, section]
   controlPoints: [
     [-400, 390, 20, 16, 'A'], [-200, 390, 20, 16, 'A'],

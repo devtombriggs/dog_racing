@@ -6,6 +6,7 @@ import { FARMYARD } from './farmData.js';
 import { WATER_PARK } from './waterParkData.js';
 import { PET_MALL } from './petMallData.js';
 import { MUD_PARK } from './mudParkData.js';
+import { BYPASS } from './bypassData.js';
 import { DESERT } from './desertData.js';
 import { SPEED_BOWL } from './speedBowlData.js';
 import { KOMBU_HOUSE } from './kombuHouseData.js';
@@ -15,7 +16,7 @@ import { BONEYARD } from './boneyardData.js';
 import { VETS } from './vetsData.js';
 import { JUNGLE } from './jungleData.js';
 
-export const PROCEDURAL_TRACKS = { wendover: WENDOVER_WOODS, treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD, water_park: WATER_PARK, pet_mall: PET_MALL, mud_park: MUD_PARK,
+export const PROCEDURAL_TRACKS = { wendover: WENDOVER_WOODS, treat_road: TREAT_ROAD, modbury_heights: MODBURY_HEIGHTS, farmyard: FARMYARD, water_park: WATER_PARK, pet_mall: PET_MALL, bypass_dash: BYPASS, mud_park: MUD_PARK,
   desert_dunes: DESERT, speed_bowl: SPEED_BOWL, kombu_house: KOMBU_HOUSE, neon_nexus: NEON,
   yorkshire_dales: DALES, boneyard: BONEYARD, the_vets: VETS, monkey_jungle: JUNGLE };
 const PROCEDURAL_DESCRIPTIONS = {
@@ -27,16 +28,21 @@ const PROCEDURAL_DESCRIPTIONS = {
   desert_dunes: `${(DESERT.length / 1000).toFixed(2)} km of desert · S-bends over the dunes and soft sand · whirlwinds and tumbleweed · the canyon hairpin · flat out down the great dune · skirt the sinkhole`,
   speed_bowl: `${Math.round(SPEED_BOWL.length)} m kart oval · five laps · six rows of Treat Boxes and Golden Bones all the way round · nothing in the way`,
   kombu_house: `${(KOMBU_HOUSE.length / 1000).toFixed(2)} km through Kombu’s house · in at the glass doors · the toy car, the pool room, flying cutlery · up in the lift · swinging doors · the dog pen and the chickens · down the back drive`,
-  neon_nexus: `${(NEON.length / 1000).toFixed(2)} km above a neon city · three two-minute laps · mega boost pads · three catapults · choose your road: the longer has the mega pads and the Golden Bones · boost across the moving platforms, or fall into the Undercity with the robots`,
+  neon_nexus: `${(NEON.length / 1000).toFixed(2)} km above a neon city · two two-minute laps · mega boost pads · three catapults · choose your road: the longer has the mega pads and the Golden Bones · boost across the moving platforms, or fall into the Undercity with the robots`,
   treat_road: '2.3 km of sky road · faster than anywhere · boost pads all the way · no barriers · catapult gap',
-  modbury_heights: '3.12 km coastal circuit · clifftops · broken bridges to jump · water crossing',
-  farmyard: '1.65 km round the farm · through the barn · dodge the tractor, the sheep and the sails · find your way through the maize maze',
+  modbury_heights: `${(MODBURY_HEIGHTS.length / 1000).toFixed(2)} km coastal circuit · clifftops · broken bridges to jump · swim the cove · the Seabed Tunnel: under the sea, among the fish`,
+  farmyard: `${(FARMYARD.length / 1000).toFixed(2)} km weaving round the farm · through the barn · dodge the tractor, the sheep and the sails · find your way through the maize maze`,
+  bypass_dash: `${(BYPASS.length / 1000).toFixed(2)} km of roads · down the motorway among the traffic · weave through the roadworks · round the roundabout · the underpass · cross four lanes of traffic, or take the footbridge`,
   mud_park: '1.41 km dirt-bike course in the rain · a figure of eight: the big jump flies over the middle · kickers and boost pads · slippery clay · deep bog and rolling logs · the mudslide and the mud pit',
-  pet_mall: '1.33 km round a pet shopping mall · escaped cats, trolleys and hamster balls · the escalator and the big leap',
+  pet_mall: `${(PET_MALL.length / 1000).toFixed(2)} km weaving through a pet shopping mall · escaped cats, trolleys and hamster balls · the escalator and the big leap`,
   water_park: '1.72 km of pools and slides · bounce across the rubber rings · the big slide and its jump',
 };
 
 export const DEFAULT_MAP = 'wendover';
+
+// Maps that are still in the game's files (and still run, for a room that asks for one by name) but are not offered any more:
+// Squelch Hollow, since Tom, 2026-11-26 (Bypass Dash took its place).  The menus, the vote and the leaderboards go by MAP_IDS.
+export const RETIRED_MAPS = ['mud_park'];
 
 export const MAPS = {
   // (Wendover Woods is a generated track since Tom, 2026-11-21, but stays first in the list)
@@ -105,3 +111,6 @@ export const DEFAULT_LAPS = 3;
 export function lapsFor(mapId) {
   return MAPS[mapId]?.laps ?? DEFAULT_LAPS;
 }
+
+/** The maps on offer, in the order the menus show them */
+export const MAP_IDS = Object.keys(MAPS).filter(id => !RETIRED_MAPS.includes(id));

@@ -8,7 +8,7 @@
 // wall has its front at -x, and is turned half round when it stands against the right-hand wall.
 import * as THREE from 'three';
 import { KOMBU_HOUSE as T, PLAN } from '../../../shared/kombuHouseData.js';
-import { createKitWorld, rng, box, cyl, ball, cone, torus, merge, paint, signTexture, canvasTexture } from '../trackKit3d.js';
+import { createKitWorld, rng, box, cyl, ball, cone, torus, merge, paint, canvasTexture } from '../trackKit3d.js';
 
 const S = T.samples, N = T.sampleCount;
 const LEFT = -1, RIGHT = 1;
@@ -90,7 +90,7 @@ export const createKombuHouse = () => createKitWorld(T, {
   env: { fog: [0xeef3f6, 200, 1700], background: 0xeef3f6, exposure: 1.0 },
   lights: { hemi: [0xfff8ec, 0xbfb59a, 1.7], sun: [0xfff1d6, 1.9] },
 
-  build({ group, D, movers, animated, herd, beside, sign, add, keep, prop, band, terrain }) {
+  build({ group, D, movers, animated, herd, beside, add, keep, prop, band, terrain }) {
     const r = rng(27);
     const one = (name, geo, x, y, z, turn = 0, size = 1) => herd(name, geo, [[x, y, z, turn, size]]);
     /** a place on (or beside) the road: [x, y, z, rotationY] at s, `across` metres to the dogs' right of the middle */
@@ -252,9 +252,7 @@ export const createKombuHouse = () => createKitWorld(T, {
       const carG = merge([box(half * 2 - 1.4, 0.4, long - 1.4, STEEL, 0, -0.2, 0), box(half * 2 - 1.2, 0.12, long - 1.2, 0xffd23a, 0, -0.42, 0)]); D.push(carG);
       const car = new THREE.Mesh(carG, prop); car.name = 'Lift_Car'; car.position.set(m.x, T.floor, m.z); car.rotation.y = a.rotationY; group.add(car);
       const ax = Math.sin(a.rotationY), az = Math.cos(a.rotationY);
-      animated.push((t, focus) => { const riding = focus && Math.abs((focus.x - m.x) * ax + (focus.z - m.z) * az) < 1.2 && Math.hypot(focus.x - m.x, focus.z - m.z) < half + 1 && focus.y > T.floor - 0.5 && focus.y < T.upstairs + 0.5; car.position.y += ((riding ? focus.y : T.floor) - car.position.y) * (riding ? 1 : 0.08); });
-      { const tex = signTexture('LIFT ↑', '#ffd23a', '#202020'), g = new THREE.PlaneGeometry(4.4, 1.5), mat = keep(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); D.push(tex, g);
-        const plate = new THREE.Mesh(g, mat); plate.position.set(0, T.floor + 6.45, -long / 2 - 1.1); plate.rotation.y = Math.PI; holder.add(plate); } }
+      animated.push((t, focus) => { const riding = focus && Math.abs((focus.x - m.x) * ax + (focus.z - m.z) * az) < 1.2 && Math.hypot(focus.x - m.x, focus.z - m.z) < half + 1 && focus.y > T.floor - 0.5 && focus.y < T.upstairs + 0.5; car.position.y += ((riding ? focus.y : T.floor) - car.position.y) * (riding ? 1 : 0.08); }); }
 
     // ---------- the hallway: the doors that swing both ways
     { const W = T.swing, leafG = merge([box(0.3, 6.6, W.leaf, 0xf3ead8, 0, 3.3, W.leaf / 2), box(0.36, 1.1, W.leaf - 0.3, 0xb9c0c8, 0, 0.6, W.leaf / 2), cyl(0.9, 0.9, 0.4, 14, 0x7fb2d6, 0, 4.6, W.leaf * 0.62, 0, Math.PI / 2), box(0.44, 2.0, 0.5, 0xb9c0c8, 0, 3.3, W.leaf - 0.6)]), postG = merge([box(0.7, 7, 0.7, WOOD, 0, 3.5, 0), box(0.5, 7, 0.5, 0xb9c0c8, 0, 3.5, 0)]); D.push(leafG, postG);
@@ -279,9 +277,7 @@ export const createKombuHouse = () => createKitWorld(T, {
       movers.wheelchair = h => { chair.position.set(h.x, h.y, h.z); chair.rotation.y = h.rotationY; for (const w of wheels) w.rotation.x = h.roll; man.rotation.x = 0.05 * Math.sin(h.roll * 0.7); }; }
 
     // ---------- the terrace and the dog pen
-    { const g = T.doors[7], [x, y, z, yaw] = at(g.s), h = g.width / 2; one('Pen_Gate', merge([box(0.8, 4, 0.8, WOOD, -h - 0.4, 2, 0), box(0.8, 4, 0.8, WOOD, h + 0.4, 2, 0), box(g.width + 1.6, 0.5, 0.6, WOOD, 0, 4.1, 0), box(0.25, 3, h * 1.8, 0x9aa3ad, -h + 0.2, 1.6, h * 0.95)]), x, y, z, yaw);
-      const tex = signTexture('DOG PEN', '#8a5a2b', '#ffffff'), pg = new THREE.PlaneGeometry(5, 1.6), pm = keep(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); D.push(tex);
-      const plate = add('Pen_Sign', pg, pm); plate.position.set(x, y + 5.2, z); plate.rotation.y = yaw + Math.PI; }
+    { const g = T.doors[7], [x, y, z, yaw] = at(g.s), h = g.width / 2; one('Pen_Gate', merge([box(0.8, 4, 0.8, WOOD, -h - 0.4, 2, 0), box(0.8, 4, 0.8, WOOD, h + 0.4, 2, 0), box(g.width + 1.6, 0.5, 0.6, WOOD, 0, 4.1, 0), box(0.25, 3, h * 1.8, 0x9aa3ad, -h + 0.2, 1.6, h * 0.95)]), x, y, z, yaw); }
     const kennel = merge([box(3.4, 2.6, 3.6, 0xa9743f, 0, 1.3, 0), gable(4.2, 1.8, 4.4, 0xb5303a, 0, 2.6, 0, Math.PI / 2), box(0.2, 1.7, 1.5, 0x2b1e12, -1.72, 0.85, 0), ball(0.75, 1, 0x2b1e12, -1.72, 1.7, 0, 0.14, 1, 1)]);
     herd('Kennels', kennel, T.obstacles.filter(ob => ob.kind === 'kennel').map(ob => [ob.x, ob.y, ob.z, ob.rotationY + (ob.lateral > 0 ? Math.PI : 0), 1]));
     herd('Dog_Bowls', merge([cyl(0.7, 0.9, 0.5, 12, 0xd8232f, 0, 0.25, 0), cyl(0.6, 0.6, 0.1, 12, 0x7fc4ea, 0, 0.5, 0)]), T.obstacles.filter(ob => ob.kind === 'bowl').map(ob => [ob.x, ob.y, ob.z, 0, 1]));
@@ -333,6 +329,5 @@ export const createKombuHouse = () => createKitWorld(T, {
     herd('Trees', tree(0x3d8a45), trees[0]); herd('Copper_Beeches', tree(0x7a4a3a), trees[1]);
     { const hedge = []; for (let s = sU(1.2); s < sU(3.5); s += 2.4) { const [x, , z] = beside(s, RIGHT, 2.2 + r()); hedge.push([x, groundAt(x, z), z, r() * 6, 1.5 + r() * 0.5]); } herd('Hedge', ball(1.6, 1, 0x2f7a3a, 0, 1.9, 0, 1, 1.2, 1), hedge); }
 
-    for (const [text, s, side] of [['TOY CAR!', T.living.sStart - 12, LEFT], ['POOL ←', T.doors[1].s - 13, RIGHT], ['KITCHEN', T.doors[3].s - 12, RIGHT], ['LOOK UP!', T.kitchen.sStart - 1, LEFT], ['MIND THE DOORS', T.hall.sStart + 3, RIGHT], ['COMPUTER ROOM', T.doors[5].s - 12, LEFT], ['CHICKENS', sU(P.hill + 0.4), LEFT], ['SLOW: VANS', sU(P.backDrive + 0.9), RIGHT]]) sign(text, s, side, '#5d8f76', '#ffffff');
   },
 });

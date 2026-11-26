@@ -27,7 +27,7 @@ export const createJungle = () => createKitWorld(T, {
   env: { fog: [0xa9d2a0, 50, 620], background: 0xa9d2a0, exposure: 1.0 },
   lights: { hemi: [0xe6ffd9, 0x4f7a3a, 1.7], sun: [0xfff3c9, 2.0] },
 
-  build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, terrain, animated, band }) {
+  build({ group, D, movers, herd, clear, beside, add, keep, prop, terrain, animated, band }) {
     const r = rng(2024), c = new THREE.Color(), rock = new THREE.Color(0x5a4c3a);
     // (the gorge, with a channel cut down to the river bed under each crossing, where a dog that falls off wades along)
     // (and on into the far bank as far as its lift, which stands in a notch cut in the bank, under the trail)
@@ -224,11 +224,8 @@ export const createJungle = () => createKitWorld(T, {
       const vines = [-w + 0.8, w - 0.8].map(x => { const vine = new THREE.Mesh(vineG, prop); vine.position.set(x, 0, 0); frame.add(vine); return vine; });
       // (the deck rides up and down the frame on its vines, all the time: a dog that steps on is carried up)
       animated.push(t => { const f = 0.5 - 0.5 * Math.cos(t * 1.3), y = 0.25 + f * (high - 6.5); car.position.y = y; for (const vine of vines) { vine.position.y = high; vine.scale.set(1, high - y, 1); } });
-      sign('VINE LIFT ▲', lift.padStart - 22, -1, '#f2c94c', '#3a2a14', { under: u.depth });
+
     }
 
-    const [rope, swings, log, old] = T.platforms;
-    for (const [text, s, side] of [['SNAKE!', T.snakes[0] - 22, -1], ['MONKEYS!', T.monkeys[0] - 14, 1], ['NO SIDES!', rope.sStart - 22, -1], ['STONE BALLS!', T.temple.sStart - 14, 1], ['JUMP THE SWINGS', swings.sStart - 26, -1], ['COCONUTS!', T.grove.sStart - 6, 1],
-      ['UP THE TREE', T.stair.sStart - 12, -1], ['JUMP OFF!', T.stair.turnS - 4, 1], ['THE LOG', log.sStart - 22, 1], ['OLD BRIDGE', old.sStart - 22, 1], ['POND', T.pond.sStart - 16, -1], ['SNAKES!', T.snakes[1] - 22, 1]]) sign(text, s, side, '#f2c94c', '#3a2a14');
   },
 });

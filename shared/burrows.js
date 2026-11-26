@@ -66,7 +66,7 @@ function place(mapId) {
 
 /** Every map's burrows: { mapId: [{ id, entryS, exitS, entry, entryYaw, exit, exitYaw, halfWidth, duration, ... }] } */
 export const BURROWS = {
-  ...Object.fromEntries(['wendover', 'frostpeak', 'modbury_heights', 'farmyard', 'water_park', 'pet_mall', 'mud_park', 'desert_dunes', 'speed_bowl', 'kombu_house', 'neon_nexus', 'yorkshire_dales', 'boneyard', 'the_vets', 'monkey_jungle'].map(mapId => [mapId, place(mapId)])),
+  ...Object.fromEntries(['wendover', 'frostpeak', 'modbury_heights', 'farmyard', 'water_park', 'pet_mall', 'bypass_dash', 'mud_park', 'desert_dunes', 'speed_bowl', 'kombu_house', 'neon_nexus', 'yorkshire_dales', 'boneyard', 'the_vets', 'monkey_jungle'].map(mapId => [mapId, place(mapId)])),
 };
 
 /** How many burrows Ralph may go down in one lap of a map (every one of them, unless it says otherwise). */

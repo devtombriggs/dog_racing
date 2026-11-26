@@ -2,11 +2,12 @@
 // the most points after the fourth race wins.  Shared by the server (which runs it) and the game
 // (which offers them beside the single maps, and shows the scores).
 
+// (the cups were named by Tom's say-so, 2026-11-26: before, they were Grand Prix 1 to 4)
 export const GRAND_PRIX = {
-  gp1: { name: 'Grand Prix 1', maps: ['wendover', 'water_park', 'pet_mall', 'treat_road'] },
-  gp2: { name: 'Grand Prix 2', maps: ['farmyard', 'modbury_heights', 'mud_park', 'frostpeak'] },
-  gp3: { name: 'Grand Prix 3', maps: ['desert_dunes', 'speed_bowl', 'kombu_house', 'neon_nexus'] },
-  gp4: { name: 'Grand Prix 4', maps: ['yorkshire_dales', 'boneyard', 'the_vets', 'monkey_jungle'] },
+  gp1: { name: 'Puppy Cup', maps: ['wendover', 'water_park', 'pet_mall', 'treat_road'] },
+  gp2: { name: 'Treat Cup', maps: ['farmyard', 'modbury_heights', 'bypass_dash', 'frostpeak'] },
+  gp3: { name: 'Bone Cup', maps: ['desert_dunes', 'speed_bowl', 'kombu_house', 'neon_nexus'] },
+  gp4: { name: 'Top Dog Cup', maps: ['yorkshire_dales', 'boneyard', 'the_vets', 'monkey_jungle'] },
 };
 
 // 1st gets 10 points, 2nd 8, and so on down to 2 for 5th and 1 for 6th.  A dog that had not finished when the race

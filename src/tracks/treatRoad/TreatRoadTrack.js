@@ -224,12 +224,7 @@ function buildLauncher(group, disposables, animated) {
   chevron.setAttribute('position', new THREE.Float32BufferAttribute([-3,0,0, 0,0,2, 3,0,0, 3,0,-0.7, 0,0,1.3, -3,0,-0.7],3));
   chevron.setIndex([0,1,5,1,4,5,1,2,4,2,3,4]);
   for (const z of [-5,-1,3]) { const arrow = new THREE.Mesh(chevron,mat); arrow.position.set(0,0.09,z); pad.add(arrow); }
-  const canvas = document.createElement('canvas'); canvas.width=512; canvas.height=128;
-  const ctx=canvas.getContext('2d'); ctx.fillStyle='#102b48'; ctx.fillRect(0,0,512,128);
-  ctx.font='bold 76px sans-serif'; ctx.textAlign='center'; ctx.fillStyle='#62ffe6'; ctx.fillText('ZOOM!',256,91);
-  const texture=new THREE.CanvasTexture(canvas); texture.colorSpace=THREE.SRGBColorSpace;
-  const signGeo=new THREE.PlaneGeometry(9,2.25), signMat=new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide});
-  const sign=new THREE.Mesh(signGeo,signMat); sign.position.set(0,7,4); sign.rotation.y=Math.PI; pad.add(sign); group.add(pad);
+  group.add(pad);
   // Rings make the flight direction and landing point readable from the approach.
   const ringGeo=new THREE.TorusGeometry(4,0.16,8,40);
   for (const t of [0.2,0.4,0.6,0.8]) {
@@ -239,7 +234,7 @@ function buildLauncher(group, disposables, animated) {
   const landing=T.pointAt(T.launch.landingS), landingGeo=new THREE.RingGeometry(2.8,3.2,40);
   const target=new THREE.Mesh(landingGeo,mat); target.rotation.x=-Math.PI/2; target.position.set(landing.x,landing.y+0.09,landing.z); target.name='TreatRoad_LandingTarget';group.add(target);
   animated.push(t => { mat.color.setRGB(0.15,0.8+0.2*Math.sin(t*6),0.75); });
-  disposables.push(mat,dark,base,chevron,texture,signGeo,signMat,ringGeo,landingGeo);
+  disposables.push(mat,dark,base,chevron,ringGeo,landingGeo);
 }
 
 function buildTreats(group, disposables, animated) {

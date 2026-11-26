@@ -24,6 +24,7 @@ const RACE_AUDIO = {
   farmyard: { music: '/audio/farmyard.mp3', musicVolume: 0.35 },                // bluegrass hoedown: banjo, fiddle, washboard
   water_park: { music: '/audio/water_park.mp3', musicVolume: 0.35 },            // tropical: steel drums, marimba, slap bass
   pet_mall: { music: '/audio/pet_mall.mp3', musicVolume: 0.35 },                // zany funk and disco: synth organ, xylophone, kazoo
+  bypass_dash: { music: '/audio/speed_bowl.mp3', musicVolume: 0.35 },           // (no tune of its own yet: the Speed Bowl's racing rock)
   mud_park: { music: '/audio/mud_park.mp3', musicVolume: 0.35 },                // rowdy stomp: slide guitar, harmonica, tuba
   desert_dunes: { music: '/audio/desert_dunes.mp3', musicVolume: 0.35 },        // desert chase: oud, hand drums, surf guitar
   speed_bowl: { music: '/audio/speed_bowl.mp3', musicVolume: 0.35 },            // arcade racing rock: guitars, organ, synth lead

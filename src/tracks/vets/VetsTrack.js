@@ -46,7 +46,7 @@ export const createVets = () => createKitWorld(T, {
   env: { fog: [0xeef6fb, 180, 1600], background: 0xeef6fb, exposure: 1.0 },
   lights: { hemi: [0xf6fbff, 0xbfc9c4, 1.75], sun: [0xfff6e6, 1.8] },
 
-  build({ group, D, movers, herd, beside, sign, add, keep, prop, band, clear }) {
+  build({ group, D, movers, herd, beside, add, keep, prop, band, clear }) {
     const r = rng(77);
     const one = (name, geo, x, y, z, turn = 0, size = 1) => herd(name, geo, [[x, y, z, turn, size]]);
     const at = (s, lateral = 0) => { const c = T.pointAt(s), p = T.pointAt(s, lateral); return [p.x, c.y, p.z, c.rotationY]; };
@@ -184,7 +184,5 @@ export const createVets = () => createKitWorld(T, {
       movers[`vet-${k}`] = h => { vet.position.set(h.x, h.y + 0.07 * Math.abs(Math.sin(h.stride)), h.z); vet.rotation.y = h.rotationY; legs[0].rotation.x = Math.sin(h.stride) * 0.7; legs[1].rotation.x = -Math.sin(h.stride) * 0.7; body.rotation.x = h.coming ? 0.16 : -0.05; };
     });
 
-    for (const [text, s, side] of [['NO WAY BACK', T.treadmill.sStart + 8, -1], ['CONES!', T.cones[0] - 14, -1], ['PILLS!', T.stairs.sStart - 4, 1], ['NEEDLES!', T.corridor.sStart - 3, 1], ['VETS!!', T.theatre.sStart - 2, 1], ['UP AGAIN', T.topStairs.sStart - 3, -1],
-      ['WET FLOOR', T.kennels.sStart + 3, 1], ['TROLLEYS!', T.trolleys[0] - 22, -1], ['WAY OUT', T.wayOut.sStart - 6, 1], ['THE WINDOW!', T.windowS - 34, -1]]) sign(text, s, side, '#1f9d6b', '#ffffff');
   },
 });

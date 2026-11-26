@@ -27,13 +27,16 @@ const DECK = 0;                         // the ground floor
 const GALLERY = 9;                      // the upper floor
 
 // [x, z, height, width, section]
+// (Tom, 2026-11-26: more bends.  The lap was one big oval with a single tight corner; the same eighteen places, in the same
+// order, now weave: an S through Cat Alley, another inside the Aquarium, a kink in the Trolley Run and an S along the Upper
+// Gallery.  Everything on the lap is placed by these places' numbers, so it has all moved with them)
 const CONTROL_POINTS = [
   [-100, 140, 0, 18, 'A'], [-20, 140, 0, 18, 'A'], [60, 140, 0, 18, 'A'],
-  [140, 138, 0, 14, 'B'], [215, 120, 0, 14, 'B'],
-  [265, 70, 0, 11, 'C'], [280, 0, 0, 11, 'C'], [262, -70, 0, 11, 'C'],
-  [210, -125, 0, 15, 'D'], [130, -150, 0, 15, 'D'], [50, -150, 0, 15, 'D'],
+  [134, 116, 0, 14, 'B'], [208, 146, 0, 14, 'B'],
+  [264, 82, 0, 11, 'C'], [247, 8, 0, 11, 'C'], [278, -58, 0, 11, 'C'],
+  [222, -132, 0, 15, 'D'], [134, -124, 0, 15, 'D'], [52, -160, 0, 15, 'D'],
   [-30, -150, 1.5, 11, 'E'], [-105, -140, 6.5, 11, 'E'], [-165, -110, GALLERY, 11, 'E'],
-  [-205, -55, GALLERY, 12, 'F'], [-215, 10, GALLERY, 12, 'F'], [-200, 70, GALLERY, 12, 'F'],
+  [-212, -52, GALLERY, 12, 'F'], [-191, 6, GALLERY, 12, 'F'], [-212, 66, GALLERY, 12, 'F'],
   [-170, 125, 0, 16, 'H'],
 ];
 
@@ -283,6 +286,7 @@ function buildTrack() {
   for (let i = 0, st = 0; i <= N; i++) if (i === N || SEC[i] !== SEC[st]) { sections.push({ id: SEC[st], ...SECTIONS[SEC[st]], sStart: S[st], sEnd: i === N ? LENGTH : S[i], firstIndex: st, lastIndex: i - 1 }); st = i; }
 
   return {
+    enclosed: 'ABCDEFH',            // shop fronts either side all the way round: the camera is kept inside them (game/ChaseCamera.js)
     id: PET_MALL_ID, name: 'Pet Mall Mayhem', laps: 3, maxDogs: 5, length: LENGTH, sampleCount: N, sampleSpacing: LENGTH / N, galleryY: GALLERY,
     samples: { x: X, y: Y, z: Z, width: W, s: S, u: U, tangentX: TX, tangentZ: TZ, normalX: NX, normalZ: NZ, grade: GRADE, curvature: KAPPA, section: SEC },
     sections, checkpoints, startPositions,
