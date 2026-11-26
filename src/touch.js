@@ -19,9 +19,19 @@ export const onTouch = asked || (typeof window !== 'undefined' && typeof navigat
 export const TOUCH_TURN = 1.25;
 
 // On a phone on its side the picture is short, and the dogs in it small (Tom's iPhone 13, 2026-11-26: "the dogs are almost
-// too small"): the camera looks through a longer lens there, which draws everything this much bigger.  A tablet is left alone
-export const PHONE_ZOOM = 1.3;
-export const phoneZoom = () => (onTouch && typeof window !== 'undefined' && window.innerHeight <= 480 ? PHONE_ZOOM : 1);
+// too small", and then "the dogs almost seem too far away... optimise the view for mobile, make it quicker to see and react to
+// things").  So there the view is a phone racing game's:
+//   zoom     the camera looks through a longer lens, which draws everything this much bigger
+//   closer   ...and sits this share of its usual distance behind the dog (the two together: the dog about 1.7 times the size)
+//   look     ...and looks this far (metres) above where it usually does, which puts the dog lower on the screen and more of the
+//            road ahead above it, where what is coming can be seen
+//   item     what a dog carries, above its head, is drawn this share of its size (Tom: "way too big" on the phone)
+// A tablet is left alone.
+export const PHONE_VIEW = { zoom: 1.3, closer: 0.78, look: 0.7, item: 0.55 };
+const WHOLE_VIEW = { zoom: 1, closer: 1, look: 0, item: 1 };
+export const onPhone = () => onTouch && typeof window !== 'undefined' && window.innerHeight <= 480;
+export const phoneView = () => (onPhone() ? PHONE_VIEW : WHOLE_VIEW);
+export const phoneZoom = () => phoneView().zoom;
 
 export const touchInput = {
   turn: 0, drift: false, brake: false,

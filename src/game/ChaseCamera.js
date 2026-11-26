@@ -8,13 +8,14 @@ export class ChaseCamera {
   // heading(): the way the dog is travelling (radians), which the camera sits behind; by default the way the group
   // faces.  (In a drift the dog's nose and its travel part company: the camera follows the travel, so it does not
   // swing out sideways)
-  constructor(camera, target, config, heading = null) {
+  // view: { closer, look } (touch.js phoneView): on a phone the camera is nearer the dog and looks further up the road
+  constructor(camera, target, config, heading = null, view = null) {
     this.camera = camera;
     this.target = target;
     this.heading = heading ?? (() => target.rotation.y);
     this.turn = new THREE.Quaternion();
-    this.offset = new THREE.Vector3(...(config.cameraOffset || [0, 4, -8]));
-    this.lookHeight = config.cameraLookHeight ?? 1.5;
+    this.offset = new THREE.Vector3(...(config.cameraOffset || [0, 4, -8])).multiplyScalar(view?.closer ?? 1);
+    this.lookHeight = (config.cameraLookHeight ?? 1.5) + (view?.look ?? 0);
 
     this.snap();
     camera.lookAt(target.position.x, target.position.y + this.lookHeight, target.position.z);

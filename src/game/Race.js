@@ -18,7 +18,7 @@ import { formatTime } from '../utils/format.js';
 import { RaceScene } from './RaceScene.js';
 import { TrackWorld } from './TrackWorld.js';
 import { ChaseCamera } from './ChaseCamera.js';
-import { phoneZoom } from '../touch.js';
+import { phoneView, phoneZoom } from '../touch.js';
 import { PlayerInput } from './PlayerInput.js';
 import { RescueWatch } from './RescueWatch.js';
 import { LocalDog } from './dogs/LocalDog.js';
@@ -155,7 +155,7 @@ export class Race {
       onUseItem: () => { if (this.myItem) socket.emit('useItem'); }
     });
 
-    this.chaseCamera = new ChaseCamera(this.stage.camera, this.local.group, this.local.config, () => this.local.travelYaw);
+    this.chaseCamera = new ChaseCamera(this.stage.camera, this.local.group, this.local.config, () => this.local.travelYaw, phoneView());
 
     // ---------------------------------
     // GAME LOOP

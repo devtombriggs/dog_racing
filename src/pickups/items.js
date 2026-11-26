@@ -16,6 +16,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { ballPositionAt, ballSeconds, ballBouncesAt } from '../../shared/items.js';
 import { buildRocket } from './firework.js';
 import { buildCollar } from './collar.js';
+import { phoneView } from '../touch.js';
 
 const MODELS = { ball: '/models/tennis_ball.glb', toy: '/models/chew_toy.glb', bone: '/models/golden_bone.glb', frisbee: '/models/frisbee.glb' };
 // Size shown above a dog's head, a vertical nudge to centre it, the glow colour (as on the HUD sheet),
@@ -177,13 +178,14 @@ export function createItems({ scene, renderer }) {
     update(delta, anchors, groundAt = null, track = null) {
       const t = performance.now() / 1000;
       for (const [playerId, entry] of held) {
-        if (!entry.object && (templates[entry.item] || entry.item === 'special')) { entry.object = makeHeld(entry.item); root.add(entry.object); }
+        if (!entry.object && (templates[entry.item] || entry.item === 'special')) { entry.object = makeHeld(entry.item); entry.object.scale.setScalar(phoneView().item); root.add(entry.object); }
         if (!entry.object) continue;
         const anchor = anchors.get(playerId);
         entry.object.visible = !!anchor;
         if (!anchor) continue;
         anchor.getWorldPosition(anchorPos);
-        entry.object.position.set(anchorPos.x, anchorPos.y + ABOVE_HEAD + Math.sin(t * 3) * 0.08, anchorPos.z);
+        // (drawn smaller, on a phone, it also sits nearer the head)
+        entry.object.position.set(anchorPos.x, anchorPos.y + ABOVE_HEAD * (0.45 + 0.55 * entry.object.scale.x) + Math.sin(t * 3) * 0.08, anchorPos.z);
         entry.object.userData.spinner.rotation.y += delta * SPIN;
         entry.object.userData.badge?.scale.setScalar(HELD.special.scale * (1 + 0.1 * Math.sin(t * 9)));
       }
