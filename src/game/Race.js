@@ -23,6 +23,10 @@ import { RescueWatch } from './RescueWatch.js';
 import { LocalDog } from './dogs/LocalDog.js';
 import { RemoteDog } from './dogs/RemoteDog.js';
 
+// how near a firework or red frisbee after me is before it shows on the screen (m: about two seconds away)
+const INCOMING_WARN_M = { firework: 90, frisbee: 45 };
+const INCOMING_LOOK = new THREE.Vector3();
+
 const NETWORK_INTERVAL = 0.05;     // seconds between telling the server where the dog is
 
 // One race, from the loading screen to leaving it: builds the 3D view, the map, the dogs and the
@@ -427,6 +431,28 @@ export class Race {
   // GAME LOOP
   // ---------------------------------
 
+  // A firework or red frisbee after me, once it is close: a small picture on a ring round the dog, on the side
+  // it is coming from as the camera sees it (Tom, 2026-11-24: smaller, only when it is near, the firework heading
+  // towards you).  The nearest one counts.
+  #warnIncoming(me) {
+    const { fireworksIncoming, frisbeesIncoming } = this.session.state;
+    let nearest = null;
+    const consider = (position, icon, label, within) => {
+      if (!position) return;
+      const dx = position.x - me.x, dz = position.z - me.z, distance = Math.hypot(dx, dz);
+      if (distance > within || (nearest && distance >= nearest.distance)) return;
+      nearest = { dx, dz, distance, icon, label };
+    };
+    for (const id of fireworksIncoming) consider(this.fireworks.where(id), '/icons/items/firework.png', 'A firework is coming at you', INCOMING_WARN_M.firework);
+    for (const id of frisbeesIncoming) consider(this.items.frisbeeAt(id), '/icons/items/frisbee.png', 'A red frisbee is coming at you', INCOMING_WARN_M.frisbee);
+    if (!nearest) { this.hud.setIncoming(null); return; }
+    this.stage.camera.getWorldDirection(INCOMING_LOOK);
+    // (clockwise from straight up the screen: the camera's forward is up, its right is right)
+    const ahead = INCOMING_LOOK.x * nearest.dx + INCOMING_LOOK.z * nearest.dz;
+    const right = -INCOMING_LOOK.z * nearest.dx + INCOMING_LOOK.x * nearest.dz;
+    this.hud.setIncoming({ icon: nearest.icon, label: nearest.label, angle: Math.atan2(right, ahead) });
+  }
+
   #frame = () => {
     this.#animationId = requestAnimationFrame(this.#frame);
 
@@ -452,6 +478,7 @@ export class Race {
     remotes.forEach((remote, id) => itemAnchors.set(id, remote.bones.head ?? remote.group));
     this.items.update(delta, itemAnchors, world.ballGround, world.proceduralTrack);
     this.fireworks.update(delta);
+    this.#warnIncoming(player.position);
     this.kelp.update(delta);
     this.sheep.update(delta);
     this.shields.update(delta, id => (id === this.myId ? local : remotes.get(id)));

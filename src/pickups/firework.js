@@ -131,6 +131,8 @@ export function createFireworks({ scene }) {
       rockets.set(id, { from: [...position], to: [...position], at: performance.now(), object, fuse });
       flash(position, 0xffc46b, 5, 0.25);
     },
+    /** Where a firework is now (as drawn), or null */
+    where(id) { return rockets.get(id)?.object.position ?? null; },
     move(list) {
       for (const { id, position } of list) {
         const rocket = rockets.get(id);

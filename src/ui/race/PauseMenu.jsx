@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { fullscreen } from '../../fullscreen.js';
-import { buttonStyle } from '../styles.js';
 import { gameAudio } from '../../audio/GameAudio.js';
 import { useMuted } from '../useMuted.js';
 import { VolumeSliders } from '../VolumeSliders.jsx';
@@ -35,21 +34,20 @@ export function PauseMenu({ session }) {
   }, []);
 
   if (!open) return null;
-  const quiet = { ...buttonStyle, background: '#3d5a45', color: 'white' };
   return (
     <div className="pause-menu" role="dialog" aria-modal="true" aria-label="Game menu">
-      <div className="pause-menu__panel">
+      <div className="zr-card pause-menu__panel">
         <h2>Menu</h2>
         <p>The race carries on while this is open</p>
-        <button style={buttonStyle} autoFocus data-pad-first="" data-pad-back="" onClick={() => setOpen(false)}>Resume</button>
+        <button className="zr-btn zr-btn--yellow" autoFocus data-pad-first="" data-pad-back="" onClick={() => setOpen(false)}>Resume</button>
         {fullscreen.available && (
-          <button style={quiet} onClick={() => { ours.current = true; fullscreen.toggle(); }}>
+          <button className="zr-btn" onClick={() => { ours.current = true; fullscreen.toggle(); }}>
             Full screen: {full ? 'on' : 'off'}
           </button>
         )}
-        <button style={quiet} aria-pressed={muted} onClick={() => gameAudio.toggleMuted()}>Sound: {muted ? 'off' : 'on'}</button>
-        <VolumeSliders className="pause-volume" />
-        <button style={quiet} onClick={session.leaveGame}>Quit to Main Menu</button>
+        <button className="zr-btn" aria-pressed={muted} onClick={() => gameAudio.toggleMuted()}>Sound: {muted ? 'off' : 'on'}</button>
+        <VolumeSliders />
+        <button className="zr-btn zr-btn--quiet" onClick={session.leaveGame}>Quit to Main Menu</button>
         <small>Esc or Start closes this menu</small>
       </div>
     </div>

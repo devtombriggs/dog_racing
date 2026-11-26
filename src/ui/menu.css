@@ -491,38 +491,61 @@
 /* the bar under the board: leave, computer dogs, options */
 .zr-footer {
   position: relative; z-index: 1;
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
   margin-top: clamp(8px, 1.6vh, 18px);
-  padding: 6px 10px; border-radius: 18px;
-  background: #14224fd9;
+  padding: 8px 12px; border: 3px solid #fff; border-radius: 22px;
+  background: linear-gradient(#234a9c, #17306f);
+  box-shadow: 0 0.6vh 0 #0b1c4a55, 0 1.4vh 3vh #0b1c4a44;
   color: #fff; font: 13px/1.3 var(--zr-text);
 }
-.zr-footer > p { flex: 1 1 160px; margin: 0; text-align: right; color: #d6e2ff; }
-.zr-footer .zr-toggle { margin: 0; padding: 6px 12px; border-radius: 12px; font-size: 13px; }
-.zr-footer .zr-toggle input { width: 18px; height: 18px; }
-.zr-footer .zr-toggle small { font-size: 11px; }
+.zr-footer > p { flex: 1 1 160px; margin: 0; text-align: right; color: #d6e2ff; font-weight: 700; }
+/* the settings in the bar: a little box each, a switch for on and off */
+.zr-footer .zr-toggle { margin: 0; padding: 6px 12px; border-radius: 14px; font-size: 13px; gap: 10px; }
+.zr-footer .zr-toggle span { font: 400 15px/1.1 var(--zr-display); letter-spacing: 0.04em; text-transform: uppercase; }
+.zr-footer .zr-toggle small { font: 400 11px/1.3 var(--zr-text); letter-spacing: 0; text-transform: none; }
+.zr-footer .zr-toggle input {
+  appearance: none; -webkit-appearance: none; flex: none; position: relative;
+  width: 40px; height: 22px; border: 2px solid #fff; border-radius: 999px; background: #3a4a7c;
+  transition: background 150ms ease;
+}
+.zr-footer .zr-toggle input::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px #0006; transition: transform 150ms ease;
+}
+.zr-footer .zr-toggle input:checked { background: var(--zr-green); }
+.zr-footer .zr-toggle input:checked::after { transform: translateX(18px); }
+.zr-footer .zr-toggle input:focus-visible { outline: 2px solid var(--zr-yellow); outline-offset: 2px; }
 .zr-screen__error { position: relative; z-index: 1; margin: 6px 0 0; text-align: center; color: #fff; font-weight: 700; background: #7a1f1fee; border-radius: 999px; padding: 4px 12px; }
 
 /* ---------- computer-controlled dogs: how many and how good ---------- */
 .bot-settings {
   display: flex; flex-shrink: 0; align-items: center; gap: 12px;
-  padding: 5px 12px; border: 2px solid #ffffff35; border-radius: 12px; background: #ffffff10;
-  color: #fff; font-size: 13px; font-weight: bold;
+  padding: 6px 12px; border: 2px solid #ffffff35; border-radius: 14px; background: #ffffff10;
+  color: #fff; font-size: 13px;
 }
 .zr-footer p.bot-settings--fixed { display: block; flex: none; color: #c4d3f5; font-weight: normal; text-align: left; }
 .bot-settings--fixed strong { color: #fff; }
-.bot-settings__label { display: flex; flex-direction: column; gap: 2px; }
-.bot-settings__label small { color: #c4d3f5; font-size: 11px; font-weight: normal; }
-.bot-settings__count, .bot-settings__levels { display: flex; align-items: center; gap: 4px; }
-.bot-settings__count output { min-width: 20px; font-size: 16px; text-align: center; }
+.bot-settings__label { display: flex; flex-direction: column; gap: 2px; font: 400 15px/1.1 var(--zr-display); letter-spacing: 0.04em; text-transform: uppercase; }
+.bot-settings__label small { color: #c4d3f5; font: 400 11px/1.3 var(--zr-text); letter-spacing: 0; text-transform: none; }
+.bot-settings__count, .bot-settings__levels { display: flex; align-items: center; gap: 5px; }
+.bot-settings__count output { min-width: 22px; color: var(--zr-yellow); font: 400 22px/1 var(--zr-display); text-align: center; -webkit-text-stroke: 4px var(--zr-navy); paint-order: stroke fill; }
 .bot-settings button {
-  min-width: 30px; padding: 5px 10px; border: 2px solid #ffffff45; border-radius: 999px;
-  background: #ffffff12; color: #fff; font: inherit; font-size: 13px; cursor: pointer;
+  min-width: 32px; padding: 4px 11px 5px; border: 2px solid #fff; border-radius: 999px;
+  background: linear-gradient(#55b4ff 0%, var(--zr-blue) 48%, var(--zr-blue-deep) 52%, #0f58c9 100%);
+  box-shadow: 0 2px 0 #0a3f9c, inset 0 1px 0 #ffffff70;
+  color: #fff; font: 400 14px/1.1 var(--zr-display); letter-spacing: 0.04em; text-transform: uppercase;
+  -webkit-text-stroke: 3px var(--zr-navy); paint-order: stroke fill;
+  cursor: pointer; transition: transform 120ms ease, filter 120ms ease;
 }
-.bot-settings button:hover:enabled { background: #ffffff2a; }
-.bot-settings button:disabled { opacity: 0.4; cursor: default; }
+.bot-settings__count button { width: 30px; height: 30px; min-width: 0; padding: 0; font-size: 20px; }
+.bot-settings button:hover:enabled { transform: translateY(-1px); filter: brightness(1.1); }
+.bot-settings button:active:enabled { transform: translateY(1px); }
+.bot-settings button:disabled { filter: grayscale(0.8) brightness(0.8); opacity: 0.6; cursor: default; }
 .bot-settings button:focus-visible { outline: 2px solid var(--zr-yellow); outline-offset: 2px; }
-.bot-settings button.bot-settings__level--on { border-color: #fff; background: var(--zr-yellow); color: var(--zr-navy); font-weight: bold; }
+.bot-settings button.bot-settings__level--on {
+  background: linear-gradient(#ffe873 0%, var(--zr-yellow) 48%, var(--zr-yellow-deep) 52%, #ff9a00 100%);
+  box-shadow: 0 2px 0 #c96f00, inset 0 1px 0 #ffffffa0;
+}
 
 /* ---------- tall or narrow screens: the box of details above the tiles, and the page scrolls ---------- */
 @media (max-aspect-ratio: 11/10), (max-width: 700px) {
@@ -553,8 +576,15 @@
   .zr-footer { flex-wrap: nowrap; margin-top: 6px; padding: 4px 8px; font-size: 11px; }
   .zr-footer small, .zr-footer .bot-settings__label small { display: none; }
   .zr-footer > p { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zr-footer { border-width: 2px; border-radius: 16px; }
   .zr-footer .zr-toggle, .bot-settings { padding: 3px 8px; font-size: 11px; gap: 6px; }
-  .bot-settings button { padding: 3px 7px; font-size: 11px; min-width: 24px; }
+  .zr-footer .zr-toggle span, .bot-settings__label { font-size: 12px; }
+  .zr-footer .zr-toggle input { width: 32px; height: 18px; }
+  .zr-footer .zr-toggle input::after { width: 10px; height: 10px; }
+  .zr-footer .zr-toggle input:checked::after { transform: translateX(14px); }
+  .bot-settings button { padding: 2px 7px 3px; font-size: 11px; min-width: 24px; }
+  .bot-settings__count button { width: 24px; height: 24px; font-size: 16px; }
+  .bot-settings__count output { font-size: 17px; }
 }
 
 /* ---------- a controller's highlight (ui/menuPad.js sets <html data-pad> while a controller is in use) ---------- */
@@ -672,4 +702,14 @@ html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scal
   .zr-lb__who { font-size: 14px; }
   .zr-lb__value { font-size: 16px; }
   .zr-lb > .zr-btn { padding-block: 6px; }
+}
+
+/* ---------- Privacy / Terms links, the age line on sign-up, deleting an account ---------- */
+.zr-legal { margin: 12px 0 0 !important; font: 700 13px var(--zr-text); color: #ffffffb0; }
+.zr-legal a, .zr-agree a { color: #fff; text-decoration: underline; }
+.zr-link--quiet { color: #ffb3a8; font-size: 13px; }
+.zr-agree { margin: 0 !important; font: 400 13px/1.35 var(--zr-text); color: #ffffffc8; text-align: center; }
+.zr-btn--danger {
+  background: linear-gradient(#ff8a7a 0%, #f2453a 48%, #d92e24 52%, #b81d14 100%);
+  box-shadow: 0 0.22em 0 #7d120c, 0 0.4em 0.7em #0b1c4a66, inset 0 0.12em 0 #ffffff70;
 }

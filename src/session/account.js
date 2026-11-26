@@ -58,6 +58,8 @@ class Account {
   async signUp(details) { await request('POST', '/auth/signup', details); await this.#changed(); this.#checkSignedIn(); }
   async signIn(details) { await request('POST', '/auth/login', details); await this.#changed(); this.#checkSignedIn(); }
   async signOut() { await request('POST', '/auth/logout'); await this.#changed(); }
+  /** Deletes the account for good (confirm: the username, typed) */
+  async deleteAccount(confirm) { await request('POST', '/auth/delete', { confirm }); await this.#changed(); }
   async finishSignUp(username) { await request('POST', '/auth/finish', { username }); await this.#changed(); this.#checkSignedIn(); }
 
   // The server said yes, but asking again who this is says nobody: the browser did not keep the sign-in cookie, or a

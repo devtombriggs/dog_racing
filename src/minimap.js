@@ -8,7 +8,10 @@
 // North is fixed (the map does not turn with you): +X to the right, +Z down the screen.
 import { PICKUP_PATHS } from '../shared/pickupSpots.js';
 
-const SIZE = 230, PAD = 16;                  // CSS pixels: the panel is SIZE wide, as tall as the course needs
+const SIZE = 230, PAD = 16;                  // drawn in these units: the panel is SIZE wide, as tall as the course needs
+// ...and shown bigger on a big screen: about 36% of the window's height, never under SIZE (Tom, 2026-11-24: "on my
+// monitor the map seems small... smaller on mobile not PC"; a phone shrinks it again in index.css)
+const shownScale = () => Math.min(2, Math.max(1, (window.innerHeight * 0.36) / SIZE));
 
 export function createMinimap({ canvas, mapId, marks = [] }) {
   const path = PICKUP_PATHS[mapId];
@@ -25,18 +28,20 @@ export function createMinimap({ canvas, mapId, marks = [] }) {
   const ox = (width - (maxX - minX) * scale) / 2, oz = (height - (maxZ - minZ) * scale) / 2;
   const toMap = (x, z) => [ox + (x - minX) * scale, oz + (z - minZ) * scale];
 
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const shown = shownScale();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2) * shown;
   canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
-  canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+  canvas.style.width = `${Math.round(width * shown)}px`; canvas.style.height = `${Math.round(height * shown)}px`;
   const g = canvas.getContext('2d');
 
   // the panel and the course never change: drawn once
   const base = document.createElement('canvas'); base.width = canvas.width; base.height = canvas.height;
   const b = base.getContext('2d');
   b.scale(dpr, dpr);
-  b.fillStyle = 'rgba(12, 26, 18, 0.72)';
-  b.beginPath(); b.roundRect(0, 0, width, height, 12); b.fill();
-  b.strokeStyle = 'rgba(255, 255, 255, 0.22)'; b.lineWidth = 1; b.stroke();
+  // (the menus' navy, with a white edge)
+  b.fillStyle = 'rgba(23, 48, 111, 0.78)';
+  b.beginPath(); b.roundRect(1.5, 1.5, width - 3, height - 3, 14); b.fill();
+  b.strokeStyle = '#fff'; b.lineWidth = 3; b.stroke();
   const trace = () => { b.beginPath(); line.forEach((p, i) => { const [x, y] = toMap(p.x, p.z); if (i) b.lineTo(x, y); else b.moveTo(x, y); }); b.closePath(); };
   b.lineJoin = b.lineCap = 'round';
   trace(); b.strokeStyle = 'rgba(0, 0, 0, 0.55)'; b.lineWidth = 7; b.stroke();

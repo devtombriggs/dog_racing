@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { itemChoices, itemOdds, rollItem, ballPositionAt, ballRoute, ballSeconds, ballBouncesAt, ballHeadingAt, forwardOf, stepFrisbee, frisbeeHits, BALL, FRISBEE } from '../shared/items.js';
+import { itemChoices, itemOdds, rollItem, ballPositionAt, ballRoute, ballSeconds, ballBouncesAt, ballHeadingAt, forwardOf, frisbeeHits, BALL, FRISBEE } from '../shared/items.js';
+import { launchFrisbee, stepFrisbee, roadAhead } from '../shared/frisbee.js';
+import { fireworkRoute } from '../shared/firework.js';
 import { PROCEDURAL_TRACKS } from '../shared/maps.js';
 
 test('item odds follow the race order: only balls and chew toys for the leader, no chew toys for last', () => {
@@ -63,32 +65,29 @@ test('a firework follows the road, then goes straight for the leader and arrives
   assert.ok(!inFireworkBlast([0, 1.4, 0], [FIREWORK.blastRadius + 1, 0, 0]));
 });
 
-test('a red frisbee turns towards its target (at most turnRate) and knocks over a dog it reaches', () => {
-  const f = { position: [0, 1, 0], yaw: 0 };                 // flying +Z
-  const target = [50, 0, 0];                                 // off to the +X side
-  const next = stepFrisbee(f, target, 0.05);
-  assert.ok(next.yaw > 0 && next.yaw <= FRISBEE.turnRate * 0.05 + 1e-9, 'turns towards it, no faster than turnRate');
-  assert.ok(Math.abs(Math.hypot(next.position[0], next.position[2]) - FRISBEE.speed * 0.05) < 1e-9);
-  let g = f, closest = Infinity;
-  for (let i = 0; i < 80; i++) { g = stepFrisbee(g, target, 0.05); closest = Math.min(closest, Math.hypot(g.position[0] - 50, g.position[2])); }
-  assert.ok(closest < FRISBEE.radius, `it reaches the target (closest ${closest.toFixed(2)} m)`);
-  assert.equal(stepFrisbee(f, null, 0.1).yaw, 0, 'no target: straight on');
+test('a red frisbee follows the road, goes straight at its dog only close in, and never turns back', () => {
+  const route = fireworkRoute('wendover'), road = s => { const p = route.pointAt(s); return [p.x, p.y, p.z]; };
+  const fly = (f, target, steps) => { let closest = Infinity, farFromRoad = 0, back = false;
+    for (let i = 0; i < steps; i++) {
+      const s = f.s; f = stepFrisbee(f, route, target, 0.05);
+      if (!f.homing && f.s < s && s - f.s < route.length / 2) back = true;
+      const p = route.pointAt(route.sAt(f.position)); farFromRoad = Math.max(farFromRoad, Math.hypot(f.position[0] - p.x, f.position[2] - p.z));
+      if (target) closest = Math.min(closest, Math.hypot(f.position[0] - target[0], f.position[2] - target[2]));
+    }
+    return { f, closest, farFromRoad, back };
+  };
+  // its dog 150 m up the road: it goes round by the road (never far off it) and reaches it
+  const start = road(100), target = road(250);
+  const chase = fly(launchFrisbee(route, [start[0], start[1] + FRISBEE.height, start[2]], route.pointAt(100).rotationY), target, 120);
+  assert.ok(chase.closest < FRISBEE.radius, `reaches it (closest ${chase.closest.toFixed(1)} m)`);
+  assert.ok(!chase.back, 'never back down the road');
+  // its dog is behind it: it flies on up the road, away from it
+  const behind = road(80);
+  const away = fly(launchFrisbee(route, [start[0], start[1] + FRISBEE.height, start[2]], route.pointAt(100).rotationY), behind, 60);
+  assert.ok(away.closest > 15, `does not come back for a dog behind it (closest ${away.closest.toFixed(1)} m)`);
+  assert.ok(Math.abs(roadAhead(route, 100, away.f.position) - FRISBEE.speed * 3) < 8, 'it flew on up the road');
   assert.ok(frisbeeHits([10, 1, 10], [10.5, 0, 10]));
   assert.ok(!frisbeeHits([10, 1, 10], [13, 0, 10]));
-});
-
-test('a red frisbee thrown at a dog close alongside goes straight to it, not out wide and round again', () => {
-  // the dog it is after is 6 m to the side and a little behind where it starts: inside the 10 m circle it turns in
-  for (const target of [[6, 0, -1], [-7, 0, 3], [3, 0, -8], [9, 0, 0]]) {
-    let f = { position: [0, 1, 2.5], yaw: 0 }, farthest = 0, reached = null;
-    for (let i = 0; i < 40 && reached === null; i++) {
-      f = stepFrisbee(f, target, 0.05);
-      farthest = Math.max(farthest, Math.hypot(f.position[0], f.position[2]));
-      if (frisbeeHits(f.position, target)) reached = (i + 1) * 0.05;
-    }
-    assert.ok(reached !== null && reached <= 0.8, `reaches a dog at ${target} in ${reached} s`);
-    assert.ok(farthest < Math.hypot(target[0], target[2]) + 6, `stays close on the way to ${target} (${farthest.toFixed(1)} m out)`);
-  }
 });
 
 test('a thrown ball flies straight ahead and stops at the end of its range', () => {
@@ -335,4 +334,15 @@ test('a tennis ball skims the road, up and down with it, and on the level it was
   const jungle = PROCEDURAL_TRACKS.monkey_jungle, drop = jungle.drops[0];
   const off = throwAt(jungle, drop.s - 6), far = ballPositionAt(off, Math.min(ballSeconds(off), (6 + drop.height / BALL.fallPerMetre + 10) / BALL.speed));
   assert.ok(off.origin[1] - far[1] > drop.height * 0.8, `came down off the end (${(off.origin[1] - far[1]).toFixed(1)} of ${drop.height.toFixed(1)} m)`);
+});
+
+test('specials: the comeback charge builds up at the back and makes the special likelier (Tom, 2026-11-24)', async () => {
+  const { specialChance, comebackGain } = await import('../shared/specials.js');
+  assert.equal(comebackGain(1, 6, 30), 0, 'leading builds nothing');
+  assert.equal(comebackGain(2, 6, 30), 0, '2nd builds nothing');
+  assert.ok(Math.abs(comebackGain(6, 6, 30) - 0.3) < 1e-9, '30 s in last of 6: +30 %');
+  assert.ok(comebackGain(5, 6, 30) < comebackGain(6, 6, 30) && comebackGain(5, 6, 30) > comebackGain(4, 6, 30), 'further back builds faster');
+  assert.ok(Math.abs(specialChance(6, 6, comebackGain(6, 6, 30)) - 0.6) < 1e-9, 'last of 6 after 30 s: 60 %');
+  assert.equal(specialChance(6, 6, comebackGain(6, 6, 70)), 1, 'about 70 s in last: certain');
+  assert.equal(specialChance(1, 6, 5), 0, 'first place never gets it, whatever it built up behind');
 });

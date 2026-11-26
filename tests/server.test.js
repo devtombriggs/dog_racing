@@ -29,6 +29,7 @@ env.ROOM_BOTS = '0';
 env.STALLED_AFTER_MS = '86400000';
 env.NO_LISTEN = '1';      // (no network port: the handlers are called directly)
 const { forTests } = await import('../server/server.js');
+const { rooms } = forTests;
 
 let nextId = 0;
 function client() {
@@ -800,7 +801,7 @@ test('chew toys: one stops a frisbee, a ball knocks one off the road, and a dog 
   for (const p of [tom, berri, sam]) p.call('leaveGame');
 });
 
-test('red frisbee: if someone overtakes the thrower while it flies, it goes after them instead', context => {
+test('red frisbee: it keeps after the dog it was thrown at, and never comes back for one that overtakes the thrower (Tom, 2026-11-24)', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
   const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
   const tom = client(), berri = client(), sam = client();
@@ -812,7 +813,7 @@ test('red frisbee: if someone overtakes the thrower while it flies, it goes afte
   for (const p of [tom, berri, sam]) p.call('raceLoaded');
   for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
   const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
-  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const move = (who, position, rotation = facing(position)) => who.call('playerMove', { position, rotation, animation: 'Run' });
   const cp = i => [map.checkpoints[i].x, map.checkpoints[i].y ?? 0, map.checkpoints[i].z];
   move(berri, cp(0)); move(berri, cp(1)); move(berri, cp(2));       // Berri well ahead
   move(tom, cp(0));                                                   // Tom 2nd, Sam 3rd
@@ -820,17 +821,56 @@ test('red frisbee: if someone overtakes the thrower while it flies, it goes afte
   move(tom, boxes[0].groundPosition);
   assert.equal(events('itemChanged').at(-1).item, 'frisbee');
   const at = boxes[0].groundPosition;
-  move(tom, at, 0);
-  move(berri, [at[0] + 300, at[1], at[2] + 300]);                   // far away up the course
+  move(tom, at);
+  move(berri, upRoad(at, 60));                                      // 60 m up the road
   tom.call('useItem');
   assert.equal(events('frisbeeThrown').at(-1).target, berri.id);
   context.mock.timers.tick(100);
-  // Sam overtakes Tom (two checkpoints to Tom's one) and stops 25 m away: now he is directly ahead
-  move(sam, cp(0)); move(sam, cp(1)); move(sam, [at[0] - 25, at[1], at[2] + 5]);
+  // Sam overtakes Tom (two checkpoints to Tom's one) and stands just behind him: the frisbee does not come back for him
+  move(sam, cp(0)); move(sam, cp(1)); move(sam, upRoad(at, -10));
   for (let i = 0; i < 60 && !events('frisbeeHit').length; i++) context.mock.timers.tick(50);
-  assert.equal(events('frisbeeTarget').at(-1).target, sam.id, 'everyone is told it switched');
-  assert.equal(events('frisbeeHit').at(-1).playerId, sam.id);
+  assert.equal(events('frisbeeTarget').length, 0, 'it never switched');
+  assert.equal(events('frisbeeHit').at(-1)?.playerId, berri.id, 'and it got Berri');
+  assert.equal(events('playerHit').filter(e => e.playerId === sam.id).length, 0);
   for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
+test('fireworks: after Jimmy\'s Dragon Dance no Treat Box gives a firework for 40 s (Tom, 2026-11-24)', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const jimmy = client(), tom = client(), berri = client();
+  const room = jimmy.call('hostGame', { mapId: 'wendover', name: 'Jimmy' }).room;
+  tom.call('joinGame', { roomCode: room.code, name: 'Tom' });
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  jimmy.call('selectDog', { dog: 'jimmy' }); tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' });
+  jimmy.call('startRace');
+  for (const p of [jimmy, tom, berri]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const move = (who, position, rotation = 0) => who.call('playerMove', { position, rotation, animation: 'Run' });
+  const cp = i => [map.checkpoints[i].x, map.checkpoints[i].y ?? 0, map.checkpoints[i].z];
+  move(berri, cp(0)); move(berri, cp(1)); move(tom, cp(0));          // Berri leads, Tom 2nd, Jimmy last
+  context.mock.timers.tick(FIREWORK_LIMIT.notBeforeMs);
+  let roll = 0;
+  context.mock.method(Math, 'random', () => roll);
+  move(jimmy, boxes[0].groundPosition);
+  assert.equal(events('itemChanged').at(-1).item, 'special');
+  jimmy.call('useItem');
+  context.mock.timers.tick(5000);
+  assert.equal(events('fireworkLaunched').length, 2, 'his two fireworks');
+  const box = () => {
+    rooms.get(room.code).players.get(tom.id).comeback = 0;
+    move(tom, boxes[1].groundPosition);
+    const item = events('itemChanged').filter(e => e.playerId === tom.id).at(-1)?.item;
+    tom.call('useItem');
+    context.mock.timers.tick(TREAT_BOX_RESPAWN_MS + 100);
+    return item;
+  };
+  roll = 0.89;                                              // 2nd of 3: a firework (88-90 %) whenever one is allowed
+  assert.notEqual(box(), 'firework', 'not straight after Jimmy\'s');
+  context.mock.timers.tick(FIREWORK_LIMIT.cooldownMs);
+  assert.equal(box(), 'firework', 'once the 40 s are up');
+  for (const p of [jimmy, tom, berri]) p.call('leaveGame');
 });
 
 test('red frisbee: gives up after its time if it cannot reach its target', context => {
@@ -872,6 +912,7 @@ test('firework: once or twice a race, like Mario Kart\'s blue shell: not early, 
   berri.call('playerMove', { position: [cp.x, cp.y ?? 0, cp.z], rotation: 0, animation: 'Run' });     // (Berri leads)
   context.mock.method(Math, 'random', () => 0.87);         // 2nd of 2: a firework whenever one is allowed
   const box = () => {
+    rooms.get(room.code).players.get(tom.id).comeback = 0;   // (this is about fireworks: no comeback charge towards his special)
     tom.call('playerMove', { position: boxes[0].groundPosition, rotation: 0, animation: 'Run' });
     const item = events('itemChanged').filter(e => e.playerId === tom.id).at(-1)?.item;
     tom.call('useItem');
@@ -2384,4 +2425,34 @@ test('Squelch Hollow (Tom, 2026-11-21): a figure of eight; running through the m
   assert.equal(latest(room.code, 'playerLaunched')?.playerId, host.id);
   assert.equal(count('playerFell'), 0);
   host.call('leaveGame');
+});
+
+test('comeback charge: a dog that sits at the back long enough is sure of its special, and it starts again after (Tom, 2026-11-24)', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const map = MAPS.wendover, boxes = TREAT_BOXES_BY_MAP.wendover;
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'wendover', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'black_lab' });
+  tom.call('startRace'); tom.call('raceLoaded'); berri.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const cp = map.checkpoints[0];
+  berri.call('playerMove', { position: [cp.x, cp.y ?? 0, cp.z], rotation: 0, animation: 'Run' });     // (Berri leads)
+  context.mock.method(Math, 'random', () => 0.95);         // an unlucky roll: 2nd of 2 would not get it on its 30 %
+  const box = () => {
+    tom.call('playerMove', { position: boxes[0].groundPosition, rotation: 0, animation: 'Run' });
+    const item = events('itemChanged').filter(e => e.playerId === tom.id).at(-1)?.item;
+    tom.call('useItem');
+    context.mock.timers.tick(TREAT_BOX_RESPAWN_MS + 100);
+    return item;
+  };
+  const tomNow = () => rooms.get(room.code).players.get(tom.id);
+  assert.notEqual(box(), 'special', 'early on, an unlucky roll is unlucky');
+  for (let i = 0; i < 70; i++) context.mock.timers.tick(1000);
+  assert.ok(tomNow().comeback >= 0.65, `70 s behind builds it up (${tomNow().comeback})`);
+  assert.equal(box(), 'special', 'and now it is certain');
+  assert.ok(tomNow().comeback < 0.1, 'given: the charge starts again from nothing');
+  assert.equal(rooms.get(room.code).players.get(berri.id).comeback ?? 0, 0, 'the leader builds nothing');
+  for (const p of [tom, berri]) p.call('leaveGame');
 });

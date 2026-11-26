@@ -38,9 +38,7 @@ export const WALL = {
   square: 0.75,      // ...and running straight into one
   scrape: 0.7,       // share of its top speed it can hold while it is against one
   again: 0.5,        // seconds after a hit before another counts as a new hit
-  pinned: 2,         // a dog with its nose against a wall is brought down to this speed (m/s)...
-  pinnedBraking: 80, // ...this quickly (m/s², at dead square on)
-  softBelow: 0.9,    // ground that already slows a dog to under this share is the penalty there: the wall adds none
+  softBelow: 0.9,    // ground that already slows a dog to under this share is the penalty there: the wall costs no speed
 };
 /** The speed a dog keeps hitting a wall.  squareness: 0 brushing along it, 1 straight into it */
 export function speedAfterWall(speed, squareness) {

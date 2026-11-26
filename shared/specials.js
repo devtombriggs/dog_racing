@@ -152,16 +152,32 @@ export const PHEASANT = {
   maxFlightMs: 4000,
 };
 
+// How far back a place is: 0 in 2nd, 1 in last (with only two racers the one behind is last)
+const behindShare = (place, racers) => (racers <= 2 ? 1 : Math.max(0, Math.min(1, (place - 2) / (racers - 2))));
+
 /**
  * The chance that a Treat Box gives the special instead of an ordinary item, by place in the race.
  * First place (and a solo racer, who is first) never gets it.  2nd gets 10 %, rising evenly to 30 %
  * for last; with only two racers the one behind is last: 30 %.
  *   e.g. 5 racers: 0, 10, 17, 23, 30 %.
+ * comeback: the dog's comeback charge (comebackGain), added on top: certain once the two make 100 %.
  */
-export function specialChance(place, racers) {
+export function specialChance(place, racers, comeback = 0) {
   if (place <= 1 || racers <= 1) return 0;
-  const behind = racers <= 2 ? 1 : Math.min(1, (place - 2) / (racers - 2));
-  return 0.1 + 0.2 * behind;
+  return Math.min(1, 0.1 + 0.2 * behindShare(place, racers) + Math.max(0, comeback));
+}
+
+/**
+ * The comeback charge (Tom, 2026-11-24: "the time you spend in like 6th or 5th to increase the chances of you getting
+ * your ult... skill matters but anyone can really win").  Each second behind adds this much to the dog's chance of its
+ * special from the next Treat Box: 1 % a second in last, less the nearer the front, nothing in 1st or 2nd.  It is kept
+ * when the dog moves up, and goes back to nothing when the special is given.
+ *   e.g. 30 s in last of 6: 30 % + 30 % = 60 % at the next box; about 70 s there and it is certain.
+ */
+export const COMEBACK = { perSecondInLast: 0.01 };
+export function comebackGain(place, racers, seconds) {
+  if (place <= 1 || racers <= 1) return 0;
+  return COMEBACK.perSecondInLast * behindShare(place, racers) * seconds;
 }
 
 /**

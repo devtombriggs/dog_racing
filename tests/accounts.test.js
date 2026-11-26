@@ -190,3 +190,27 @@ test('accounts: sessions run out', () => {
   time += 61 * 86400e3;
   assert.equal(db.userForSession(token), null);
 });
+
+test('accounts: a player can delete their own account, and everything about it goes (Privacy page)', async () => {
+  const db = openDb(), accounts = createAccounts(db);
+  const signedUp = await call(accounts, 'POST', '/auth/signup', { body: { email: 'rocky@example.com', username: 'Rocky', password: 'sheepsheep' } });
+  const user = signedUp.body.user, cookie = jar({ zr_session: signedUp.cookies.zr_session });
+  db.recordRace([{ userId: user.id, mapId: 'treat_road', dog: 'rocky', place: 1, racers: 6, finished: true, raceSeconds: 120, bestLap: 38, singlePlayer: true, humans: 1 }]);
+  db.recordGrandPrix([{ userId: user.id, grandPrix: 'gp1', place: 1, points: 60, humans: 1 }]);
+
+  assert.equal((await call(accounts, 'POST', '/auth/delete', { body: { confirm: 'Rocky' } })).status, 401, 'signed out: nothing to delete');
+  const wrong = await call(accounts, 'POST', '/auth/delete', { cookie, body: { confirm: 'Rock' } });
+  assert.equal(wrong.status, 400);
+  assert.ok(db.user(user.id), 'a mistyped name deletes nothing');
+
+  const done = await call(accounts, 'POST', '/auth/delete', { cookie, body: { confirm: ' rocky ' } });
+  assert.equal(done.status, 200);
+  assert.equal(done.cookies.zr_session, '', 'the sign-in cookie is cleared');
+  assert.equal(db.user(user.id), null);
+  assert.equal((await call(accounts, 'GET', '/api/me', { cookie })).body.user, null, 'the old session no longer works');
+  assert.equal((await call(accounts, 'POST', '/auth/login', { body: { email: 'rocky@example.com', password: 'sheepsheep' } })).status, 401, 'cannot sign in again');
+  const boards = db.leaderboards();
+  assert.ok(!JSON.stringify(boards).includes('Rocky'), 'gone from every leaderboard');
+  // the email and username are free again
+  assert.equal((await call(accounts, 'POST', '/auth/signup', { body: { email: 'rocky@example.com', username: 'Rocky', password: 'sheepsheep' } })).status, 200);
+});

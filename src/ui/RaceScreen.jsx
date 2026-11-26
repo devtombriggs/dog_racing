@@ -18,7 +18,7 @@ export function RaceScreen({ session, state, split = null }) {
   const containerRef = useRef(null);
   const minimapRef = useRef(null);
   const speedRef = useRef(null);
-  const surfaceRef = useRef(null);
+  const incomingRef = useRef(null);
   const rescueRef = useRef(null);
 
   useEffect(() => {
@@ -31,7 +31,7 @@ export function RaceScreen({ session, state, split = null }) {
       session,
       hud: new RaceHud({
         speed: speedRef.current,
-        surface: surfaceRef.current,
+        incoming: incomingRef.current,
         rescue: rescueRef.current
       })
     });
@@ -66,16 +66,18 @@ export function RaceScreen({ session, state, split = null }) {
         style={{ position: 'absolute', left: 16, bottom: 16, pointerEvents: 'none' }}
       />
 
-      <Standings standings={state.standings} socketId={state.socketId} />
+      <Standings standings={state.standings} socketId={state.socketId} compact={onTouch && !split} />
 
       {/* Lost: off the track or the wrong way, counting down to the rescue */}
       <div ref={rescueRef} className="race-rescue" role="status" hidden />
-      {state.fireworksIncoming.length > 0
-        ? <div className="race-incoming" role="alert">FIREWORK INCOMING!</div>
-        : state.frisbeesIncoming.length > 0 && <div className="race-incoming" role="alert">FRISBEE INCOMING!</div>}
+      {/* A firework or red frisbee after you, once it is close: a small picture on a ring round the dog, on the
+          side it is coming from (Race.js #warnIncoming) */}
+      <div ref={incomingRef} className="race-incoming" role="img" hidden>
+        <div className="race-incoming__mark"><img alt="" /><i aria-hidden="true" /></div>
+      </div>
 
       {split && <div className="race-half__player">PLAYER {split.index + 1}</div>}
-      <HudPanel state={state} speedRef={speedRef} surfaceRef={surfaceRef} device={session.device} />
+      <HudPanel state={state} speedRef={speedRef} />
       {onTouch && !split && <TouchControls heldItem={state.heldItem} />}
       <CountdownOverlay racePhase={state.racePhase} />
       <ResultsPanel session={session} finishTime={state.finishTime} lobbyReturnAt={state.lobbyReturnAt}

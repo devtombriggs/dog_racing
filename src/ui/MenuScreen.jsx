@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fullscreen } from '../fullscreen.js';
 import { MuteButton } from './MuteButton.jsx';
 import { VolumeSliders } from './VolumeSliders.jsx';
-import { AccountBadge, AccountSheet } from './AccountSheet.jsx';
+import { AccountBadge, AccountSheet, LegalLinks } from './AccountSheet.jsx';
 import { useAccount } from './useAccount.js';
 import { account } from '../session/account.js';
 import { onTouch } from '../touch.js';
@@ -40,6 +40,7 @@ function Settings({ session, state, close }) {
           <span>Accessibility mode<small>Your dog runs by itself · ↑ jumps · ↓ uses the item · hold ← or → round a bend to drift</small></span>
         </label>
         <button className="zr-btn zr-btn--yellow" data-pad-first="" data-pad-back="" onClick={close}>Done</button>
+        <LegalLinks />
       </div>
     </div>
   );

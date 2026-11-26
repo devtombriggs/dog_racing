@@ -6,6 +6,7 @@
 //   POST /auth/signup                 { email, username, password }
 //   POST /auth/login                  { email, password }
 //   POST /auth/logout
+//   POST /auth/delete                 { confirm: username }: deletes the signed-in account and all its races
 //   GET  /auth/google                 off to Google's sign-in page...
 //   GET  /auth/google/callback        ...and back: signed in, or (the first time) on to choose a username
 //   POST /auth/finish                 { username }: makes the account for a first Google sign-in
@@ -200,6 +201,20 @@ export function createAccounts(db, env = {}, { fetchImpl = globalThis.fetch, now
         name: profile.given_name ?? profile.name, expires: now() + PENDING_MS });
       setCookie(res, req, PENDING_COOKIE, key, PENDING_MS / 1000);
       redirect(res, '/?signin=username');
+    },
+
+    // Deleting your own account (the Privacy page promises it): the player types their username to be sure
+    'POST /auth/delete': async (req, res) => {
+      const user = db.userForSession(sessionTokenOf(req));
+      if (!user) return send(res, 401, { error: 'Sign in first' });
+      const { confirm } = await readJson(req);
+      if (typeof confirm !== 'string' || confirm.trim().toLowerCase() !== user.username.toLowerCase()) {
+        return send(res, 400, { error: 'Type your username exactly to delete your account' });
+      }
+      db.deleteUser(user.id);
+      clearCookie(res, req, SESSION_COOKIE);
+      console.log(`[accounts] account ${user.id} deleted by its owner`);
+      send(res, 200, { user: null });
     },
 
     'POST /auth/finish': async (req, res) => {

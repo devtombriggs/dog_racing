@@ -386,7 +386,9 @@ export class LocalDog extends DogAvatar {
   }
 
   // Run into a wall (shared/handling.js WALL).  into: metres it had gone into it this step.  ground: the share of
-  // its pace the ground there leaves it (soft ground has already slowed it: the wall adds nothing)
+  // its pace the ground there leaves it (soft ground has already slowed it: the wall costs no more speed there).
+  // Turning the dog or knocking it back off the wall was tried and was unplayable (Tom, 2026-11-24): it only must
+  // not get stuck, which #slideAlongWall sees to.
   #hitWall(frame, into, ground) {
     if (frame.special || ground < WALL.softBelow || this.currentSpeed <= 0) return;
     const now = performance.now(), travelled = Math.abs(this.currentSpeed) * frame.delta;
@@ -397,10 +399,30 @@ export class LocalDog extends DogAvatar {
       this.currentSpeed = was - (was - speedAfterWall(was, into / travelled)) * cost;
     }
     this.currentSpeed = Math.min(this.currentSpeed, this.sprintSpeed * (1 - (1 - WALL.scrape) * cost));
-    // (nose against it and going nowhere: it is not sprinting on the spot.  It keeps enough pace to turn away)
-    const square = travelled > 1e-4 ? Math.min(1, into / travelled) : 0;
-    if (square > 0.5) this.currentSpeed = Math.max(WALL.pinned, this.currentSpeed - WALL.pinnedBraking * (square - 0.5) * frame.delta);
     this.wallAt = now;
+  }
+
+  // Never stuck on a wall (Tom, 2026-11-24): the step it lost going into the wall is carried on along the wall
+  // instead, the way the dog was already heading along it (dead square on: the way the race goes), so a dog with its
+  // nose to a fence still runs along it until it is steered off.  The dog is not turned.
+  // out: [x, z], the way back on to the road; into: metres it had gone into the wall.  Returns the new ground under it.
+  #slideAlongWall(frame, [ox, oz], into, coastalSurface) {
+    const { position } = this, { coastalTrack } = this.race.world;
+    let ax = oz, az = -ox;                                        // along the wall, one way...
+    const along = ax * Math.sin(this.travelYaw) + az * Math.cos(this.travelYaw);
+    let way = along;
+    if (Math.abs(along) < 0.15) {                                 // (dead square on: the way the race goes)
+      const line = racingLineAt(this.race.mapId, position.x, position.z, this.race.rescue.lineS);
+      if (line) way = ax * Math.sin(line.rotationY) + az * Math.cos(line.rotationY);
+    }
+    if (way < 0) { ax = -ax; az = -az; }                          // ...the way it goes
+    position.x += ax * into;
+    position.z += az * into;
+    const after = coastalTrack.query(position.x, position.z, -1, position.y);
+    if (!after?.blocked) return after;
+    position.x = after.clampX;                                    // (into a corner: as far as it goes)
+    position.z = after.clampZ;
+    return coastalTrack.query(position.x, position.z, -1, position.y) ?? coastalSurface;
   }
 
   // Start, hold or end a skid, from the drift button.  Returns the drift's steering ({ yawRate: how fast it is turning
@@ -873,10 +895,12 @@ export class LocalDog extends DogAvatar {
     if (coastalSurface?.blocked && !ghostsThrough(frame.special, coastalSurface)) {      // (the twins' Trip Wire goes through whatever stands on the road)
       // how far into the wall it had got this step, against how far it travelled: 1 is straight into it
       const into = Math.hypot(position.x - coastalSurface.clampX, position.z - coastalSurface.clampZ);
+      const out = into > 1e-6 ? [(coastalSurface.clampX - position.x) / into, (coastalSurface.clampZ - position.z) / into] : null;
       position.x = coastalSurface.clampX;
       position.z = coastalSurface.clampZ;
       coastalSurface = coastalTrack.query(position.x, position.z, -1, position.y);
       this.#hitWall(frame, into, coastalTrack.speedFactor(coastalSurface, this.coastalStats, this.isJumping));
+      if (out && !frame.special) coastalSurface = this.#slideAlongWall(frame, out, into, coastalSurface);
     }
     // a sinkhole (Dune Dash) drags a dog on the ground towards its middle
     if (coastalSurface?.pull && !this.isJumping) {

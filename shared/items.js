@@ -4,8 +4,8 @@
 //   ball  — tennis ball thrown straight ahead; knocks over the first dog it reaches
 //   toy   — rubber chew toy dropped behind you; stays on the road until a dog runs into it, then it is gone
 //   bone  — golden bone: a speed boost for the dog that uses it
-//   frisbee — red frisbee: chases down the dog directly ahead of you (whoever is there right now) and
-//             knocks just that dog over; the tennis ball is the straight shot, this is the homing one
+//   frisbee — red frisbee: chases down the dog that was directly ahead of you when you threw it, up the road
+//             (never back on itself: shared/frisbee.js), and knocks just that dog over; the tennis ball is the straight shot, this is the homing one
 //   firework — a rocket for the dog in first place, wherever it is: it flies up the road after the
 //             leader, knocks over any dog it passes close to on the way (it does not go looking for
 //             them), and bursts on the leader, catching anyone right beside them too
@@ -52,13 +52,10 @@ export const TOY = {
 
 export const FRISBEE = {
   speed: 34,            // m/s: faster than a sprinting dog, catchable only by a boosted one for a while
-  turnRate: 3.4,        // radians per second it can turn to follow its target round corners
-  closeTurn: 1.3,       // close to its target it turns as sharply as it needs to reach it, and this much over
+  homeWithin: 20,       // it follows the road (shared/frisbee.js) until its dog is this close ahead, then goes straight at it
   duration: 6.0,        // seconds before it gives up
   launchAhead: 2.5,
   height: 1.0,          // flies this far above the dog it is chasing
-  climbRate: 6,         // how quickly it matches its target's height (per second, as a share of the gap):
-                        // quick enough to follow a dog down Frostpeak's black run
   radius: 1.7,          // hits a dog whose centre comes this close (flat), at about chest height
   tickMs: 50,           // the server moves it (and tells everyone where it is) this often
 };
@@ -80,9 +77,9 @@ export const FIREWORK = {
 // Jimmy's and Casper's fireworks come with their specials and do not count.
 export const FIREWORK_LIMIT = {
   notBeforeMs: 20000,   // none in the first 20 s of a race
-  cooldownMs: 40000,    // none for 40 s after one is given
+  cooldownMs: 40000,    // none for 40 s after one is given or any firework is lit (Jimmy's and Casper's too)
   perRace: 2,           // and no more than two a race
-  // (and only one held or flying at a time)
+  // (and none while one is held or any firework is flying)
 };
 
 export const COLLAR = {
@@ -247,31 +244,6 @@ export function distanceToSegment(p, a, b) {
   const dx = b[0] - a[0], dz = b[2] - a[2], len2 = dx * dx + dz * dz;
   const t = len2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[2] - a[2]) * dz) / len2)) : 0;
   return Math.hypot(p[0] - (a[0] + dx * t), p[2] - (a[2] + dz * t));
-}
-
-/**
- * One step of a frisbee's chase: turn towards the target, fly on, and ease its height towards the
- * target's.  f = { position: [x, y, z], yaw }; target = [x, y, z] or null (no target: it flies
- * straight).  Returns the new { position, yaw }.
- *
- * It turns at turnRate, which at its speed is a circle 10 m in radius: a dog nearer than that and off
- * to one side (running alongside the thrower, say) is inside the circle, and the frisbee would swing
- * out wide behind and come round again.  So close in it turns as sharply as it has to to get there.
- */
-export function stepFrisbee(f, target, dt) {
-  let yaw = f.yaw, y = f.position[1];
-  if (target) {
-    const want = Math.atan2(target[0] - f.position[0], target[2] - f.position[2]);
-    const turn = Math.atan2(Math.sin(want - yaw), Math.cos(want - yaw));
-    const away = Math.hypot(target[0] - f.position[0], target[2] - f.position[2]);
-    // (a turn of radius r reaches a point `away` off at an angle `turn` if away >= 2 r sin(turn))
-    const sharpest = FRISBEE.speed * 2 * Math.sin(Math.min(Math.abs(turn), Math.PI / 2)) / Math.max(away, 0.5) * FRISBEE.closeTurn;
-    const rate = Math.max(FRISBEE.turnRate, sharpest) * dt;
-    yaw += Math.max(-rate, Math.min(rate, turn));
-    y += (target[1] + FRISBEE.height - y) * Math.min(1, FRISBEE.climbRate * dt);
-  }
-  const d = FRISBEE.speed * dt;
-  return { position: [f.position[0] + Math.sin(yaw) * d, y, f.position[2] + Math.cos(yaw) * d], yaw };
 }
 
 /** Does a frisbee at `position` hit a dog standing at `dog` ([x, y, z] of its feet)? */

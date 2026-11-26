@@ -133,6 +133,11 @@ export function createItems({ scene, renderer }) {
         f.from = f.object ? f.object.position.toArray() : f.to; f.to = [...position]; f.yaw = yaw; f.at = performance.now();
       }
     },
+    /** Where a red frisbee is now (as drawn), or null */
+    frisbeeAt(id) {
+      const f = frisbees.get(id);
+      return !f ? null : f.object ? f.object.position : { x: f.to[0], y: f.to[1], z: f.to[2] };
+    },
     removeFrisbee(id, position) {
       const f = frisbees.get(id);
       if (f?.object) root.remove(f.object);

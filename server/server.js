@@ -5,9 +5,10 @@ import { env } from 'node:process';
 import { lapsFor, MAPS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { SLALOM, slalomHits } from '../shared/slalom.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
-import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, stepFrisbee, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
+import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
-import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, quakeSeconds, kelpDistance, specialDurationMs, specialChance, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
+import { launchFrisbee, stepFrisbee, roadAhead } from '../shared/frisbee.js';
+import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, quakeSeconds, kelpDistance, specialDurationMs, specialChance, comebackGain, specialFor, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
 import { racingLineAt, GOLDEN_BONE_SPOTS, PICKUP_PATHS } from '../shared/pickupSpots.js';
 import { entersBurrow, woodlandWaterAt, woodlandDogY } from '../shared/wendoverData.js';
 import { BURROWS, BURROW_CHECKPOINTS, BURROWS_PER_LAP } from '../shared/burrows.js';
@@ -363,8 +364,10 @@ function grantItem(room, player) {
   if (player.item) return;
   const standings = raceStandings(room);
   const place = standings.find((entry) => entry.playerId === player.id)?.place ?? 1;
-  // the dog's own special: never for the leader, more likely the further back (shared/specials.js)
-  const special = specialFor(player.dog) && (ALWAYS_SPECIAL || Math.random() < specialChance(place, standings.length));
+  // the dog's own special: never for the leader, more likely the further back and the longer it has spent there
+  // (player.comeback: chargeComebacks; shared/specials.js)
+  const special = specialFor(player.dog) && (ALWAYS_SPECIAL || Math.random() < specialChance(place, standings.length, player.comeback ?? 0));
+  if (special) player.comeback = 0;
   player.item = FORCE_ITEM ?? (special ? SPECIAL_ITEM : rollItem(place, standings.length, Math.random, { noFirework: !fireworkAllowed(room) }));
   if (player.item === 'firework' && !FORCE_ITEM) room.fireworksGiven = (room.fireworksGiven ?? 0) + 1, room.fireworkGivenAt = Date.now();
   io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item });
@@ -377,7 +380,7 @@ function fireworkAllowed(room) {
   if ((room.fireworksGiven ?? 0) >= FIREWORK_LIMIT.perRace) return false;
   if (room.fireworkGivenAt && now - room.fireworkGivenAt < FIREWORK_LIMIT.cooldownMs) return false;
   for (const p of room.players.values()) if (p.item === 'firework') return false;
-  for (const f of room.fireworks?.values() ?? []) if (f.fromBox) return false;
+  if (room.fireworks?.size) return false;                       // (none while any firework is flying, Jimmy's and Casper's too)
   return true;
 }
 
@@ -699,10 +702,12 @@ function checkSpecialContacts(room, mover) {
 }
 
 // ---------------------------------
-// RED FRISBEE: chases the dog directly ahead of the thrower (whoever that is right now: if someone
-// overtakes the thrower, it goes after them instead), knocks that one dog over and is gone.  It
-// flies straight through anyone else.  The server flies it (it has to see every dog), moving it every
-// FRISBEE.tickMs and telling everyone where it is, and it gives up after FRISBEE.duration.
+// RED FRISBEE: chases the dog that was directly ahead of the thrower when it was thrown (that one dog,
+// even if someone overtakes the thrower meanwhile: Tom, 2026-11-24, it must "never come back on itself"),
+// up the road (shared/frisbee.js), knocks that dog over and is gone.  It flies straight through anyone
+// else.  Only if its dog finishes or leaves does it look for another, the nearest up the road ahead of it.
+// The server flies it (it has to see every dog), moving it every FRISBEE.tickMs and telling everyone
+// where it is, and it gives up after FRISBEE.duration.
 // ---------------------------------
 function frisbeeTarget(room, player) {
   const standings = raceStandings(room);
@@ -714,9 +719,10 @@ function frisbeeTarget(room, player) {
 function throwFrisbee(room, player) {
   const forward = forwardOf(player.rotation);
   const [x, y, z] = player.position;
+  const position = [x + forward[0] * FRISBEE.launchAhead, y + FRISBEE.height, z + forward[2] * FRISBEE.launchAhead];
   const frisbee = {
     id: `frisbee-${room.nextItemId++}`, owner: player.id, target: frisbeeTarget(room, player), firedAt: Date.now(),
-    position: [x + forward[0] * FRISBEE.launchAhead, y + FRISBEE.height, z + forward[2] * FRISBEE.launchAhead], yaw: player.rotation
+    ...launchFrisbee(fireworkRoute(room.mapId), position, player.rotation)
   };
   room.frisbees.set(frisbee.id, frisbee);
   io.to(room.code).emit('frisbeeThrown', { id: frisbee.id, owner: frisbee.owner, target: frisbee.target, position: frisbee.position, yaw: frisbee.yaw });
@@ -725,21 +731,20 @@ function throwFrisbee(room, player) {
 
 function tickFrisbees(room) {
   if (rooms.get(room.code) !== room || room.status !== 'racing') { stopFrisbees(room); return; }
-  const now = Date.now(), dt = FRISBEE.tickMs / 1000, moved = [];
+  const now = Date.now(), dt = FRISBEE.tickMs / 1000, moved = [], route = fireworkRoute(room.mapId);
   for (const f of room.frisbees.values()) {
     if ((now - f.firedAt) / 1000 > FRISBEE.duration) {
       room.frisbees.delete(f.id);
       io.to(room.code).emit('frisbeeGone', { id: f.id, position: f.position });
       continue;
     }
-    const thrower = room.players.get(f.owner);
-    const target = room.players.get(thrower ? frisbeeTarget(room, thrower) : f.target);
-    if (target && target.id !== f.target) {
-      f.target = target.id;
-      io.to(room.code).emit('frisbeeTarget', { id: f.id, target: f.target });
+    let target = room.players.get(f.target);
+    if ((!target || target.finished) && !f.lost) {
+      target = nextUpTheRoad(room, f, route);
+      if (target) io.to(room.code).emit('frisbeeTarget', { id: f.id, target: (f.target = target.id) });
     }
     const from = f.position;
-    Object.assign(f, stepFrisbee(f, target && !target.finished ? target.position : null, dt));
+    Object.assign(f, stepFrisbee(f, route, target && !target.finished && !f.lost ? target.position : null, dt));
     // a chew toy in its way stops it: both are gone (drop one behind you to block the frisbee chasing you)
     const toy = [...room.hazards.values()].find(hazard => thrownItemMeetsToy(from, f.position, hazard));
     if (toy) {
@@ -761,6 +766,17 @@ function tickFrisbees(room) {
   }
   if (moved.length) io.to(room.code).emit('frisbeesMoved', { frisbees: moved });
   if (room.frisbees.size === 0) stopFrisbees(room);
+}
+
+// A frisbee whose dog has finished or left: the nearest dog still racing up the road in front of it (not the thrower)
+function nextUpTheRoad(room, f, route) {
+  let best = null, bestGap = route.length / 2;
+  for (const dog of room.players.values()) {
+    if (dog.id === f.owner || dog.finished || !dog.position) continue;
+    const gap = roadAhead(route, f.s, dog.position);
+    if (gap < bestGap) { best = dog; bestGap = gap; }
+  }
+  return best;
 }
 
 function stopFrisbees(room) {
@@ -800,6 +816,8 @@ function launchFirework(room, player, { orBehind = false, look = null, fromBox =
   };
   firework.homing = fireworkTurnsBack(room, firework);
   room.fireworks.set(firework.id, firework);
+  // any firework (a Treat Box's, Jimmy's or Casper's ball) starts the wait before a Treat Box gives another (Tom, 2026-11-24)
+  room.fireworkGivenAt = Date.now();
   io.to(room.code).emit('fireworkLaunched', { id: firework.id, owner: firework.owner, target: firework.target, position: firework.position, yaw: firework.yaw, ...(look ? { look } : {}) });
   room.fireworkTimer ??= setInterval(() => tickFireworks(room), FIREWORK.tickMs);
 }
@@ -1405,7 +1423,8 @@ function beginCountdown(room) {
       broadcastStandings(room);
       startBots(room);
       clearInterval(room.stallTimer);
-      room.stallTimer = setInterval(() => watchForStalls(room), 1000);
+      for (const player of room.players.values()) player.comeback = 0;
+      room.stallTimer = setInterval(() => { chargeComebacks(room, 1); watchForStalls(room); }, 1000);
       room.stallTimer.unref?.();
       if (ALWAYS_SPECIAL || FORCE_ITEM) for (const player of room.players.values()) grantItem(room, player);
 
@@ -1544,6 +1563,18 @@ function holdSeat(room, player, token) {
   if (room.status === 'loading') beginCountdown(room);          // (nobody waits for a game that is not there)
   if (room.status === 'racing' || room.status === 'finished') broadcastStandings(room);
   updateLobby(room);
+}
+
+// Once a second through a race: every dog behind the leader builds up its comeback charge, a better chance of its
+// special from the next Treat Box (comebackGain in shared/specials.js).  Computer dogs too.
+function chargeComebacks(room, seconds) {
+  if (rooms.get(room.code) !== room || room.status !== 'racing') return;
+  const standings = raceStandings(room);
+  for (const entry of standings) {
+    const player = room.players.get(entry.playerId);
+    if (!player || player.finished || player.item === SPECIAL_ITEM) continue;      // (holding it already: nothing to build towards)
+    player.comeback = (player.comeback ?? 0) + comebackGain(entry.place, standings.length, seconds);
+  }
 }
 
 // Once a second through a race: any player who is connected but has gone quiet has their dog driven
@@ -2464,4 +2495,4 @@ io.on('connection', (socket) => {
 if (env.NO_LISTEN !== '1') httpServer.listen(PORT, () => console.log(`Multiplayer server running on port ${PORT}${env.DB_PATH ? ` (database: ${env.DB_PATH})` : ' (database in memory)'}${accounts.google ? ' · Google sign-in on' : ''}`));
 
 // (for the tests: the database and sign-in the server is using)
-export const forTests = { db, accounts };
+export const forTests = { db, accounts, rooms };

@@ -164,6 +164,8 @@ export function openDb(path = ':memory:', { now = () => Date.now() } = {}) {
     },
 
     user: id => publicUser(userRow.get(id)),
+    /** Deletes an account and everything kept about it: its sign-ins, sessions and race results (ON DELETE CASCADE) */
+    deleteUser: id => Number(q('DELETE FROM users WHERE id = ?').run(id).changes) > 0,
 
     // ---------- sessions ----------
     createSession(userId) {

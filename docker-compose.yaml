@@ -30,6 +30,12 @@ services:
     volumes:
       - zoomies-data:/data
     restart: unless-stopped
+    # the connection log (players' addresses): kept small and overwritten, as the Privacy page says
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   zoomies-data:

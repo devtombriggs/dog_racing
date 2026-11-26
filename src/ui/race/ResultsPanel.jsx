@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { MAPS } from '../../../shared/maps.js';
 import { DOGS } from '../../config/dogs.js';
 import { formatTime } from '../../utils/format.js';
-import { buttonStyle } from '../styles.js';
 
 // A clock to redraw the seconds left (before the race ends, the next race starts, or the room goes back to the lobby)
 function useClock(running) {
@@ -24,19 +23,19 @@ const secondsTo = (when, now) => Math.max(0, Math.ceil((when - now) / 1000));
 function GrandPrixTable({ grandPrix, socketId }) {
   const winner = grandPrix.table[0];
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div className="race-results__gp">
       {grandPrix.final
-        ? <h1 style={{ color: '#ffd257', margin: '4px 0 2px' }}>🏆 {winner.name === 'CPU' ? DOGS[winner.dog]?.displayName ?? 'CPU' : winner.name} wins!</h1>
-        : <h3 style={{ color: '#ffd257', margin: '4px 0' }}>🏆 {grandPrix.name} · after race {grandPrix.round} of {grandPrix.of}</h3>}
-      {grandPrix.final && <p style={{ color: '#b4c9b5', margin: '0 0 8px' }}>{grandPrix.name} · final scores</p>}
-      <table style={{ margin: '0 auto', borderCollapse: 'collapse', fontSize: 16 }} aria-label="Grand Prix points">
+        ? <h2 className="race-results__winner">🏆 {winner.name === 'CPU' ? DOGS[winner.dog]?.displayName ?? 'CPU' : winner.name} wins!</h2>
+        : <h3>🏆 {grandPrix.name} · after race {grandPrix.round} of {grandPrix.of}</h3>}
+      {grandPrix.final && <p>{grandPrix.name} · final scores</p>}
+      <table aria-label="Grand Prix points">
         <tbody>
           {grandPrix.table.map((row, index) => (
-            <tr key={row.playerId} style={{ color: row.playerId === socketId ? '#a5e69c' : 'white', fontWeight: index === 0 || row.playerId === socketId ? 'bold' : 'normal' }}>
-              <td style={{ padding: '2px 10px', textAlign: 'right' }}>{index + 1}.</td>
-              <td style={{ padding: '2px 10px', textAlign: 'left' }}>{row.name} — {DOGS[row.dog]?.displayName ?? 'Dog'}</td>
-              <td style={{ padding: '2px 10px', textAlign: 'right' }}>{row.points} pts</td>
-              <td style={{ padding: '2px 10px', textAlign: 'right', color: '#b4c9b5' }}>+{row.gained}</td>
+            <tr key={row.playerId} className={row.playerId === socketId ? 'race-results__you' : index === 0 ? 'race-results__top' : ''}>
+              <td>{index + 1}.</td>
+              <td>{row.name} — {DOGS[row.dog]?.displayName ?? 'Dog'}</td>
+              <td>{row.points} pts</td>
+              <td className="race-results__gained">+{row.gained}</td>
             </tr>
           ))}
         </tbody>
@@ -55,54 +54,25 @@ export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = 
   // still racing, and the first dog is home: the time left, top centre, out of the way of the road
   if (finishTime === null && !over) {
     if (raceEndsAt === null) return null;
-    return (
-      <div role="status" style={{ position: 'absolute', top: 18, left: '50%', transform: 'translateX(-50%)', zIndex: 30, background: 'rgba(10,25,15,0.85)', color: '#ffd257', borderRadius: 10, padding: '8px 18px', fontWeight: 'bold', fontFamily: 'Arial, sans-serif' }}>
-        First dog home · race ends in {secondsTo(raceEndsAt, clockNow)} s
-      </div>
-    );
+    return <div className="race-ending" role="status">First dog home · race ends in {secondsTo(raceEndsAt, clockNow)} s</div>;
   }
 
   const table = over && grandPrix;
   const midGrandPrix = table && !grandPrix.final;
   return (
-    <div
-      className="race-results"
-      style={{
-        position: 'absolute',
-        bottom: 35,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 30,
-        background:
-          'rgba(10,25,15,0.92)',
-        color: 'white',
-        borderRadius: 14,
-        padding: '20px 35px',
-        textAlign: 'center',
-        minWidth: 250
-      }}
-    >
+    <div className="zr-card race-results">
       {table && <GrandPrixTable grandPrix={grandPrix} socketId={socketId} />}
 
       {!(table && grandPrix.final) && (
         <>
-          <h2>
-            {finishTime !== null ? 'Race Complete!' : 'Race Over'}
-          </h2>
-
-          <p>
-            {finishTime !== null ? '3 laps completed' : 'Time ran out before you finished'}
-          </p>
+          <h2>{finishTime !== null ? 'Race Complete!' : 'Race Over'}</h2>
+          {finishTime === null && <p>Time ran out before you finished</p>}
         </>
       )}
 
-      {finishTime !== null && !(table && grandPrix.final) && (
-        <h1>
-          {formatTime(finishTime)}
-        </h1>
-      )}
+      {finishTime !== null && !(table && grandPrix.final) && <div className="race-results__time">{formatTime(finishTime)}</div>}
 
-      <p style={{ color: '#b4c9b5' }}>
+      <p>
         {!over
           ? raceEndsAt !== null
             ? `The race ends for everyone in ${secondsTo(raceEndsAt, clockNow)} s`
@@ -113,22 +83,10 @@ export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = 
       </p>
 
       {buttons && (
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-        {over && !midGrandPrix && (
-          <button
-            style={buttonStyle}
-            onClick={session.returnToLobby}
-          >
-            Back to Lobby
-          </button>
-        )}
-        <button
-          style={buttonStyle}
-          onClick={session.leaveGame}
-        >
-          Main Menu
-        </button>
-      </div>
+        <div className="race-results__buttons">
+          {over && !midGrandPrix && <button className="zr-btn zr-btn--yellow" onClick={session.returnToLobby}>Back to Lobby</button>}
+          <button className="zr-btn zr-btn--quiet" onClick={session.leaveGame}>Main Menu</button>
+        </div>
       )}
     </div>
   );

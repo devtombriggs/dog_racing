@@ -28,6 +28,22 @@ export function AccountBadge({ onOpen }) {
   );
 }
 
+// The Privacy and Terms pages (public/privacy, public/terms), opened in a new tab so a lobby is not lost
+export function LegalLinks() {
+  return (
+    <p className="zr-legal">
+      <a href="/privacy/" target="_blank" rel="noopener">Privacy</a> · <a href="/terms/" target="_blank" rel="noopener">Terms</a>
+    </p>
+  );
+}
+
+// (said wherever an account is made: by email, or choosing a username after Google)
+const AGREE = (
+  <p className="zr-agree">
+    By creating an account you confirm you are 13 or over and agree to the <a href="/terms/" target="_blank" rel="noopener">Terms</a> and <a href="/privacy/" target="_blank" rel="noopener">Privacy Policy</a>.
+  </p>
+);
+
 function Field({ label, ...input }) {
   return (
     <label className="zr-field">
@@ -74,13 +90,16 @@ function SignIn({ mode, setMode, close, notice }) {
         {creating && <Field label="Username" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} required minLength={3} maxLength={16} placeholder="3 to 16 letters or numbers" />}
         <Field label="Password" type="password" autoComplete={creating ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} required minLength={creating ? 8 : 1} maxLength={200} placeholder={creating ? 'At least 8 characters' : ''} />
         {error && <p className="zr-error" role="alert">{error}</p>}
+        {creating && AGREE}
         <button className="zr-btn zr-btn--yellow" type="submit" disabled={busy}>{busy ? 'One moment…' : creating ? 'Create Account' : 'Sign In'}</button>
       </form>
+      {google && creating && <p className="zr-agree">Signing up with Google means the same.</p>}
       <p className="zr-switch">
         {creating ? 'Already have an account? ' : 'New here? '}
         <button type="button" className="zr-link" onClick={() => setMode(creating ? 'signin' : 'signup')}>{creating ? 'Sign in' : 'Create an account'}</button>
       </p>
       <button type="button" className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="" onClick={close}>Not now</button>
+      <LegalLinks />
     </>
   );
 }
@@ -101,6 +120,7 @@ function ChooseUsername({ close }) {
       <form className="zr-form" onSubmit={submit}>
         <Field label="Username" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} required minLength={3} maxLength={16} data-pad-first="" />
         {error && <p className="zr-error" role="alert">{error}</p>}
+        {AGREE}
         <button className="zr-btn zr-btn--yellow" type="submit" disabled={busy}>{busy ? 'One moment…' : 'Start Racing'}</button>
       </form>
       <button type="button" className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="" onClick={async () => { await account.cancelSignUp().catch(() => {}); close(); }}>Cancel</button>
@@ -108,9 +128,35 @@ function ChooseUsername({ close }) {
   );
 }
 
+// Deleting the account: the player types their username, as nothing can bring it back
+function DeleteAccount({ back, close }) {
+  const { user } = useAccount();
+  const [typed, setTyped] = useState('');
+  const { busy, error, run } = useBusy();
+  const matches = typed.trim().toLowerCase() === user.username.toLowerCase();
+  const submit = async (event) => {
+    event.preventDefault();
+    if (await run(() => account.deleteAccount(typed))) close();
+  };
+  return (
+    <>
+      <h2>Delete Account</h2>
+      <p>This deletes <strong>{user.username}</strong>, your sign-in and every race you have run, from the leaderboards too. It cannot be undone.</p>
+      <form className="zr-form" onSubmit={submit}>
+        <Field label="Type your username to confirm" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" maxLength={16} data-pad-first="" />
+        {error && <p className="zr-error" role="alert">{error}</p>}
+        <button className="zr-btn zr-btn--danger" type="submit" disabled={busy || !matches}>{busy ? 'One moment…' : 'Delete For Good'}</button>
+      </form>
+      <button type="button" className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="" onClick={back}>Keep My Account</button>
+    </>
+  );
+}
+
 function SignedIn({ close }) {
   const { user, stats } = useAccount();
   const { busy, error, run } = useBusy();
+  const [deleting, setDeleting] = useState(false);
+  if (deleting) return <DeleteAccount back={() => setDeleting(false)} close={close} />;
   const favourite = stats?.favouriteDog && DOGS[stats.favouriteDog];
   return (
     <>
@@ -128,6 +174,9 @@ function SignedIn({ close }) {
       {error && <p className="zr-error" role="alert">{error}</p>}
       <button className="zr-btn zr-btn--yellow" data-pad-first="" data-pad-back="" onClick={close}>Done</button>
       <button className="zr-btn zr-btn--quiet" disabled={busy} onClick={async () => { if (await run(() => account.signOut())) close(); }}>Sign Out</button>
+      <p className="zr-legal">
+        <a href="/privacy/" target="_blank" rel="noopener">Privacy</a> · <a href="/terms/" target="_blank" rel="noopener">Terms</a> · <button type="button" className="zr-link zr-link--quiet" onClick={() => setDeleting(true)}>Delete account</button>
+      </p>
     </>
   );
 }
