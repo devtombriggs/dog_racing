@@ -18,7 +18,8 @@ async function request(method, path, body) {
 
 class Account {
   // user: { id, username, email } or null.  pending: a first Google sign-in waiting for a username.
-  state = { ready: false, user: null, stats: null, google: false, pending: null, offline: false, guestName: '' };
+  // wallet: { coins, owned: [item id], equipped: { dog: { slot: item id } } } (shared/shop.js), or null for a guest
+  state = { ready: false, user: null, stats: null, wallet: null, google: false, pending: null, offline: false, guestName: '' };
   #listeners = new Set();
   #ticket = null;
 
@@ -38,7 +39,7 @@ class Account {
     try {
       const me = await request('GET', `/api/me?t=${Date.now()}`);          // (never a cached answer)
       this.#ticket = me.ticket;
-      this.#set({ ready: true, offline: false, user: me.user, stats: me.stats, google: me.google, pending: me.pending });
+      this.#set({ ready: true, offline: false, user: me.user, stats: me.stats, wallet: me.wallet ?? null, google: me.google, pending: me.pending });
       return me.ticket;
     } catch {
       this.#set({ ready: true, offline: true });
@@ -75,6 +76,12 @@ class Account {
   checkUsername = name => request('GET', `/api/username?name=${encodeURIComponent(name)}`);
   leaderboards = () => request('GET', '/api/leaderboards');
   googleSignIn() { window.location.assign('/auth/google'); }
+
+  // The shop and the garage (shared/shop.js): the server answers with the wallet as it now is
+  async buy(itemId) { const { wallet } = await request('POST', '/api/shop/buy', { itemId }); this.#set({ wallet }); return wallet; }
+  async equip(dog, slot, itemId) { const { wallet } = await request('POST', '/api/shop/equip', { dog, slot, itemId }); this.#set({ wallet }); return wallet; }
+  /** A race has just paid out: the server says how many coins there are now */
+  setCoins(total) { if (this.state.wallet && Number.isFinite(total)) this.#set({ wallet: { ...this.state.wallet, coins: total } }); }
 
   #changeListeners = new Set();
   /** Called after every sign in and out (the race connection is told: see GameSession) */

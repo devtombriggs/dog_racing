@@ -18,6 +18,7 @@ import { formatTime } from '../utils/format.js';
 import { RaceScene } from './RaceScene.js';
 import { TrackWorld } from './TrackWorld.js';
 import { ChaseCamera, confineToWalls } from './ChaseCamera.js';
+import { wear } from '../cosmetics/cosmetics.js';
 import { phoneView, phoneZoom } from '../touch.js';
 import { PlayerInput } from './PlayerInput.js';
 import { RescueWatch } from './RescueWatch.js';
@@ -129,6 +130,8 @@ export class Race {
       castShadow: this.world.castsShadows,
       wanted: () => !this.#disposed,
       onLoaded: () => {
+        // (what it wears: the Garage.  The server says, for every dog, so everyone sees the same)
+        wear(this.local, room.players.find(player => player.id === myId)?.cosmetics);
         this.specials.register(myId, { ...this.local.specialsEntry, own: true });
         this.#dogLoaded = true;
         this.#notifyLoaded();
@@ -221,6 +224,7 @@ export class Race {
       castShadow: this.world.castsShadows,
       wanted: () => !this.#disposed && this.remotes.has(data.id),
       onLoaded: () => {
+        wear(remote, data.cosmetics);
         this.specials.register(data.id, remote.specialsEntry);
         this.#remoteModelsPending -= 1;
         this.#notifyLoaded();

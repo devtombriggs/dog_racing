@@ -261,6 +261,19 @@ A cat, a trolley or a hamster ball knocks a dog over like a tennis ball does (1.
 - **Map card:** `public/maps/pet_mall.jpg`.  **Tests:** `tests/pet-mall.test.js`.
 - **Music:** `public/audio/pet_mall.mp3`.
 
+## Coins, the Shop and the Garage
+
+Branch `coins` (2026-11-26). Signed-in players win coins from races and spend them in the **Shop**; what they buy is put on in the **Garage**. Guests can look but earn and own nothing.
+
+- **Everything is in `shared/shop.js`:** what a race pays (`PLACE_COINS`: 100, 70, 50, 35, 25, 15 for 1st to 6th; 5 for not finishing; 50% against Easy computer dogs and 75% against Medium when racing alone; a Grand Prix podium adds 150, 75 or 40) and the things for sale (`SHOP_ITEMS`).
+- **For sale now:** the Santa Hat (300, any dog, head), Pippa's Winter Coat (500, Pippa only, body) and Jimmy (5,000: a character; he cannot be picked until bought). A new thing is a line in `SHOP_ITEMS`, a picture in `src/ui/shopArt.jsx` and, if it is worn, how it is made in `src/cosmetics/cosmetics.js`.
+- **The server decides** (`server/db.js`: `wallet`, `addCoins`, `buy`, `equip`; `server/accounts.js`: `POST /api/shop/buy`, `POST /api/shop/equip`, and the wallet in `GET /api/me`). It pays out when a race is recorded (`payCoins` in `server/server.js`, event `coinsEarned`), refuses a locked dog, and tells the room what each dog wears (`player.cosmetics`).
+- **An older database** gets a `coins` column when it is opened, and every player is paid for the races already on record.
+- **What is worn** is made to fit by code, not by hand (`src/cosmetics/cosmetics.js`): a hat is measured from the part of the dog's skin that follows its head bone; a coat is cut from the dog's own back and sides and moved by the same bones. The Garage shows the real model (`src/ui/DogPreview.jsx`).
+- **For trying things out:** `UNLOCK_ALL=1` on the server lets anyone race as a dog from the Shop (the tests use it).
+- **Admins:** `ADMIN_EMAILS` in `.env` (email addresses, commas between) names the accounts that own everything in the Shop without buying it and show 999,999 coins. Nothing is written to the database for it, so taking an address off the list makes it an ordinary account again.
+- **Tests:** `tests/shop.test.js`, and two in `tests/server.test.js`.
+
 ## Bypass Dash
 
 `bypass_dash` (`shared/bypassData.js`, `src/tracks/bypass/BypassTrack.js`, tests in `tests/bypass.test.js`). It took Squelch Hollow's place in the Treat Cup on 2026-11-26. A 1.43 km lap of the roads round a town, three laps, no boost pads.

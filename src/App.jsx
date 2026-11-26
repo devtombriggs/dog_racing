@@ -5,6 +5,8 @@ import { useSession } from './session/useSession.js';
 import { startMenuPad } from './ui/menuPad.js';
 import { MenuScreen } from './ui/MenuScreen.jsx';
 import { LeaderboardsScreen } from './ui/LeaderboardsScreen.jsx';
+import { ShopScreen } from './ui/ShopScreen.jsx';
+import { GarageScreen } from './ui/GarageScreen.jsx';
 import { JoinScreen } from './ui/JoinScreen.jsx';
 import { LocalJoinScreen } from './ui/LocalJoinScreen.jsx';
 import { DogSelectScreen } from './ui/DogSelectScreen.jsx';
@@ -16,6 +18,8 @@ import { onTouch } from './touch.js';
 const SCREENS = {
   menu: MenuScreen,
   leaderboards: LeaderboardsScreen,
+  shop: ShopScreen,
+  garage: GarageScreen,
   join: JoinScreen,
   localJoin: LocalJoinScreen,
   selection: DogSelectScreen,

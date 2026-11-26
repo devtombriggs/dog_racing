@@ -47,7 +47,8 @@ function GrandPrixTable({ grandPrix, socketId }) {
 // Your time once you are home; how long the others have left; the Grand Prix points; and the way
 // back to the lobby once it is all over
 // buttons: false for the other players' shares of a split screen (player 1's has them)
-export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = null, grandPrix = null, socketId = null, buttons = true }) {
+// coins: what the race paid this player ({ race, grandPrix, total }: shared/shop.js), once the server has said
+export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = null, grandPrix = null, socketId = null, buttons = true, coins = null }) {
   const over = lobbyReturnAt !== null;
   const clockNow = useClock(over || raceEndsAt !== null);
 
@@ -71,6 +72,14 @@ export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = 
       )}
 
       {finishTime !== null && !(table && grandPrix.final) && <div className="race-results__time">{formatTime(finishTime)}</div>}
+
+      {coins && (coins.race > 0 || coins.grandPrix > 0) && (
+        <p className="race-results__coins" role="status">
+          <img src="/ui/coin.webp" alt="" draggable="false" />
+          <b>+{coins.race + coins.grandPrix}</b> coins{coins.grandPrix > 0 ? ` (${coins.grandPrix} for the Grand Prix)` : ''}
+          <small>You have {Number(coins.total).toLocaleString('en-GB')}</small>
+        </p>
+      )}
 
       <p>
         {!over

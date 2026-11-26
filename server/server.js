@@ -20,11 +20,13 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { openDb } from './db.js';
 import { createAccounts, sessionTokenOf } from './accounts.js';
+import { coinsForRace, coinsForGrandPrix, dogUnlocked, cosmeticsFor, LOCKED_DOGS, SHOP_ITEM } from '../shared/shop.js';
 
 const PORT = Number(env.PORT || 3001);
 
 // Player accounts and the leaderboards (server/db.js): in memory unless DB_PATH names a file
-const db = openDb(env.DB_PATH || ':memory:');
+// (ADMIN_EMAILS: the accounts with these email addresses, commas between, own everything in the Shop: server/db.js)
+const db = openDb(env.DB_PATH || ':memory:', { admins: (env.ADMIN_EMAILS ?? '').split(',') });
 const accounts = createAccounts(db, env);
 setInterval(() => db.clearOldSessions(), 3600e3).unref?.();
 // Signing in and the leaderboards are plain web requests (server/accounts.js); the races share the port
@@ -55,6 +57,8 @@ const LOBBY_BROWSER = 'lobby-browser';
 // For trying the specials out: ALWAYS_SPECIAL=1 makes every Treat Box give the special, even to the leader,
 // and hands every dog its special at GO and again three seconds after each use.
 const ALWAYS_SPECIAL = env.ALWAYS_SPECIAL === '1';
+// For trying things out (and for the tests): UNLOCK_ALL=1 lets anyone race as the dogs that are bought in the Shop (shared/shop.js)
+const unlockAll = () => env.UNLOCK_ALL === '1';
 // For trying one item out: FORCE_ITEM=firework (or collar, frisbee, ball, toy, bone) makes every Treat
 // Box give that item, even to the leader, and hands it to every dog at GO and three seconds after each use.
 const FORCE_ITEM = ITEM_IDS.includes(env.FORCE_ITEM) ? env.FORCE_ITEM : null;
@@ -1003,6 +1007,28 @@ function recordRace(room) {
   }));
   if (!results.length) return;
   try { db.recordRace(results); } catch (error) { console.error('Could not record the race:', error); }
+  // ...and the coins it pays each of them (shared/shop.js): by place, less against easier computer dogs
+  payCoins(room, results.map(result => ({ userId: result.userId, why: 'race', place: result.place,
+    // (racers: as many as it started with, if someone has left since: the winner of a race between two is still a winner)
+    coins: coinsForRace({ place: result.place, finished: result.finished, racers: Math.max(result.racers, result.humans), humans: result.humans, botLevel: room.bots?.level ?? 'hard' }) })));
+}
+
+// Pays signed-in players and tells the room: { playerId: { coins (just won), total (now held), why, place } }
+function payCoins(room, payments) {
+  const paid = {};
+  for (const payment of payments) {
+    const player = [...room.players.values()].find(each => each.userId === payment.userId && !each.bot);
+    if (!player) continue;
+    try { paid[player.id] = { coins: payment.coins, total: db.addCoins(payment.userId, payment.coins), why: payment.why, place: payment.place }; }
+    catch (error) { console.error('Could not pay the coins:', error); }
+  }
+  if (Object.keys(paid).length) io.to(room.code).emit('coinsEarned', paid);
+}
+
+// What a player owns, for the dogs they may race as and what their dog wears (guests own nothing)
+function walletOf(player) {
+  if (!player?.userId) return { coins: 0, owned: [], equipped: {} };
+  try { return db.wallet(player.userId) ?? { coins: 0, owned: [], equipped: {} }; } catch { return { coins: 0, owned: [], equipped: {} }; }
 }
 
 function recordGrandPrix(room, table) {
@@ -1011,6 +1037,8 @@ function recordGrandPrix(room, table) {
     .map(({ entry, place }) => ({ userId: room.players.get(entry.playerId).userId, grandPrix: room.grandPrix.id, place, points: entry.points, humans: room.raceHumans ?? 1 }));
   if (!results.length) return;
   try { db.recordGrandPrix(results); } catch (error) { console.error('Could not record the Grand Prix:', error); }
+  // (a place on the podium of a Grand Prix pays on top of its four races)
+  payCoins(room, results.filter(result => coinsForGrandPrix(result.place) > 0).map(result => ({ userId: result.userId, why: 'grandPrix', place: result.place, coins: coinsForGrandPrix(result.place) })));
 }
 
 // ---------------------------------
@@ -2196,6 +2224,12 @@ io.on('connection', (socket) => {
       });
     }
 
+    // A dog from the shop (shared/shop.js) has to be bought first
+    const wallet = walletOf(player);
+    if (!unlockAll() && !dogUnlocked(dog, wallet.owned)) {
+      return callback?.({ success: false, error: `${SHOP_ITEM[LOCKED_DOGS[dog]].name} is in the Shop: ${SHOP_ITEM[LOCKED_DOGS[dog]].price.toLocaleString('en-GB')} coins` });
+    }
+
     // One of each dog per race: the first to pick it has it.
     const takenBy = [...room.players.values()].find(
       (other) => other.id !== playerId && other.dog === dog
@@ -2210,6 +2244,7 @@ io.on('connection', (socket) => {
 
     // Picking a dog is readying up: once everyone has, the map vote begins.
     player.dog = dog;
+    player.cosmetics = cosmeticsFor(dog, wallet.owned, wallet.equipped);       // what it wears (the Garage): everyone's game draws it
     player.hover = null;
     player.ready = true;
     player.loaded = false;
@@ -2231,8 +2266,10 @@ io.on('connection', (socket) => {
     }
     for (const player of room.players.values()) {
       if (player.dog) continue;
-      const free = DOGS.filter((dog) => ![...room.players.values()].some((other) => other.dog === dog));
+      const wallet = walletOf(player);
+      const free = DOGS.filter((dog) => (unlockAll() || dogUnlocked(dog, wallet.owned)) && ![...room.players.values()].some((other) => other.dog === dog));
       player.dog = free[Math.floor(Math.random() * free.length)];
+      player.cosmetics = cosmeticsFor(player.dog, wallet.owned, wallet.equipped);
       player.hover = null;
       player.ready = true;
     }
@@ -2298,6 +2335,7 @@ io.on('connection', (socket) => {
     }
 
     player.dog = null;
+    player.cosmetics = {};
     player.ready = false;
 
     callback?.({ success: true });

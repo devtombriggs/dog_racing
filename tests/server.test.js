@@ -28,6 +28,7 @@ env.ROOM_BOTS = '0';
 // (the players in these tests stand still for minutes at a time: they are not to be taken for stalled)
 env.STALLED_AFTER_MS = '86400000';
 env.NO_LISTEN = '1';      // (no network port: the handlers are called directly)
+env.UNLOCK_ALL = '1';     // (every dog can be raced: the Shop's locks have a test of their own, which turns this off)
 const { forTests } = await import('../server/server.js');
 const { rooms } = forTests;
 
@@ -325,6 +326,9 @@ test('a signed-in player\'s race goes on the leaderboards with its best lap; a g
     assert.deepEqual(boards.fastestLaps[mapId].map(row => [row.username, row.dog, row.seconds]), [['Racer', 'jazz', lapSeconds]]);
     assert.deepEqual(boards.mostRaces.map(row => row.username), ['Racer']);
     assert.equal(db.playerStats(user.id).wins, 1);
+    // ...and it paid: a win, between two people, in full (shared/shop.js).  The guest is paid nothing
+    assert.deepEqual(latest(room.code, 'coinsEarned'), { [host.id]: { coins: 100, total: 100, why: 'race', place: 1 } });
+    assert.equal(db.wallet(user.id).coins, 100);
     // signed out again: back to a guest's name
     assert.equal(host.call('account', { ticket: null }).user, null);
     host.call('leaveGame');
@@ -2474,4 +2478,55 @@ test('comeback charge: a dog that sits at the back long enough is sure of its sp
   assert.ok(tomNow().comeback < 0.1, 'given: the charge starts again from nothing');
   assert.equal(rooms.get(room.code).players.get(berri.id).comeback ?? 0, 0, 'the leader builds nothing');
   for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+// Coins, the Shop and the Garage (Tom, 2026-11-26; shared/shop.js)
+test('the Shop: a dog that has to be bought cannot be raced until it is, and what a dog wears is told to everyone in the room', () => {
+  const { db } = forTests;
+  const user = db.createPasswordUser({ email: 'shopper@example.com', username: 'Shopper', password: 'longenough' });
+  const ticketFor = () => new Promise((resolve) => {
+    const res = { writeHead() {}, setHeader() {}, getHeader() {}, end: text => resolve(JSON.parse(text).ticket) };
+    forTests.accounts.handle({ method: 'GET', url: '/api/me', headers: { cookie: `zr_session=${db.createSession(user.id)}` }, socket: {} }, res);
+  });
+  const host = client(), guest = client();
+  return ticketFor().then((ticket) => {
+    env.UNLOCK_ALL = '0';
+    try {
+      host.call('account', { ticket });
+      const room = host.call('hostGame', { name: 'x' }).room;
+      guest.call('joinGame', { roomCode: room.code, name: 'Visitor' });
+      const playerOf = id => latest(room.code, 'lobbyUpdated').players.find(player => player.id === id);
+      // Jimmy is in the Shop: neither a guest nor a player who has not bought him may pick him
+      assert.match(guest.call('selectDog', { dog: 'jimmy' }).error, /Shop/);
+      assert.match(host.call('selectDog', { dog: 'jimmy' }).error, /5,000 coins/);
+      assert.equal(host.call('selectDog', { dog: 'gsp' }).success, true);
+      assert.deepEqual(playerOf(host.id).cosmetics, {}, 'nothing bought, nothing worn');
+      // some coins, a hat and Pippa's coat, put on Pippa in the Garage
+      db.addCoins(user.id, 6000);
+      db.buy(user.id, 'hat_santa'); db.buy(user.id, 'coat_pippa');
+      db.equip(user.id, 'gsp', 'head', 'hat_santa'); db.equip(user.id, 'gsp', 'body', 'coat_pippa'); db.equip(user.id, 'ralph', 'head', 'hat_santa');
+      host.call('changeDog');
+      assert.deepEqual(playerOf(host.id).cosmetics, {});
+      host.call('selectDog', { dog: 'gsp' });
+      assert.deepEqual(playerOf(host.id).cosmetics, { head: 'hat_santa', body: 'coat_pippa' }, 'everyone is told what she wears');
+      host.call('changeDog'); host.call('selectDog', { dog: 'ralph' });
+      assert.deepEqual(playerOf(host.id).cosmetics, { head: 'hat_santa' }, 'each dog wears its own things');
+      // ...and Jimmy, bought: now he can be picked (the guest still cannot)
+      host.call('changeDog');
+      db.buy(user.id, 'dog_jimmy');
+      assert.equal(db.wallet(user.id).coins, 6000 - 300 - 500 - 5000);
+      assert.equal(host.call('selectDog', { dog: 'jimmy' }).success, true);
+      host.call('changeDog');
+      assert.match(guest.call('selectDog', { dog: 'jimmy' }).error, /Shop/);
+      // the host sends everyone on without a dog: nobody is given one they have not bought
+      for (let k = 0; k < 20; k++) {
+        guest.call('changeDog'); host.call('changeDog');
+        if (latest(room.code, 'lobbyUpdated').status !== 'lobby') break;
+        host.call('skipToMapVote');
+        assert.notEqual(playerOf(guest.id).dog, 'jimmy');
+        break;
+      }
+    } finally { env.UNLOCK_ALL = '1'; }
+    host.call('leaveGame'); guest.call('leaveGame');
+  });
 });

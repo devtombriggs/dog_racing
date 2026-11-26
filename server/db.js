@@ -5,6 +5,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
+import { SHOP_ITEM, SHOP_ITEMS, SLOTS, PLACE_COINS, DID_NOT_FINISH, fitsDog } from '../shared/shop.js';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
@@ -55,6 +56,22 @@ const SCHEMA = `
     raced_at INTEGER NOT NULL,
     humans INTEGER                           -- (as race_results: the people in its last race)
   );
+  -- the shop (shared/shop.js): what each player has bought, and what each of their dogs is wearing.  (How many coins they
+  -- have is users.coins, added to an older database when it is opened)
+  CREATE TABLE IF NOT EXISTS purchases (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    bought_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, item_id)
+  );
+  CREATE TABLE IF NOT EXISTS equipped (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dog TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, dog, slot)
+  );
 `;
 
 export const SESSION_DAYS = 60;
@@ -88,8 +105,17 @@ function passwordMatches(password, stored) {
   return timingSafeEqual(expected, got);
 }
 
-/** Opens the database (path: a file, or ':memory:') and makes its tables if they are not there yet. */
-export function openDb(path = ':memory:', { now = () => Date.now() } = {}) {
+/** How many coins an admin is shown as having: they own everything anyway */
+export const ADMIN_COINS = 999999;
+
+/**
+ * Opens the database (path: a file, or ':memory:') and makes its tables if they are not there yet.
+ * admins: email addresses whose accounts own everything in the shop without buying it (ADMIN_EMAILS on the server: for the
+ * people who run the game to see and try everything).  Nothing is written to the database for it: take the address out and
+ * the account is an ordinary one again, with whatever it had really won and bought.
+ */
+export function openDb(path = ':memory:', { now = () => Date.now(), admins = [] } = {}) {
+  const adminKeys = new Set(admins.map(email => String(email).trim().toLowerCase()).filter(Boolean));
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON;');
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
@@ -97,6 +123,15 @@ export function openDb(path = ':memory:', { now = () => Date.now() } = {}) {
   // (a database from before the Single Player and Multiplayer boards: add the column; its races count as Single Player)
   for (const table of ['race_results', 'grand_prix_results']) {
     if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'humans')) db.exec(`ALTER TABLE ${table} ADD COLUMN humans INTEGER`);
+  }
+
+  // (a database from before coins: add the purse, and pay every player for the races they have already run, as those races
+  // would pay now: by the place they finished in, in full)
+  if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'coins')) {
+    db.exec('ALTER TABLE users ADD COLUMN coins INTEGER NOT NULL DEFAULT 0');
+    const pay = PLACE_COINS.map((coins, k) => `WHEN ${k + 1} THEN ${coins}`).join(' ');
+    db.exec(`UPDATE users SET coins = COALESCE((SELECT SUM(CASE WHEN r.finished = 0 THEN ${DID_NOT_FINISH} ELSE CASE MIN(r.place, ${PLACE_COINS.length}) ${pay} ELSE 0 END END)
+      FROM race_results r WHERE r.user_id = users.id), 0)`);
   }
 
   const q = sql => db.prepare(sql);
@@ -199,6 +234,57 @@ export function openDb(path = ':memory:', { now = () => Date.now() } = {}) {
     recordGrandPrix(results) {
       const insert = q('INSERT INTO grand_prix_results (user_id, grand_prix, place, points, raced_at, humans) VALUES (?, ?, ?, ?, ?, ?)');
       transaction(() => { for (const r of results) insert.run(r.userId, r.grandPrix, r.place, r.points, now(), r.humans ?? 1); });
+    },
+
+    // ---------- coins, the shop and the garage (shared/shop.js) ----------
+    /** What a player has: { coins, owned: [item id], equipped: { dog: { slot: item id } } } */
+    /** Is this account one of the admins' (see openDb)? */
+    isAdmin(userId) {
+      if (!adminKeys.size) return false;
+      const key = q('SELECT email_key FROM users WHERE id = ?').get(userId)?.email_key;
+      return Boolean(key) && adminKeys.has(key);
+    },
+    wallet(userId) {
+      const row = q('SELECT coins FROM users WHERE id = ?').get(userId);
+      if (!row) return null;
+      const admin = this.isAdmin(userId);
+      const owned = admin ? SHOP_ITEMS.map(item => item.id)
+        : q('SELECT item_id FROM purchases WHERE user_id = ? ORDER BY bought_at, item_id').all(userId).map(each => each.item_id).filter(id => SHOP_ITEM[id]);
+      const equipped = {};
+      for (const each of q('SELECT dog, slot, item_id FROM equipped WHERE user_id = ?').all(userId)) {
+        if (owned.includes(each.item_id) && SHOP_ITEM[each.item_id]) (equipped[each.dog] ??= {})[each.slot] = each.item_id;
+      }
+      return admin ? { coins: ADMIN_COINS, owned, equipped, admin: true } : { coins: Number(row.coins), owned, equipped };
+    },
+    /** Pays a player (a race's winnings).  Returns how many coins they have now. */
+    addCoins(userId, coins) {
+      const n = Math.max(0, Math.round(Number(coins) || 0));
+      if (n) q('UPDATE users SET coins = coins + ? WHERE id = ?').run(n, userId);
+      return Number(q('SELECT coins FROM users WHERE id = ?').get(userId)?.coins ?? 0);
+    },
+    /** Buys something from the shop.  Throws AccountError with words for the player.  Returns their wallet. */
+    buy(userId, itemId) {
+      const item = SHOP_ITEM[itemId];
+      if (!item) throw new AccountError('That is not in the shop');
+      if (this.isAdmin(userId)) throw new AccountError('You already have that');
+      return transaction(() => {
+        if (q('SELECT 1 FROM purchases WHERE user_id = ? AND item_id = ?').get(userId, item.id)) throw new AccountError('You already have that');
+        // (taken only if there is enough: two buys at the same moment cannot spend the same coins)
+        const paid = q('UPDATE users SET coins = coins - ? WHERE id = ? AND coins >= ?').run(item.price, userId, item.price);
+        if (!Number(paid.changes)) throw new AccountError('You do not have enough coins for that yet');
+        q('INSERT INTO purchases (user_id, item_id, price, bought_at) VALUES (?, ?, ?, ?)').run(userId, item.id, item.price, now());
+        return this.wallet(userId);
+      });
+    },
+    /** Puts something a player owns on one of their dogs (itemId null: takes off whatever is in that slot).  Returns their wallet. */
+    equip(userId, dog, slot, itemId) {
+      if (typeof dog !== 'string' || !SLOTS[slot]) throw new AccountError('That cannot be worn there');
+      if (itemId == null) { q('DELETE FROM equipped WHERE user_id = ? AND dog = ? AND slot = ?').run(userId, dog, slot); return this.wallet(userId); }
+      const item = SHOP_ITEM[itemId];
+      if (!item || item.slot !== slot || !fitsDog(item, dog)) throw new AccountError('That does not fit this dog');
+      if (!this.isAdmin(userId) && !q('SELECT 1 FROM purchases WHERE user_id = ? AND item_id = ?').get(userId, item.id)) throw new AccountError('Buy it in the shop first');
+      q('INSERT INTO equipped (user_id, dog, slot, item_id) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, dog, slot) DO UPDATE SET item_id = excluded.item_id').run(userId, dog, slot, item.id);
+      return this.wallet(userId);
     },
 
     // ---------- leaderboards ----------

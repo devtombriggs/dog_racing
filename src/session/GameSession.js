@@ -21,7 +21,9 @@ const NO_RACE = {
   // the first dog is home: when the race ends for everyone else (performance clock)
   raceEndsAt: null,
   // a Grand Prix race is over: the points table the server sent ({ round, of, final, table, nextMapId })
-  grandPrixResults: null
+  grandPrixResults: null,
+  // what this race paid (a signed-in player): { race, grandPrix, total } coins (shared/shop.js), or null
+  coinsEarned: null
 };
 
 // The secret this browser tab proves itself with after a refresh (kept for the tab's life only, so two
@@ -64,7 +66,8 @@ export class GameSession {
   singlePlayer = false;
 
   state = {
-    screen: 'menu',          // 'menu' | 'leaderboards' | 'join' | 'localJoin' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
+    garageDog: null,         // the dog the Garage is showing
+    screen: 'menu',          // 'shop' | 'garage' | 'menu' | 'leaderboards' | 'join' | 'localJoin' | 'selection' | 'mapSelect' | 'mapVote' | 'race'
     raceNumber: 0,           // counts the races this visit: each one gets a fresh race screen
     notice: '',              // a passing word about someone else ("Berri lost connection"), shown for a few seconds
     room: null,
@@ -392,6 +395,15 @@ export class GameSession {
         this.#say(away ? `${name} lost connection: their dog is running itself` : `${name} is back`);
       },
 
+      // the race has paid out (signed-in players): this player's share, shown on the results and added to the purse
+      coinsEarned: (paid) => {
+        const mine = paid?.[this.state.socketId ?? this.socket?.id];
+        if (!mine) return;
+        const now = this.state.coinsEarned ?? { race: 0, grandPrix: 0, total: 0 };
+        this.set({ coinsEarned: { ...now, [mine.why === 'grandPrix' ? 'grandPrix' : 'race']: mine.coins, total: mine.total } });
+        if (!this.guest) account.setCoins(mine.total);
+      },
+
       raceEnded: (data) => {
         this.raceFinished = true;
         this.raceGo = false;
@@ -479,6 +491,11 @@ export class GameSession {
   backToMenu = () => {
     this.set({ error: '', screen: 'menu' });
   };
+
+  // The Shop (spend coins) and the Garage (put on what has been bought): shared/shop.js, ui/ShopScreen.jsx, ui/GarageScreen.jsx
+  openShop = () => { this.set({ error: '', screen: 'shop' }); };
+  // (dog: the dog to open the garage on, or nothing for the last one looked at)
+  openGarage = (dog = null) => { this.set({ error: '', screen: 'garage', garageDog: typeof dog === 'string' ? dog : this.state.garageDog ?? null }); };
 
   // ---------------------------------
   // HOST GAME

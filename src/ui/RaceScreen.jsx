@@ -81,7 +81,7 @@ export function RaceScreen({ session, state, split = null }) {
       {onTouch && !split && <TouchControls heldItem={state.heldItem} />}
       <CountdownOverlay racePhase={state.racePhase} />
       <ResultsPanel session={session} finishTime={state.finishTime} lobbyReturnAt={state.lobbyReturnAt}
-        raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} buttons={!split || split.index === 0} />
+        raceEndsAt={state.raceEndsAt} grandPrix={state.grandPrixResults} socketId={state.socketId} buttons={!split || split.index === 0} coins={state.coinsEarned} />
     </div>
   );
 }

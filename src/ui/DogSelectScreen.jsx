@@ -7,6 +7,9 @@ import { BotSettings } from './BotSettings.jsx';
 import { Paw } from './Paw.jsx';
 import { arrowKeys, tileHandlers } from './tileGrid.js';
 import { restrictMenuPad } from './menuPad.js';
+import { useAccount } from './useAccount.js';
+import { SHOP_ITEM, LOCKED_DOGS, dogUnlocked } from '../../shared/shop.js';
+import { Coins } from './shopArt.jsx';
 
 // (in alphabetical order of their names)
 const DOG_IDS = Object.keys(DOGS).sort((a, b) => DOGS[a].displayName.localeCompare(DOGS[b].displayName));
@@ -50,6 +53,9 @@ export function DogSelectScreen({ session, state }) {
   const turnPad = !turnDevice ? null : turnDevice.type === 'pad' ? turnDevice.index : -1;
   useEffect(() => { restrictMenuPad(turnPad); return () => restrictMenuPad(null); }, [turnPad]);
 
+  // dogs from the Shop (shared/shop.js) that this player has not bought yet: shown, but not to be picked
+  const { wallet } = useAccount();
+  const locked = id => !dogUnlocked(id, wallet?.owned ?? []);
   const myDog = room?.players.find(player => player.id === socketId)?.dog ?? null;
   const multiplayer = !room?.singlePlayer;
   const waitingFor = room?.players.filter(player => !player.dog).length ?? 0;
@@ -57,10 +63,10 @@ export function DogSelectScreen({ session, state }) {
 
   // the dog shown large: the last one pointed at, to begin with this player's own (or the first free one)
   const [pointedAt, setPointedAt] = useState(null);
-  const shown = pointedAt ?? myDog ?? DOG_IDS.find(id => !takenBy(id)) ?? DOG_IDS[0];
+  const shown = pointedAt ?? myDog ?? DOG_IDS.find(id => !takenBy(id) && !locked(id)) ?? DOG_IDS[0];
   const show = (id) => { setPointedAt(id); session.hoverDog(id); };
   const dog = DOGS[shown], taken = takenBy(shown);
-  const free = DOG_IDS.filter(id => !takenBy(id) && id !== myDog);
+  const free = DOG_IDS.filter(id => !takenBy(id) && id !== myDog && !locked(id));
 
   return (
     <main className="zr-screen">
@@ -90,9 +96,13 @@ export function DogSelectScreen({ session, state }) {
           </div>
           {dog.perk && <p className="zr-special zr-special--perk"><strong>▼ Downhill</strong>{dog.perk}</p>}
           {SPECIALS[shown] && <p className="zr-special"><strong>★ {SPECIALS[shown].name}</strong>{SPECIAL_WORDS[shown]}</p>}
-          <button className="zr-btn zr-btn--yellow" disabled={!connected || Boolean(taken) || (multiplayer && !local && myDog === shown)} onClick={() => pick(shown)}>
-            {taken ? `Taken · ${taken.name}` : myDog === shown ? 'Your pick ✓' : `Choose ${dog.displayName}`}
-          </button>
+          {locked(shown) ? (
+            <p className="zr-detail__locked"><b>In the Shop</b><Coins amount={SHOP_ITEM[LOCKED_DOGS[shown]].price} /></p>
+          ) : (
+            <button className="zr-btn zr-btn--yellow" disabled={!connected || Boolean(taken) || (multiplayer && !local && myDog === shown)} onClick={() => pick(shown)}>
+              {taken ? `Taken · ${taken.name}` : myDog === shown ? 'Your pick ✓' : `Choose ${dog.displayName}`}
+            </button>
+          )}
         </aside>
 
         <div className="zr-gridwrap" style={{ '--cols': COLUMNS, '--rows': ROWS }}>
@@ -107,14 +117,15 @@ export function DogSelectScreen({ session, state }) {
               return (
                 <button
                   key={id}
-                  className={`zr-tile${shown === id ? ' zr-tile--shown' : ''}${myDog === id ? ' zr-tile--mine' : ''}${other ? ' zr-tile--taken' : ''}`}
-                  {...tileHandlers(id, shown, show, chosen => { if (!takenBy(chosen)) pick(chosen); })}
+                  className={`zr-tile${shown === id ? ' zr-tile--shown' : ''}${myDog === id ? ' zr-tile--mine' : ''}${other ? ' zr-tile--taken' : ''}${locked(id) ? ' zr-tile--locked' : ''}`}
+                  {...tileHandlers(id, shown, show, chosen => { if (!takenBy(chosen) && !locked(chosen)) pick(chosen); })}
                   onBlur={() => session.hoverDog(null)}
-                  aria-label={`${DOGS[id].name}. ${other ? `Taken by ${other.name}. ` : ''}${STAT_LABELS.map(([key, label]) => `${label} ${shownStat(id, key)} out of 10`).join(', ')}`}
+                  aria-label={`${DOGS[id].name}. ${locked(id) ? 'Locked: buy in the Shop. ' : ''}${other ? `Taken by ${other.name}. ` : ''}${STAT_LABELS.map(([key, label]) => `${label} ${shownStat(id, key)} out of 10`).join(', ')}`}
                   aria-disabled={Boolean(other)}
                   disabled={!connected}
                 >
                   <img src={portrait(DOGS[id])} alt="" draggable="false" />
+                  {locked(id) && <span className="zr-tile__lock" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 10V8a6 6 0 0112 0v2h1.500v11h-15V10zm3 0h6V8a3 3 0 00-6 0z" /></svg></span>}
                   {multiplayer && looking.length > 0 && (
                     <span className="zr-tile__tags" aria-hidden="true">
                       {looking.map(player => <span key={player.id} style={{ background: playerColor(player) }}>{player.id === socketId ? 'You' : player.name}</span>)}

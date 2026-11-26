@@ -27,6 +27,8 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       # the address players reach the game at, e.g. https://zoomies.example.com (left empty: worked out per request)
       PUBLIC_URL: ${PUBLIC_URL:-}
+      # the people who run the game: accounts with these email addresses own everything in the Shop (commas between)
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     volumes:
       - zoomies-data:/data
     restart: unless-stopped

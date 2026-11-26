@@ -131,6 +131,7 @@ export function createAccounts(db, env = {}, { fetchImpl = globalThis.fetch, now
       send(res, 200, {
         user, google: Boolean(google),
         stats: user ? db.playerStats(user.id) : null,
+        wallet: user ? db.wallet(user.id) : null,          // coins, what is owned and what each dog wears (shared/shop.js)
         ticket: user ? ticketFor(user) : null,
         pending: waiting ? { provider: waiting.provider, email: waiting.email, suggested: suggestion(waiting.name) } : null,
       });
@@ -241,6 +242,21 @@ export function createAccounts(db, env = {}, { fetchImpl = globalThis.fetch, now
     },
 
     'GET /api/leaderboards': (req, res) => send(res, 200, db.leaderboards()),
+
+    // The shop and the garage (shared/shop.js).  Each answers with the player's wallet as it now is.
+    'POST /api/shop/buy': async (req, res) => {
+      const user = db.userForSession(sessionTokenOf(req));
+      if (!user) return send(res, 401, { error: 'Sign in to use the shop' });
+      const { itemId } = await readJson(req);
+      send(res, 200, { wallet: db.buy(user.id, itemId) });
+    },
+    'POST /api/shop/equip': async (req, res) => {
+      const user = db.userForSession(sessionTokenOf(req));
+      if (!user) return send(res, 401, { error: 'Sign in to use the garage' });
+      const { dog, slot, itemId } = await readJson(req);
+      if (typeof dog !== 'string' || !/^[a-z_]{2,24}$/.test(dog)) return send(res, 400, { error: 'That is not one of the dogs' });
+      send(res, 200, { wallet: db.equip(user.id, dog, slot, itemId ?? null) });
+    },
   };
 
   return {

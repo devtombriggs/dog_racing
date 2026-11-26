@@ -321,3 +321,8 @@ html.touch .pause-menu__panel {
 html.touch .pause-menu__panel h2, html.touch .pause-volume { grid-column: 1 / -1; }
 html.touch .pause-menu__panel p, html.touch .pause-menu__panel small { display: none; }
 html.touch .pause-menu__panel button { margin: 4px !important; padding: 12px 10px !important; }
+
+/* what the race paid (shared/shop.js), on the results */
+.race-results__coins { display: flex; align-items: center; justify-content: center; gap: 0.4em; margin: 0 0 10px !important; color: var(--zr-yellow) !important; font: 400 22px/1 var(--zr-display); letter-spacing: 0.02em; }
+.race-results__coins img { width: 1.4em; height: 1.4em; }
+.race-results__coins small { margin-left: 0.6em; color: #c4d3f5; font: 700 13px/1 var(--zr-text); letter-spacing: 0; }

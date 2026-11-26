@@ -6,6 +6,7 @@ import { AccountBadge, AccountSheet, LegalLinks } from './AccountSheet.jsx';
 import { useAccount } from './useAccount.js';
 import { account } from '../session/account.js';
 import { onTouch } from '../touch.js';
+import { Coins } from './shopArt.jsx';
 
 // The first screen: how you want to play, and who you are (the badge at the top right).
 //   Single Player   (Tom, 2026-11-19: no Grand Prix or Maps buttons here for now)
@@ -19,6 +20,9 @@ const ICONS = {
   pad: <svg viewBox="0 0 48 48" aria-hidden="true"><path fillRule="evenodd" d="M14 12h20c6 0 9 5 10 12l1.500 9c.5 4-4 6-7 3l-5-6H14.500l-5 6c-3 3-7.500 1-7-3L4 24c1-7 4-12 10-12zm0 6v3h-3v3h3v3h3v-3h3v-3h-3v-3zm17 1a2 2 0 100 4 2 2 0 000-4zm-4 4a2 2 0 100 4 2 2 0 000-4zm8 0a2 2 0 100 4 2 2 0 000-4z" /></svg>,
   trophy: <svg viewBox="0 0 48 48" aria-hidden="true"><g stroke="#14224f" strokeWidth="2.500" strokeLinejoin="round"><path fill="#ffc21a" d="M7 8h7v4H11c0 5 3 8 5 9l-1 3c-5-2-8-7-8-12zM41 8h-7v4h3c0 5-3 8-5 9l1 3c5-2 8-7 8-12z" /><path fill="#ffd22e" d="M12 5h24v10c0 8-5 14-12 14S12 23 12 15z" /><path fill="#ffc21a" d="M21 29h6v6h-6z" /><path fill="#ffd22e" d="M14 35h20v8H14z" /></g><g fill="#b86a12"><ellipse cx="24" cy="19" rx="4" ry="3.300" /><circle cx="18.800" cy="14" r="1.800" /><circle cx="22.300" cy="11.600" r="1.800" /><circle cx="25.700" cy="11.600" r="1.800" /><circle cx="29.200" cy="14" r="1.800" /></g></svg>,
   person: <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="15" r="9" /><path d="M6 44c0-11 8-17 18-17s18 6 18 17z" /></svg>,
+  // (a shopping bag, and a kennel)
+  shop: <svg viewBox="0 0 48 48" aria-hidden="true"><g stroke="#14224f" strokeWidth="2.500" strokeLinejoin="round"><path fill="#fff" d="M8 16h32l-3 26H11z" /><path fill="none" strokeLinecap="round" d="M17 20v-6a7 7 0 0114 0v6" /></g></svg>,
+  garage: <svg viewBox="0 0 48 48" aria-hidden="true"><g stroke="#14224f" strokeWidth="2.500" strokeLinejoin="round"><path fill="#fff" d="M5 22L24 6l19 16v20H5z" /><path fill="#14224f" d="M18 42V30a6 6 0 0112 0v12z" /></g></svg>,
 };
 
 function Settings({ session, state, close }) {
@@ -78,7 +82,7 @@ function Controls({ close }) {
 
 export function MenuScreen({ session, state }) {
   const { connected, error } = state;
-  const { user, guestName, ready, pending } = useAccount();
+  const { user, guestName, ready, pending, wallet } = useAccount();
   const [multiplayer, setMultiplayer] = useState(false);
   const [sheet, setSheet] = useState(null);       // 'settings' | 'controls' | 'account' | null
   const [accountMode, setAccountMode] = useState({ mode: 'signin', notice: '' });
@@ -115,6 +119,11 @@ export function MenuScreen({ session, state }) {
             <button className="zr-btn zr-btn--yellow" data-pad-first="" disabled={!connected} onClick={() => session.startSinglePlayer()}>{ICONS.flags}Single Player</button>
             <button className="zr-btn" disabled={!connected} onClick={() => setMultiplayer(true)}>{ICONS.people}Multiplayer</button>
             <button className="zr-btn zr-btn--purple" onClick={session.openLeaderboards}>{ICONS.trophy}Leaderboards</button>
+            {/* the coins races pay: spent in the Shop, and what is bought is put on in the Garage */}
+            <div className="zr-home__pair">
+              <button className="zr-btn zr-btn--green" onClick={session.openShop}>{ICONS.shop}Shop</button>
+              <button className="zr-btn zr-btn--green" onClick={() => session.openGarage()}>{ICONS.garage}Garage</button>
+            </div>
           </div>
         ) : (
           <>
@@ -147,9 +156,13 @@ export function MenuScreen({ session, state }) {
           <MuteButton />
         </div>
       </div>
-      <p className={`zr-home__server${connected ? '' : ' zr-home__server--off'}`} role="status">
-        <i aria-hidden="true" />Server: <b>{connected ? 'Connected' : 'Disconnected'}</b>
-      </p>
+      {/* bottom right: the player's coins (Tom, 2026-11-26: "instead of server: connected").  The server is only mentioned when it
+          is not there, which is when the buttons stop working */}
+      {!connected ? (
+        <p className="zr-home__server zr-home__server--off" role="status"><i aria-hidden="true" />Server: <b>Disconnected</b></p>
+      ) : user && wallet ? (
+        <button className="zr-purse" onClick={session.openShop} aria-label={`${wallet.coins} coins: open the Shop`}><Coins amount={wallet.coins} /></button>
+      ) : null}
       {sheet === 'settings' && <Settings session={session} state={state} close={() => setSheet(null)} />}
       {sheet === 'controls' && <Controls close={() => setSheet(null)} />}
       {(sheet === 'account' || googleSheet) && (

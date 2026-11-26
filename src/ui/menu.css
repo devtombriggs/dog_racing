@@ -714,3 +714,111 @@ html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scal
   background: linear-gradient(#ff8a7a 0%, #f2453a 48%, #d92e24 52%, #b81d14 100%);
   box-shadow: 0 0.22em 0 #7d120c, 0 0.4em 0.7em #0b1c4a66, inset 0 0.12em 0 #ffffff70;
 }
+
+/* ---------- Coins, the Shop and the Garage (shared/shop.js; ShopScreen.jsx, GarageScreen.jsx) ---------- */
+.zr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.zr-coin { display: inline-block; width: 1.25em; height: 1.25em; vertical-align: -0.28em; flex: none; filter: drop-shadow(0 0.06em 0.05em #0006); }
+.zr-coins { display: inline-flex; align-items: center; gap: 0.35em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.zr-coins b { font: 400 1em/1 var(--zr-display); letter-spacing: 0.02em; }
+.zr-coins--purse {
+  padding: 0.35em 0.9em 0.35em 0.5em; border: 3px solid #fff; border-radius: 999px;
+  background: linear-gradient(#1d2d5a, #0f1a3a); color: var(--zr-yellow); font-size: clamp(16px, 2.8vh, 24px);
+}
+
+/* the home screen: Shop and Garage side by side under the three big buttons, and the purse bottom right (where the server's
+   state used to be: that is only shown now when the server is not there) */
+.zr-btn--green { background: linear-gradient(#8ff0a4 0%, var(--zr-green) 48%, #25b84f 52%, #169a3e 100%); }
+.zr-home__menu:has(.zr-home__pair) { gap: 1.2cqh; height: 41cqh; }
+.zr-home__menu:has(.zr-home__pair) > .zr-btn { height: 9.9cqh; }
+.zr-home__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1cqw; }
+.zr-home__menu .zr-home__pair .zr-btn { height: 7.6cqh; font-size: 2.3cqw; }
+.zr-purse {
+  position: absolute; z-index: 2; bottom: clamp(6px, 1.6vh, 18px); right: clamp(8px, 1.6vw, 26px);
+  display: flex; align-items: center; padding: 0.4em 1em 0.4em 0.5em; border: 3px solid #fff; border-radius: 999px;
+  background: linear-gradient(#1d2d5a, #0f1a3a); box-shadow: 0 0.15em 0.5em #0007;
+  color: var(--zr-yellow); font-size: clamp(16px, 3.2vh, 30px); cursor: pointer; transition: transform 120ms ease, filter 120ms ease;
+}
+.zr-purse:hover { transform: scale(1.04); filter: brightness(1.1); }
+.zr-purse:focus-visible { outline: 0.15em solid var(--zr-yellow); outline-offset: 0.1em; }
+
+/* the Shop */
+.zr-shop, .zr-garage { width: min(980px, 96vw); max-height: 96dvh; display: flex; flex-direction: column; padding: 16px 22px 18px; text-align: left; }
+.zr-shop__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
+.zr-shop__head h1 { margin: 0; }
+.zr-shop__you { margin: 0 0 10px !important; }
+.zr-shop__you b { color: var(--zr-yellow); }
+.zr-shop__problem { margin: 0 0 10px !important; padding: 8px 12px; border-radius: 12px; background: #7a1f1fee; color: #fff !important; font-weight: 700; }
+.zr-shop__bought { margin: 0 0 10px !important; padding: 8px 12px; border: 2px solid var(--zr-green); border-radius: 12px; background: #46d36b2b; color: #fff !important; }
+.zr-shop__body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
+.zr-shop__foot { display: flex; justify-content: center; gap: 10px; margin-top: 12px; }
+.zr-shelf { margin-bottom: 14px; }
+.zr-shelf h2 { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; font-size: 24px; -webkit-text-stroke-width: 5px; }
+.zr-shelf h2 small { color: #c4d3f5; font: 700 13px/1.2 var(--zr-text); letter-spacing: 0; text-transform: none; -webkit-text-stroke: 0; }
+.zr-shelf__empty { margin: 0 !important; padding: 12px; border: 2px dashed #ffffff33; border-radius: 14px; text-align: center; color: #9db0de !important; }
+.zr-shelf__items { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.zr-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 12px 14px; text-align: center;
+  border: 3px solid #ffffff55; border-radius: 18px; background: linear-gradient(#2a4a9c, #1d3578);
+}
+.zr-item--owned { border-color: var(--zr-green); background: linear-gradient(#256b52, #1b4d47); }
+.zr-item h3 { margin: 4px 0 0; color: #fff; font: 400 19px/1.1 var(--zr-display); letter-spacing: 0.02em; }
+.zr-item p { margin: 0 !important; font-size: 13px; line-height: 1.35; }
+.zr-item__fits { color: var(--zr-yellow) !important; font-weight: 700; }
+.zr-item__art { display: grid; place-items: center; width: 92px; height: 92px; border-radius: 22px; background: #ffffff1c; font-size: 46px; }
+.zr-item__art svg { width: 78%; height: 78%; }
+.zr-item__art--dog { object-fit: cover; background: none; }
+.zr-item__art--none { color: #9db0de; }
+.zr-item .zr-btn { margin: 8px 0 0; padding: 0.5em 1.1em; }
+.zr-item .zr-btn .zr-coins { font-size: 1.15em; }
+.zr-item__owned { margin-top: 8px; color: #8ff0a4; font: 400 18px/1 var(--zr-display); letter-spacing: 0.04em; }
+.zr-item__short { color: #c4d3f5; }
+
+/* the Garage: the dogs, the dog, what it can wear */
+.zr-garage__body { flex: 1; min-height: clamp(260px, 56vh, 640px); display: grid; grid-template-columns: 132px minmax(0, 1fr) minmax(220px, 300px); gap: 14px; }
+.zr-garage__dogs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; overflow-y: auto; padding-right: 4px; }
+.zr-garage__dog { padding: 0; border: 3px solid transparent; border-radius: 14px; background: none; cursor: pointer; aspect-ratio: 1; overflow: hidden; }
+.zr-garage__dog img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.zr-garage__dog--on { border-color: var(--zr-yellow); box-shadow: 0 0 0 2px var(--zr-navy), 0 0 12px #ffd22e99; }
+.zr-garage__dog:focus-visible { outline: 3px solid #fff; outline-offset: 1px; }
+.zr-garage__stage { position: relative; min-height: 240px; border-radius: 18px; background: radial-gradient(circle at 50% 38%, #6fb6ff, #2a5cc0 62%, #1d3578); overflow: hidden; }
+.zr-garage__stage h2 { position: absolute; left: 0; right: 0; bottom: 8px; margin: 0; text-align: center; font-size: 26px; -webkit-text-stroke-width: 6px; pointer-events: none; }
+.zr-preview { position: absolute; inset: 0; }
+.zr-preview canvas { display: block; width: 100%; height: 100%; }
+.zr-garage__slots { overflow-y: auto; padding-right: 4px; }
+.zr-slot { margin-bottom: 12px; }
+.zr-slot h3 { margin: 0 0 6px; color: var(--zr-yellow); font: 400 18px/1 var(--zr-display); letter-spacing: 0.05em; text-transform: uppercase; }
+.zr-slot__items { display: grid; gap: 6px; }
+.zr-wear {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px 6px 6px; text-align: left;
+  border: 3px solid #ffffff44; border-radius: 14px; background: #ffffff14; color: #fff; font: 700 14px/1.2 var(--zr-text); cursor: pointer;
+}
+.zr-wear .zr-item__art { width: 44px; height: 44px; border-radius: 10px; font-size: 22px; flex: none; }
+.zr-wear > span:nth-child(2) { flex: 1; }
+.zr-wear:enabled:hover { border-color: #fff; }
+.zr-wear--on { border-color: var(--zr-green); background: #46d36b2b; }
+.zr-wear--shop { opacity: 0.75; border-style: dashed; }
+.zr-wear--shop .zr-coins { color: var(--zr-yellow); }
+.zr-wear:disabled { cursor: default; opacity: 0.6; }
+
+/* a dog that has to be bought first, on the dog screen */
+.zr-tile--locked img { filter: grayscale(0.85) brightness(0.55); }
+.zr-tile__lock { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.zr-tile__lock svg { width: 34%; height: 34%; fill: #fff; stroke: var(--zr-navy); stroke-width: 1.6; paint-order: stroke fill; stroke-linejoin: round; filter: drop-shadow(0 2px 3px #0008); }
+.zr-detail__locked { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 6px 0 0; color: var(--zr-navy); font: 400 clamp(14px, 2.2vh, 20px)/1.1 var(--zr-display); }
+.zr-detail__locked .zr-coins { color: #b86a00; font-size: 1.25em; }
+
+/* a short screen (a phone on its side): everything closer together */
+@media (max-height: 480px) {
+  .zr-shop, .zr-garage { padding: 8px 14px 10px; }
+  .zr-shop__head h1 { font-size: 24px; -webkit-text-stroke-width: 5px; }
+  .zr-shop__you { display: none; }
+  .zr-item__art { width: 60px; height: 60px; }
+  .zr-garage__body { grid-template-columns: 96px minmax(0, 1fr) minmax(170px, 220px); gap: 8px; }
+  .zr-garage__stage { min-height: 150px; }
+  .zr-shop__foot { margin-top: 6px; }
+}
+@media (max-width: 760px) and (min-height: 481px) {
+  .zr-garage__body { grid-template-columns: 1fr; grid-auto-rows: min-content; overflow-y: auto; }
+  .zr-garage__dogs { grid-template-columns: repeat(6, 1fr); }
+  .zr-garage__stage { min-height: 260px; }
+}
