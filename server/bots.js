@@ -140,6 +140,13 @@ function buildRoute(mapId) {
   // (It used to be left to the hazard watch, which only jumps what it sees 0.2 to 0.6 s off: a dog that came to
   // it slowly, or was knocked down beside it, stopped in front of it for good, Tom 2026-11-22)
   if (track?.fallenLog) { const { s: logS, radius } = track.fallenLog, reach = radius + 0.7; jumps.push({ id: 'fallen-log', s0: logS - reach, s1: logS + reach, height: 1.05, hazardKind: 'log' }); }
+  // ...and the smaller fallen trees there (Tom, 2026-11-26), over half the path or across the High Path: timed the same way, by a
+  // dog whose line runs into one (from..to: where across the road it lies).  Seen 0.6 s off, a slow dog came down on it
+  for (const [k, trunk] of (track?.trunks ?? []).entries()) {
+    // (up in good time and down late: a dog on the High Path, inside the bend, comes to it quicker than its place round the lap says)
+    const reach = (track.trunkSize?.radius ?? 0.6) + 0.7;
+    jumps.push({ id: `trunk-${k}`, s0: trunk.s - reach * 2, s1: trunk.s + reach * 2, height: (track.trunkSize?.height ?? 0.8) + 0.1, hazardKind: 'trunk', from: trunk.from - reach - 0.7, to: trunk.to + reach + 0.7 });
+  }
   // moving platforms (Neon Nexus): every break between them has to be jumped, and each has to be steered for
   const sliders = [];
   for (const zone of track?.platforms ?? []) {
@@ -462,10 +469,13 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     for (const jump of route.jumps) {
       const gap = route.ahead(jump.s0, s);
       if (gap < -1 || gap > 30) continue;
+      if (jump.from != null && (lateral < jump.from || lateral > jump.to)) continue;       // (not in its way)
       const { rise, fall } = takeoffDistance(jump.height, force, gravity);
       // (a dog too slow to stay up the whole way goes when the middle of its jump is the middle of the gap)
-      const spare = speed * (fall - rise) - (jump.s1 - jump.s0);
-      let from = speed * (rise + tick) - Math.min(0, spare) / 2;
+      // (how fast it is coming round the lap: on a second road inside a bend, quicker than it is running)
+      const pace = jump.from != null ? speed / Math.max(0.5, 1 - route.pointAt(s).curvature * lateral) : speed;
+      const spare = pace * (fall - rise) - (jump.s1 - jump.s0);
+      let from = pace * (rise + tick) - Math.min(0, spare) / 2;
       // misjudged: goes too late.  (A moving platform is missed more often: falling into the Undercity is part of Neon Nexus)
       if (jump.must && decide(`${jump.id}:${lap()}:${attempt}`, jump.platform ? L.platformMiss ?? L.jumpMiss : L.jumpMiss)) from = -1.2;
       if (gap <= from) return true;

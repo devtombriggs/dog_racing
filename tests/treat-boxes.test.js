@@ -32,9 +32,10 @@ test('every map has box rows of three and single bones, with IDs unique across a
   const all = [];
   for (const mapId of Object.keys(MAPS)) {
     const boxes = TREAT_BOXES_BY_MAP[mapId], bones = GOLDEN_BONE_SPOTS[mapId];
-    // (the Speed Bowl's rows are five across; Neon Nexus has rows of four where it is two roads, two on each)
+    // (the Speed Bowl's rows are five across; Neon Nexus and Wendover Woods have rows of four where they are two roads, two on each)
     if (mapId === 'speed_bowl') assert.equal(boxes.length % 5, 0);
     else if (mapId === 'neon_nexus') assert.ok(boxes.length >= 30);
+    else if (mapId === 'wendover') assert.ok(boxes.length >= 21);
     else assert.ok(boxes?.length >= 9 && boxes.length % 3 === 0, `${mapId}: box rows`);
     assert.ok(bones?.length >= 4, `${mapId}: bones`);
     all.push(...boxes.map(b => b.id));

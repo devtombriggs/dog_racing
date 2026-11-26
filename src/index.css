@@ -253,15 +253,16 @@ html.touch .race-minimap {
   transform: scale(0.55); transform-origin: top right; opacity: 0.9;
 }
 
-/* The controls (ui/race/TouchControls.jsx) */
-.touch-controls { position: absolute; inset: 0; z-index: 20; pointer-events: none; --pad-r: max(14px, env(safe-area-inset-right)); --pad-b: max(14px, env(safe-area-inset-bottom)); }
+/* The controls (ui/race/TouchControls.jsx).  --tc: how big they are drawn: full size on a tablet, smaller on a phone, where
+   they were a third of the height of the screen (Tom's iPhone 13, 2026-11-26: "the buttons are also too big") */
+.touch-controls { position: absolute; inset: 0; z-index: 20; pointer-events: none; --tc: 1; --pad-r: max(14px, env(safe-area-inset-right)); --pad-b: max(14px, env(safe-area-inset-bottom)); }
 .touch-arrows {
-  position: absolute; left: max(14px, env(safe-area-inset-left)); bottom: var(--pad-b); display: flex; gap: 14px;
-  padding: 10px; margin: -10px; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none;
+  position: absolute; left: max(14px, env(safe-area-inset-left)); bottom: var(--pad-b); display: flex; gap: calc(14px * var(--tc));
+  padding: calc(10px * var(--tc)); margin: calc(-10px * var(--tc)); pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none;
 }
 .touch-arrow {
-  width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center;
-  border: 3px solid #ffffffcc; color: #fff; font: 800 34px/1 system-ui, sans-serif; text-shadow: 0 1px 2px #0009;
+  width: calc(92px * var(--tc)); height: calc(92px * var(--tc)); border-radius: 50%; display: grid; place-items: center;
+  border: 3px solid #ffffffcc; color: #fff; font: 800 calc(34px * var(--tc))/1 system-ui, sans-serif; text-shadow: 0 1px 2px #0009;
   background: radial-gradient(circle at 40% 30%, #5b6f9e, #1d2a52); opacity: 0.85;
   box-shadow: 0 4px 0 #00000055, 0 4px 12px #0005; transition: transform 60ms;
 }
@@ -269,23 +270,34 @@ html.touch .race-minimap {
 .touch-btn {
   position: absolute; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none;
   display: grid; place-items: center; border-radius: 50%; border: 3px solid #ffffffcc; color: #fff;
-  font: 800 14px/1 'Lilita One', system-ui, sans-serif; letter-spacing: 0.04em; text-shadow: 0 1px 2px #0009;
+  font: 800 calc(14px * var(--tc))/1 'Lilita One', system-ui, sans-serif; letter-spacing: 0.04em; text-shadow: 0 1px 2px #0009;
   box-shadow: 0 4px 0 #00000055, 0 4px 12px #0005; opacity: 0.88; transition: transform 60ms;
 }
 .touch-btn--on { transform: scale(0.92); opacity: 1; box-shadow: 0 1px 0 #00000055, 0 2px 8px #0005; }
-.touch-btn--drift { right: var(--pad-r); bottom: var(--pad-b); width: 104px; height: 104px; font-size: 19px; background: radial-gradient(circle at 40% 30%, #6cc4ff, #1f6fd8); }
+.touch-btn--drift { right: var(--pad-r); bottom: var(--pad-b); width: calc(104px * var(--tc)); height: calc(104px * var(--tc)); font-size: calc(19px * var(--tc)); background: radial-gradient(circle at 40% 30%, #6cc4ff, #1f6fd8); }
 .touch-btn--drift.touch-btn--on { background: radial-gradient(circle at 40% 30%, #9ad8ff, #2f86f0); }
-.touch-btn--jump { right: calc(var(--pad-r) + 120px); bottom: var(--pad-b); width: 76px; height: 76px; background: radial-gradient(circle at 40% 30%, #ffd84d, #e89a12); }
-.touch-btn--item { right: calc(var(--pad-r) + 14px); bottom: calc(var(--pad-b) + 120px); width: 76px; height: 76px; font-size: 34px; background: radial-gradient(circle at 40% 30%, #c08bff, #7333dd); }
-.touch-btn--item img { width: 54px; height: 54px; pointer-events: none; filter: drop-shadow(0 2px 3px #0007); }
-.touch-btn--empty { font-size: 14px; opacity: 0.45; }
-.touch-btn--brake { right: calc(var(--pad-r) + 128px); bottom: calc(var(--pad-b) + 96px); width: 58px; height: 58px; font-size: 12px; background: radial-gradient(circle at 40% 30%, #ff8a7a, #c9372a); }
+.touch-btn--jump { right: calc(var(--pad-r) + 120px * var(--tc)); bottom: var(--pad-b); width: calc(76px * var(--tc)); height: calc(76px * var(--tc)); background: radial-gradient(circle at 40% 30%, #ffd84d, #e89a12); }
+.touch-btn--item { right: calc(var(--pad-r) + 14px * var(--tc)); bottom: calc(var(--pad-b) + 120px * var(--tc)); width: calc(76px * var(--tc)); height: calc(76px * var(--tc)); font-size: calc(34px * var(--tc)); background: radial-gradient(circle at 40% 30%, #c08bff, #7333dd); }
+.touch-btn--item img { width: calc(54px * var(--tc)); height: calc(54px * var(--tc)); pointer-events: none; filter: drop-shadow(0 2px 3px #0007); }
+.touch-btn--empty { font-size: calc(14px * var(--tc)); opacity: 0.45; }
+.touch-btn--brake { right: calc(var(--pad-r) + 128px * var(--tc)); bottom: calc(var(--pad-b) + 96px * var(--tc)); width: calc(58px * var(--tc)); height: calc(58px * var(--tc)); font-size: calc(12px * var(--tc)); background: radial-gradient(circle at 40% 30%, #ff8a7a, #c9372a); }
 .touch-pause {
   position: absolute; pointer-events: auto; top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right));
   width: 44px; height: 44px; border-radius: 12px; border: 2px solid #ffffffaa; background: #0b1c4a99;
   display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; padding: 0;
 }
 .touch-pause span { display: block; width: 20px; height: 3px; border-radius: 2px; background: #fff; }
+
+/* A phone on its side is 320 to 430 px high: smaller controls, and a smaller course map (Tom, 2026-11-26: "the map is way too
+   big": it was 4 tenths of the height of his iPhone 13's screen, and lay over the Item button) */
+@media (max-height: 480px) {
+  html.touch .touch-controls { --tc: 0.72; }
+  html.touch .race-minimap { transform: scale(0.36); }
+}
+@media (max-height: 350px) {
+  html.touch .touch-controls { --tc: 0.66; }
+  html.touch .race-minimap { transform: scale(0.32); }
+}
 
 /* A phone held upright: turn it (App.jsx) */
 .rotate-prompt { display: none; }

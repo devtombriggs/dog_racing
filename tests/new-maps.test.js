@@ -362,33 +362,79 @@ test('a hazard on a hill is cleared by a jump of its own height, measured from t
   assert.equal(DALES.hazardHit([downhill.x, ground + h.height + 0.15, downhill.z], t), null, 'a jump of the height of the cheese clears it');
 });
 
-test('Wendover Woods, remade (Tom, 2026-11-21): the hollow log, the beck to swim, the Treetop Walk, the long drift and the fallen log to jump', async () => {
+test('Wendover Woods, remade (Tom, 2026-11-21) and made the fast flagship (Tom, 2026-11-26): the Speed Tunnel, the beck, the two paths, the ridge, the long drift and the fallen trees', async () => {
   const { WENDOVER_WOODS: T } = await import('../shared/wendoverWoodsData.js');
   const at = (s, lateral = 0) => { const p = T.pointAt(s, lateral); return T.query(p.x, p.z, -1, p.y); };
-  // the start where it always was: at the origin, running along +x
+  // the start where it always was: at the origin, running along +x; and the lap the length it was ("the same length")
   assert.ok(Math.hypot(T.startFinish.position[0], T.startFinish.position[2]) < 1 && Math.abs(Math.sin(T.startFinish.rotationY) - 1) < 0.05);
-  // through the hollow log: narrow
+  assert.ok(Math.abs(T.length - 1787) < 25, `${T.length.toFixed(0)} m`);
+  // Bluebell Run: steeply downhill
+  const bluebell = T.sections.find(sec => sec.id === 'B');
+  assert.ok(T.pointAt(bluebell.sStart).y - T.pointAt(bluebell.sEnd).y > 9);
+  // the Speed Tunnel: narrow, twice as long as the hollow log was, and a boost all the way through
   const mid = (T.hollow.sStart + T.hollow.sEnd) / 2;
-  assert.ok(T.pointAt(mid).halfWidth <= 4.6 && at(mid, 6).blocked);
-  // the beck: deep enough to swim
+  assert.ok(T.pointAt(mid).halfWidth <= 4.6 && at(mid, 6).blocked && T.hollow.sEnd - T.hollow.sStart >= 80);
+  for (let s = T.hollow.sStart + 6; s < T.hollow.sEnd - 6; s += 5) assert.ok(at(s).kick, `no boost in the tunnel at ${s.toFixed(0)} m`);
+  // the beck: deep enough to swim, short enough to jump off the ramp, which is right across the path with a boost pad in front of it
+  // (Tom, 2026-11-26: on one half only, a dog on the other half missed the jump and the boost)
   assert.equal(at((T.beck.sStart + T.beck.sEnd) / 2).movement, 'swim');
-  // the Treetop Walk: up in the branches, and shorter than the road round the bend
+  const ramp = T.beckRamp, rampMid = (ramp.sStart + ramp.sEnd) / 2;
+  for (const lateral of [-5, -2.5, 0, 2.5, 5]) { assert.ok(at(rampMid, lateral).hop, `no ramp ${lateral} m across`); assert.ok(at(ramp.sStart - 6, lateral).kick, `no boost in front of the ramp ${lateral} m across`); }
+  assert.ok(17 * 2 * ramp.hop / 16 > T.beck.sEnd - ramp.sEnd + 1.5, 'a dog at a run flies the whole pool');          // (17 m/s: a dog flat out; 16: a jump's gravity)
+  // the fork.  The High Path: up in the branches, shorter than the road round the bend, with mega pads and two trees across it
   const W = T.treetop, b = T.branchAt((W.sStart + W.sEnd) / 2);
-  assert.ok(b.lift > 3 && b.open);
+  assert.ok(b.lift > 3 && b.open && W.sEnd - W.sStart > 250);
   let path = 0, prev = null;
   for (let s = W.sStart; s <= W.sEnd; s += 0.5) { const br = T.branchAt(s), p = T.pointAt(s, br ? br.side * br.centre : 0); if (prev) path += Math.hypot(p.x - prev.x, p.z - prev.z); prev = p; }
-  assert.ok(path < W.sEnd - W.sStart - 10, `${path.toFixed(0)} m against ${(W.sEnd - W.sStart).toFixed(0)} m`);
+  assert.ok(path < W.sEnd - W.sStart - 30, `${path.toFixed(0)} m against ${(W.sEnd - W.sStart).toFixed(0)} m`);
+  assert.equal(T.strips.filter(strip => strip.branch === W.id && strip.mega).length, 2);
+  const high = T.trunks.filter(trunk => Math.abs(trunk.from) > 10);
+  assert.equal(high.length, 2);
+  for (const trunk of high) {
+    for (let lateral = trunk.from - 0.4; lateral <= trunk.to + 0.4; lateral += 0.4) { const p = T.pointAt(trunk.s, lateral); assert.equal(T.hazardHit([p.x, p.y, p.z], 0)?.kind, 'trunk', 'no way round a tree on the High Path'); }
+    const p = T.pointAt(trunk.s, (trunk.from + trunk.to) / 2);
+    assert.equal(T.hazardHit([p.x, p.y + 1.2, p.z], 0), null, 'a jump clears it');
+    assert.ok(Math.abs(at(trunk.s, (trunk.from + trunk.to) / 2).grade) < 0.06, 'on ground flat enough to jump from');
+  }
+  // ...the Low Path: puddles that slow a dog, never more than half the path, on one side and then the other
+  assert.ok(T.mud.length >= 5);
+  T.mud.forEach((puddle, k) => {
+    assert.ok(puddle.s > W.sStart && puddle.s < W.sEnd && at(puddle.s, puddle.lateral).mud);
+    const hw = T.pointAt(puddle.s).halfWidth; let dry = 0;
+    for (let lateral = -hw + 1; lateral <= hw - 1; lateral += 0.25) if (!at(puddle.s, lateral).mud) dry += 0.25;
+    assert.ok(dry > hw - 1, `puddle ${k}: only ${dry.toFixed(1)} m of dry path beside it`);
+    if (k) assert.ok(Math.sign(puddle.lateral) !== Math.sign(T.mud[k - 1].lateral));
+    assert.equal(at(puddle.s, W.side * W.offset).mud, false, 'not on the High Path');
+  });
+  // the other fallen trees lie over half the path only: there is a way round each
+  const low = T.trunks.filter(trunk => Math.abs(trunk.from) < 10);
+  assert.equal(low.length, 2);
+  for (const trunk of low) {
+    const hw = T.pointAt(trunk.s).halfWidth, clear = [];
+    for (let lateral = -hw + 1; lateral <= hw - 1; lateral += 0.25) { const p = T.pointAt(trunk.s, lateral); if (!T.hazardHit([p.x, p.y, p.z], 0)) clear.push(lateral); }
+    assert.ok(clear.length * 0.25 > 3.5, `only ${(clear.length * 0.25).toFixed(1)} m to get round a fallen tree`);
+    assert.ok(Math.abs(at(trunk.s).grade) < 0.06);
+  }
+  // the ridge: hills, and a boost pad on them
+  const ridge = T.sections.find(sec => sec.id === 'R');
+  let ups = 0, was = 0;
+  for (let s = ridge.sStart - 60; s < ridge.sEnd; s += 4) { const g = at(s).grade; if (Math.abs(g) > 0.03) { if (Math.sign(g) !== was) ups += 1; was = Math.sign(g); } }
+  assert.ok(ups >= 4, `${ups} ups and downs`);
+  assert.ok(T.strips.filter(strip => !strip.hop && strip.sStart > ridge.sStart - 60 && strip.sStart < ridge.sEnd).length >= 3);
   // the long drift: one bend all the way down, a drift's own size (40 to 150 m round), and downhill
   const drift = T.sections.find(sec => sec.id === 'G');
   let turned = 0;
   for (let i = T.indexAtS(drift.sStart); i !== T.indexAtS(drift.sStart + 180); i = (i + 1) % T.sampleCount) turned += T.samples.curvature[i] * T.sampleSpacing;
   assert.ok(Math.abs(turned) > 1.8, `${(Math.abs(turned) * 180 / Math.PI).toFixed(0)} degrees`);
-  assert.ok(T.pointAt(drift.sStart).y > T.pointAt(drift.sEnd).y + 5);
+  assert.ok(T.pointAt(drift.sStart).y > T.pointAt(drift.sEnd).y + 8);
   // the fallen log: right across the path, cleared by the jump the ramp in front of it gives
-  const logs = T.hazardsAt(0).filter(h => h.kind === 'log'), kicker = T.strips.find(strip => strip.hop);
+  const logs = T.hazardsAt(0).filter(h => h.kind === 'log'), kicker = T.strips.find(strip => strip.id === 'kicker-log');
   assert.ok(logs.length >= 6 && kicker.sStart < T.fallenLog.s);
   const apex = kicker.hop ** 2 / (2 * 16);
   assert.ok(apex > logs[0].height + 0.5, 'the ramp throws a dog well over it');
+  // the narrow trail, and out into the clearing
+  const trail = T.sections.find(sec => sec.id === 'I');
+  assert.ok(T.pointAt((trail.sStart + trail.sEnd) / 2).halfWidth < 5 && T.pointAt(40).halfWidth > 9);
   // more turns: nothing straighter for longer than the start straight
   const S = T.samples, N = T.sampleCount, step = T.length / N, w = Math.round(30 / step), heading = i => Math.atan2(S.tangentX[i % N], S.tangentZ[i % N]);
   let run = 0, longest = 0;

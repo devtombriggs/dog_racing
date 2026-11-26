@@ -13,7 +13,7 @@ const CUP_IDS = Object.keys(GRAND_PRIX);
 
 // Map vote countdown: the seconds left until the vote closes, redrawn as they pass
 function useVoteSecondsLeft(session, voting) {
-  const [secondsLeft, setSecondsLeft] = useState(15);
+  const [secondsLeft, setSecondsLeft] = useState(120);
   useEffect(() => {
     if (!voting) return undefined;
     const tick = () => setSecondsLeft(Math.max(0, Math.ceil((session.voteDeadline - performance.now()) / 1000)));
@@ -25,7 +25,7 @@ function useVoteSecondsLeft(session, voting) {
 }
 
 // Map select (single player: choose a map to race on it) and map vote (multiplayer).
-// Two tabs: the Grand Prix (each a box of its four maps) and the single maps.  Whatever is highlighted
+// Two tabs: the single maps first (Tom, 2026-11-26), then the Grand Prix (each a box of its four maps).  Whatever is highlighted
 // is described in the box on the left.
 export function MapScreen({ session, state }) {
   const { screen, room, socketId, connected, error } = state;
@@ -35,8 +35,9 @@ export function MapScreen({ session, state }) {
   const myVote = votes[socketId];
   const voteCount = Object.keys(votes).length;
   const secondsLeft = useVoteSecondsLeft(session, voting);
+  const host = room?.hostId === socketId;
 
-  const [tab, setTab] = useState(myVote && MAPS[myVote] ? 'maps' : myVote ? 'cups' : state.mapTab ?? 'cups');
+  const [tab, setTab] = useState(myVote && MAPS[myVote] ? 'maps' : myVote ? 'cups' : state.mapTab ?? 'maps');
   // the tile highlighted on each tab (it is the one described beside the tiles)
   const [shownOn, setShownOn] = useState({ cups: GRAND_PRIX[myVote] ? myVote : CUP_IDS[0], maps: MAPS[myVote] ? myVote : MAP_IDS[0] });
   const shown = shownOn[tab];
@@ -69,18 +70,21 @@ export function MapScreen({ session, state }) {
         <Paw /><h1 className="zr-title">{voting ? 'Vote for a Map' : 'Choose a Map'}</h1><Paw />
       </header>
       {voting && (
-        <div className="zr-timer" role="timer" aria-live="polite"><span>Starting in</span><strong>{secondsLeft}s</strong></div>
+        <div className="zr-timer" role="timer" aria-live="off">
+          <span>Starting in</span><strong>{Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}</strong>
+          {host && <button className="zr-btn zr-btn--yellow zr-btn--small" disabled={!connected} onClick={() => { fullscreen.enterForRace(); session.endMapVote(); }}>Start</button>}
+        </div>
       )}
-      {voting && <p className="zr-screen__sub">{voteCount} of {room?.players.length ?? 0} voted · most votes wins · a tie is picked at random</p>}
+      {voting && <p className="zr-screen__sub">{voteCount} of {room?.players.length ?? 0} voted · most votes wins · a tie is picked at random{host ? ' · press Start when everyone is ready' : ' · the host can start sooner'}</p>}
 
-      <div className="zr-tabs" role="tablist" aria-label="Grand Prix or single maps">
-        <button className="zr-tab" role="tab" aria-selected={cups} onClick={() => setTab('cups')}>
-          <img src={`/ui/tab_gp_${cups ? 'on' : 'off'}.webp`} alt="Grand Prix" draggable="false" />
-          {voting && votesOn(CUP_IDS) > 0 && <span className="zr-tab__count" aria-label={`${votesOn(CUP_IDS)} votes`}>{votesOn(CUP_IDS)}</span>}
-        </button>
+      <div className="zr-tabs" role="tablist" aria-label="Single maps or Grand Prix">
         <button className="zr-tab" role="tab" aria-selected={!cups} onClick={() => setTab('maps')}>
           <img src={`/ui/tab_maps_${cups ? 'off' : 'on'}.webp`} alt="Maps" draggable="false" />
           {voting && votesOn(MAP_IDS) > 0 && <span className="zr-tab__count" aria-label={`${votesOn(MAP_IDS)} votes`}>{votesOn(MAP_IDS)}</span>}
+        </button>
+        <button className="zr-tab" role="tab" aria-selected={cups} onClick={() => setTab('cups')}>
+          <img src={`/ui/tab_gp_${cups ? 'on' : 'off'}.webp`} alt="Grand Prix" draggable="false" />
+          {voting && votesOn(CUP_IDS) > 0 && <span className="zr-tab__count" aria-label={`${votesOn(CUP_IDS)} votes`}>{votesOn(CUP_IDS)}</span>}
         </button>
       </div>
 

@@ -1,6 +1,7 @@
 // Wendover Woods — the look of it: a real wood.  Oaks, beeches, birches and pines all round, ferns and bluebells under them,
-// toadstools, the log cabin in the clearing, a giant fallen tree hollow enough to run through, the beck, the old oak at the
-// hairpin, the Treetop Walk up in the branches, deer, and the fallen log with the ramp in front of it.  The track itself is
+// toadstools, the log cabin in the open field of the clearing, a giant fallen tree hollow enough to run through (the Speed
+// Tunnel), the beck and the ramp over it, the old oak at the hairpin, the High Path up in the branches and the puddles on the
+// Low Path under it, fallen trees to jump, deer, and the fallen log with the ramp in front of it.  The track itself is
 // shared/wendoverWoodsData.js; the parts every kit map shares are in ../trackKit3d.js.
 import * as THREE from 'three';
 import { WENDOVER_WOODS as T } from '../../../shared/wendoverWoodsData.js';
@@ -8,12 +9,18 @@ import { createKitWorld, rng, box, cyl, ball, cone, merge, canvasTexture } from 
 
 const S = T.samples;
 const EARTH = [0x7a5c3c, 0x735738], GRASS_ROAD = [0x6f9a45, 0x689340];
-const woodsHill = (x, z) => -4 + 4 * Math.sin(x / 70 + 0.6) * Math.cos(z / 83) + 2.2 * Math.sin((x - z) / 41);
+// The lie of the land: the wood rises and falls with the path (high at the clearing and the ridge, low down at the beck), a
+// little below it, with humps of its own.  (LAND: a place on the path every 24 m; the land is as high as the path near by)
+const PLAIN = -21, LAND = []; for (let s = 0; s < T.length; s += 24) { const p = T.pointAt(s); LAND.push([p.x, p.z, p.y]); }
+const woodsHill = (x, z) => { let sum = 0, weight = 0; for (const [px, pz, py] of LAND) { const w = 1 / (900 + (x - px) ** 2 + (z - pz) ** 2) ** 2; sum += py * w; weight += w; }
+  // (and far out it falls away to the plain the wood stands on)
+  const far = Math.min(1, Math.max(0, (Math.hypot(x - 6, z + 237) - 330) / 200)), out = far * far * (3 - 2 * far);
+  return (sum / weight - 3 + 2.6 * Math.sin(x / 70 + 0.6) * Math.cos(z / 83) + 1.6 * Math.sin((x - z) / 41)) * (1 - out) + PLAIN * out; };
 
 export const createWendoverWoods = () => createKitWorld(T, {
   name: 'WendoverWoods', sunDirection: [0.35, 0.85, 0.3],
   sky: { top: 0x6fb2e8, horizon: 0xe4f1ea, clouds: 0xffffff, cloudCount: 20 },
-  ground: { color: 0x3d6a2c, y: -12 },
+  ground: { color: 0x3d6a2c, y: PLAIN - 0.5 },
   road: { color: i => (T.depthAt(S.s[i]) > 0.05 ? 0x6b6a5a : 'AI'.includes(S.section[i]) ? GRASS_ROAD[Math.floor(i / 3) % 2] : S.section[i] === 'C' ? 0x5a3f28 : EARTH[Math.floor(i / 3) % 2]),
     side: 0x456b2f, skirt: { out: 3, drop: 0.8 }, roughness: 0.95 },
   edges: [
@@ -24,19 +31,21 @@ export const createWendoverWoods = () => createKitWorld(T, {
   strips: { color: '#ffffff', background: 'rgba(60,110,40,0.9)' },
   megaStrips: { color: '#ffffff', background: 'rgba(230,150,30,0.95)' },
   water: { color: 0x5f9fb4 },
+  patches: { color: 0x4a3826, roughness: 0.12 },          // muddy puddles
   branch: { color: () => 0x8a6a44, edges: [{ height: 1.1, every: 3, size: [64, 32], cutout: true, draw(g) { g.clearRect(0, 0, 64, 32); g.fillStyle = '#5d4027'; g.fillRect(0, 0, 6, 32); g.strokeStyle = '#d8c79a'; g.lineWidth = 3; g.beginPath(); g.moveTo(0, 6); g.quadraticCurveTo(32, 14, 64, 6); g.stroke(); g.beginPath(); g.moveTo(0, 18); g.quadraticCurveTo(32, 25, 64, 18); g.stroke(); } }] },
   env: { fog: [0xd6e8d8, 140, 1300], background: 0xd6e8d8, exposure: 1.0 },
   lights: { hemi: [0xeaf6ff, 0x5a7a3a, 1.6], sun: [0xfff2d6, 2.1] },
 
   build({ group, D, movers, herd, clear, beside, sign, add, keep, prop, terrain, animated }) {
     const r = rng(1466), field = new THREE.Color();
-    const ground = terrain({ size: 1100, cell: 7, centre: [10, -223], height: woodsHill, blend: 34,
+    const ground = terrain({ size: 1100, cell: 7, centre: [6, -237], height: woodsHill, blend: 34,
       color: (x, z) => { const n = 0.5 + 0.5 * Math.sin(x * 0.09) * Math.cos(z * 0.11); return field.setRGB(0.2 + 0.05 * n, 0.33 + 0.07 * n, 0.15 + 0.03 * n); } });
     // (the Treetop Walk runs 20 m off the road, through the wood: no tree within WALK_CLEAR of its edge, or the dogs up
     // there cannot see where they are going (Tom, 2026-11-22).  Its own trunks, holding it up, are built below)
     const WALK_CLEAR = 6, walk = [];
     for (let s = T.treetop.sStart; s <= T.treetop.sEnd; s += 2) { const br = T.branchAt(s); if (br) { const p = T.pointAt(s, br.side * br.centre); walk.push([p.x, p.z, br.half + WALK_CLEAR]); } }
-    const offWalk = (x, z) => walk.every(([wx, wz, keep]) => (x - wx) ** 2 + (z - wz) ** 2 > keep * keep);
+    // (and none in the clearing: the narrow trail comes out of the trees into an open field, Tom 2026-11-26)
+    const FIELD = T.clearing, offWalk = (x, z) => (x - FIELD.x) ** 2 + (z - FIELD.z) ** 2 > FIELD.radius ** 2 && walk.every(([wx, wz, keep]) => (x - wx) ** 2 + (z - wz) ** 2 > keep * keep);
     const scatter = (count, margin, far, make, keepIf = () => true) => { const list = []; let tries = 0; while (list.length < count && tries++ < count * 25) { const x = 10 - far + r() * far * 2, z = -223 - far + r() * far * 2; if (clear(x, z, margin) && keepIf(x, z)) list.push(make(x, ground(x, z), z)); } return list; };
 
     // ---------- the wood: oaks, beeches, birches and pines, thick right up to the path
@@ -76,14 +85,14 @@ export const createWendoverWoods = () => createKitWorld(T, {
     // ---------- the hollow log: a giant fallen tree, the path running through the middle of it
     { const H = T.hollow, a = T.pointAt(H.sStart), b = T.pointAt(H.sEnd), long = H.sEnd - H.sStart, R = 6.2;
       const bark = canvasTexture(128, 128, (g) => { const q = rng(9); g.fillStyle = '#5a3f28'; g.fillRect(0, 0, 128, 128); for (let k = 0; k < 90; k++) { g.fillStyle = q() < 0.5 ? '#4a3220' : '#6b4a30'; g.fillRect(q() * 128, 0, 2 + q() * 4, 128); } }, true);
-      bark.repeat.set(6, 4); D.push(bark);
+      bark.repeat.set(6, 8); D.push(bark);
       const tubeG = new THREE.CylinderGeometry(R, R, long, 28, 1, true).rotateX(Math.PI / 2), tubeM = keep(new THREE.MeshStandardMaterial({ map: bark, roughness: 1, side: THREE.DoubleSide }));
       const mid = T.pointAt((H.sStart + H.sEnd) / 2), tube = add('Hollow_Log', tubeG, tubeM);
       tube.position.set(mid.x, mid.y + R - 1.2, mid.z); tube.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
       const ringG = new THREE.TorusGeometry(R, 0.6, 8, 28); D.push(ringG);
       for (const end of [a, b]) { const ring = new THREE.Mesh(ringG, keep(new THREE.MeshStandardMaterial({ color: 0xc9a070, roughness: 0.9 }))); ring.position.set(end.x, mid.y + R - 1.2, end.z); ring.rotation.y = tube.rotation.y; group.add(ring); }
       // moss and toadstools on its back, roots at one end
-      herd('Hollow_Log_Moss', ball(1.6, 1, 0x4f8a34, 0, 0, 0, 1.4, 0.35, 1), Array.from({ length: 9 }, (_, k) => { const p = T.pointAt(H.sStart + (k + 0.5) * long / 9); return [p.x, mid.y + R * 2 - 1.3, p.z, k, 1]; }));
+      herd('Hollow_Log_Moss', ball(1.6, 1, 0x4f8a34, 0, 0, 0, 1.4, 0.35, 1), Array.from({ length: 17 }, (_, k) => { const p = T.pointAt(H.sStart + (k + 0.5) * long / 17); return [p.x, mid.y + R * 2 - 1.3, p.z, k, 1]; }));
       const roots = []; for (let k = 0; k < 7; k++) { const t = k / 7 * Math.PI * 2; roots.push(cyl(0.4, 0.8, 7, 6, 0x4a3220, Math.cos(t) * (R + 1), Math.sin(t) * (R + 1), 0, Math.PI / 2 + 0.4 * Math.cos(t), 0.4 * Math.sin(t))); }
       herd('Hollow_Log_Roots', merge(roots), [[a.x, mid.y + R - 1.2, a.z, tube.rotation.y, 1]]); }
 
@@ -117,9 +126,23 @@ export const createWendoverWoods = () => createKitWorld(T, {
     { const s = T.fallenLog.s, c = T.pointAt(s), R = T.fallenLog.radius;
       const logG = merge([cyl(R, R, c.halfWidth * 2 + 4, 10, 0x6b4a2c, 0, R, 0, 0, Math.PI / 2), cyl(R * 0.82, R * 0.82, c.halfWidth * 2 + 4.05, 10, 0xc9a070, 0, R, 0, 0, Math.PI / 2), cyl(0.15, 0.1, 1.4, 5, 0x5d3f26, 1.5, R * 2, 0.3, 0.4)]);
       herd('Fallen_Log', logG, [[c.x, c.y - 0.1, c.z, c.rotationY, 1]]);
-      const k = T.pointAt(T.kicker), rampG = new THREE.BufferGeometry();
+      const rampG = new THREE.BufferGeometry();
       rampG.setAttribute('position', new THREE.Float32BufferAttribute([-0.5, 0, 0, 0.5, 0, 0, 0.5, 1, 1, -0.5, 0, 0, 0.5, 1, 1, -0.5, 1, 1, -0.5, 0, 1, 0.5, 0, 1, 0.5, 1, 1, -0.5, 0, 1, 0.5, 1, 1, -0.5, 1, 1], 3)); rampG.computeVertexNormals(); D.push(rampG);
-      const ramp = new THREE.Mesh(rampG, keep(new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.9, side: THREE.DoubleSide }))); ramp.position.set(k.x, k.y - 0.02, k.z); ramp.rotation.y = k.rotationY; ramp.scale.set(k.halfWidth * 2 - 1, 0.6, 5); ramp.name = 'Log_Ramp'; group.add(ramp); }
+      const rampM = keep(new THREE.MeshStandardMaterial({ color: 0x8a6a44, roughness: 0.9, side: THREE.DoubleSide }));
+      // (a ramp `wide` metres across, its low edge at s, its middle `lateral` metres across the path)
+      const rampAt = (name, at, lateral, wide, long) => { const c = T.pointAt(at), q = T.pointAt(at, lateral), ramp = new THREE.Mesh(rampG, rampM); ramp.position.set(q.x, c.y - 0.02, q.z); ramp.rotation.y = c.rotationY; ramp.scale.set(wide, 0.6, long); ramp.name = name; group.add(ramp); };
+      rampAt('Log_Ramp', T.kicker, 0, T.pointAt(T.kicker).halfWidth * 2 - 1, 5);
+      // the natural ramp over the beck: a slab of rock right across the path
+      { const R = T.beckRamp; rampAt('Beck_Ramp', R.sStart, 0, T.pointAt(R.sStart).halfWidth * 2 - 1, R.sEnd - R.sStart); } }
+
+    // ---------- the smaller fallen trees: over half the path (round them or over them), and across the High Path (over them)
+    { const R = T.trunkSize.radius;
+      T.trunks.forEach((trunk, k) => {
+        const c = T.pointAt(trunk.s), q = T.pointAt(trunk.s, (trunk.from + trunk.to) / 2), long = trunk.to - trunk.from + 1.6;
+        const g = merge([cyl(R, R * 1.12, long, 9, k % 2 ? 0x6b4a2c : 0x5d4027, 0, R, 0, 0, Math.PI / 2), cyl(R * 0.8, R * 0.92, long + 0.05, 9, 0xc9a070, 0, R, 0, 0, Math.PI / 2),
+          cyl(0.12, 0.08, 1.2, 5, 0x5d3f26, long * 0.2, R * 2, 0.2, 0.5), ball(0.5, 1, 0x4f8a34, -long * 0.25, R * 1.9, 0, 1.6, 0.3, 1)]);
+        herd(`Fallen_Tree_${k}`, g, [[q.x, q.y - 0.08, q.z, c.rotationY, 1]]);
+      }); }
 
     // ---------- deer crossing Bluebell Run
     const deerG = merge([ball(0.7, 1, 0xa0683a, 0, 1.4, 0, 0.7, 0.65, 1.3), ball(0.32, 1, 0xa0683a, 0, 2.15, 0.95, 0.8, 0.9, 1.1), box(0.18, 0.7, 0.18, 0xa0683a, 0, 1.75, 0.75, 0, -0.5),
@@ -131,7 +154,7 @@ export const createWendoverWoods = () => createKitWorld(T, {
     });
     void animated;
 
-    for (const [text, s, side] of [['DEER!', T.deer[0] - 26, 1], ['THE HOLLOW LOG', T.hollow.sStart - 26, -1], ['THE BECK', T.beck.sStart - 20, 1], ['THE OLD OAK', T.beck.sEnd + 30, -1],
-      ['TREETOP WALK', T.treetop.sStart - 18, -1], ['LONG DRIFT', T.sections.find(sec => sec.id === 'G').sStart - 20, 1], ['JUMP THE LOG!', T.kicker - 30, 1]]) sign(text, s, side, '#efe4c8', '#2f5a28');
+    for (const [text, s, side] of [['DEER!', T.deer[0] - 26, 1], ['SPEED TUNNEL', T.hollow.sStart - 26, -1], ['THE BECK', T.beck.sStart - 24, 1], ['THE OLD OAK', T.trunks[0].s + 22, -1],
+      ['HIGH PATH', T.treetop.sStart - 18, -1], ['LOW PATH', T.treetop.sStart - 18, 1], ['THE RIDGE', T.sections.find(sec => sec.id === 'R').sStart - 10, 1], ['LONG DRIFT', T.sections.find(sec => sec.id === 'G').sStart - 20, 1], ['JUMP THE LOG!', T.kicker - 30, 1], ['NARROW TRAIL', T.sections.find(sec => sec.id === 'I').sStart - 16, -1]]) sign(text, s, side, '#efe4c8', '#2f5a28');
   },
 });

@@ -77,7 +77,7 @@ In the menus (`src/ui/menuPad.js`; the direction-finding is `src/ui/padNav.js`, 
 | D-pad or left stick | Move the highlight to the nearest button or tile that way (held: repeats) |
 | A | Choose it |
 | B | Back (Back, Done, Resume). On dog select and the map screen it only moves the highlight to Leave Game |
-| LB / RB | The Grand Prix and Maps tabs |
+| LB / RB | The Maps and Grand Prix tabs |
 | Start | In a race: the menu |
 
 It finds buttons by where they are on the screen, so a new screen needs nothing but, where wanted, `data-pad-first` (where the highlight starts) and `data-pad-back` (what B presses). In the race itself only Start does anything; while the race menu is open the controller works the menu and not the dog. In split screen only the controller of the player whose turn it is works dog select. Typing a name still needs a keyboard.

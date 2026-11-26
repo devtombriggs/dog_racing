@@ -1229,10 +1229,11 @@ function getRoomData(room) {
 // MAP VOTE (multiplayer)
 // ---------------------------------
 // When the host presses Next (or a full room has all five dogs picked), everyone votes for a map.
-// The race always starts when the 15 s countdown ends: most votes wins, a tie (say 50/50) is a
-// random pick between the tied maps, and no votes at all picks a random map.
+// The race starts when the two-minute countdown ends, or sooner when the host presses Start (Tom,
+// 2026-11-26): most votes wins, a tie (say 50/50) is a random pick between the tied maps, and no
+// votes at all picks a random map.
 
-const MAP_VOTE_MS = 15000;
+const MAP_VOTE_MS = 120000;
 
 // Automatic only for a full room (all five dogs picked); otherwise the host presses Next.
 function maybeBeginMapVote(room) {
@@ -2252,6 +2253,20 @@ io.on('connection', (socket) => {
     room.votes.set(playerId, data.mapId);
     callback?.({ success: true });
     updateLobby(room);
+  });
+
+  // START (host): close the map vote now and race on whatever is winning
+
+  socket.on('endMapVote', (callback) => {
+    const room = rooms.get(playerRooms.get(playerId));
+    if (!room || room.status !== 'voting' || !room.players.has(playerId)) {
+      return callback?.({ success: false, error: 'There is no map vote running' });
+    }
+    if (room.hostId !== playerId) {
+      return callback?.({ success: false, error: 'Only the host can start the race' });
+    }
+    callback?.({ success: true });
+    finishMapVote(room);
   });
 
   // Which dog a player is looking at on the select screen, shown to the others

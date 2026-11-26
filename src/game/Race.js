@@ -18,6 +18,7 @@ import { formatTime } from '../utils/format.js';
 import { RaceScene } from './RaceScene.js';
 import { TrackWorld } from './TrackWorld.js';
 import { ChaseCamera } from './ChaseCamera.js';
+import { phoneZoom } from '../touch.js';
 import { PlayerInput } from './PlayerInput.js';
 import { RescueWatch } from './RescueWatch.js';
 import { LocalDog } from './dogs/LocalDog.js';
@@ -531,7 +532,9 @@ export class Race {
 
     this.#wasRacing = true;
 
-    this.chaseCamera.easeFov(local.fov, delta);
+    // (a phone: the same view through a longer lens, so the dogs are bigger)
+    const zoom = phoneZoom();
+    this.chaseCamera.easeFov(zoom === 1 ? local.fov : 2 * Math.atan(Math.tan(local.fov * Math.PI / 360) / zoom) * 180 / Math.PI, delta);
     local.update(delta);
 
     // ---------------------------------

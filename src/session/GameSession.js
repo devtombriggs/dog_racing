@@ -74,7 +74,7 @@ export class GameSession {
     socketId: null,
     error: '',
     hoveredDog: null,
-    mapTab: 'cups',          // the map screen's tab to open on: 'cups' (Grand Prix) | 'maps'
+    mapTab: 'maps',          // the map screen's tab to open on: 'maps' | 'cups' (Grand Prix)
     // split screen: the other players' sessions, while a local game is on: { guests: [GameSession] } (see startLocalGame)
     local: null,
     connected: false,
@@ -503,7 +503,7 @@ export class GameSession {
 
   // (tab: which side of the map screen opens after the dog is picked: 'cups' for the Grand Prix, or 'maps')
   startSinglePlayer = (tab) => {
-    this.set({ error: '', mapTab: tab === 'maps' ? 'maps' : 'cups' });
+    this.set({ error: '', mapTab: tab === 'cups' ? 'cups' : 'maps' });
 
     if (!this.socket?.connected) {
       this.set({ error: 'Not connected to server' });
@@ -693,6 +693,14 @@ export class GameSession {
     this.set({ error: '' });
     this.socket?.emit('voteMap', { mapId }, (response) => {
       if (!response?.success) this.set({ error: response?.error || 'Vote not counted' });
+    });
+  };
+
+  // Host only: close the vote now and race on whatever is winning
+  endMapVote = () => {
+    this.set({ error: '' });
+    this.socket?.emit('endMapVote', (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Could not start the race' });
     });
   };
 

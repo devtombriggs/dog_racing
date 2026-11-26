@@ -310,6 +310,7 @@
   box-shadow: 0 4px 0 #c96f00;
 }
 .zr-timer strong { font: 400 clamp(22px, 4.4vh, 38px)/1 var(--zr-display); font-variant-numeric: tabular-nums; }
+.zr-timer .zr-btn { margin-top: 6px; }
 
 /* tabs: Tom's two pictures of each, lit and unlit */
 .zr-tabs {

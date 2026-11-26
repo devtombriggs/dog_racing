@@ -9,9 +9,10 @@
 import { PICKUP_PATHS } from '../shared/pickupSpots.js';
 
 const SIZE = 230, PAD = 16;                  // drawn in these units: the panel is SIZE wide, as tall as the course needs
-// ...and shown bigger on a big screen: about 36% of the window's height, never under SIZE (Tom, 2026-11-24: "on my
-// monitor the map seems small... smaller on mobile not PC"; a phone shrinks it again in index.css)
-const shownScale = () => Math.min(2, Math.max(1, (window.innerHeight * 0.36) / SIZE));
+// ...and shown bigger on a big screen: about 25% of the window's height, never under SIZE (Tom, 2026-11-24: "on my
+// monitor the map seems small... smaller on mobile not PC"; 36% of the height was then "way too big", 2026-11-26;
+// a phone shrinks it again in index.css)
+const shownScale = () => Math.min(1.5, Math.max(1, (window.innerHeight * 0.25) / SIZE));
 
 export function createMinimap({ canvas, mapId, marks = [] }) {
   const path = PICKUP_PATHS[mapId];

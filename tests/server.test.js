@@ -1106,7 +1106,7 @@ test('jumping: a dog in the air still launches off Treat Road\'s pad and can cle
   tom.call('leaveGame'); berri.call('leaveGame');
 });
 
-test('map vote: a full room starts it on its own, it always runs the full 15 s, most votes wins', context => {
+test('map vote: a full room starts it on its own, it runs the full two minutes unless the host starts it, most votes wins', context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const players = ['A', 'B', 'C', 'D', 'E', 'F'].map(() => client());
   const [a, b, c] = players;
@@ -1119,7 +1119,7 @@ test('map vote: a full room starts it on its own, it always runs the full 15 s, 
   players.slice(3).forEach((p, i) => p.call('selectDog', { dog: dogs[i + 3] }));
   const voting = latest(room.code, 'lobbyUpdated');
   assert.equal(voting.status, 'voting', 'all six dogs picked: the vote starts by itself');
-  assert.equal(voting.voteMsLeft, 15000);
+  assert.equal(voting.voteMsLeft, 120000);
   assert.deepEqual(lobbies().filter(l => l.code === room.code), [], 'no joining once the vote is on');
   assert.equal(a.call('voteMap', { mapId: 'nowhere' }).success, false);
   a.call('voteMap', { mapId: 'frostpeak' }); b.call('voteMap', { mapId: 'treat_road' });
@@ -1130,13 +1130,32 @@ test('map vote: a full room starts it on its own, it always runs the full 15 s, 
   assert.equal(latest(room.code, 'raceStarted'), undefined);
   players[4].call('voteMap', { mapId: 'frostpeak' });                // everyone has voted (3 Frostpeak)...
   assert.equal(latest(room.code, 'raceStarted'), undefined, '...but it waits for the countdown');
-  context.mock.timers.tick(14999);
+  context.mock.timers.tick(119999);
   assert.equal(latest(room.code, 'raceStarted'), undefined);
   context.mock.timers.tick(1);
   assert.equal(latest(room.code, 'raceStarted').mapId, 'frostpeak', 'most votes wins');
-  context.mock.timers.tick(20000);
+  context.mock.timers.tick(150000);
   assert.equal(server.events.filter(e => e.room === room.code && e.event === 'raceStarted').length, 1, 'only started once');
   for (const p of players) p.call('leaveGame');
+});
+
+test('map vote: the host can start the race before the countdown ends; nobody else can', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const a = client(), b = client();
+  const room = a.call('hostGame', { name: 'A' }).room;
+  b.call('joinGame', { roomCode: room.code, name: 'B' });
+  a.call('selectDog', { dog: 'gsp' }); b.call('selectDog', { dog: 'ralph' });
+  assert.equal(a.call('endMapVote').success, false, 'no vote running yet');
+  a.call('skipToMapVote');
+  b.call('voteMap', { mapId: 'frostpeak' });
+  context.mock.timers.tick(5000);
+  assert.equal(b.call('endMapVote').success, false, 'only the host');
+  assert.equal(latest(room.code, 'raceStarted'), undefined);
+  assert.equal(a.call('endMapVote').success, true);
+  assert.equal(latest(room.code, 'raceStarted').mapId, 'frostpeak', 'the votes so far decide it');
+  context.mock.timers.tick(150000);
+  assert.equal(server.events.filter(e => e.room === room.code && e.event === 'raceStarted').length, 1, 'the countdown does not start it again');
+  a.call('leaveGame'); b.call('leaveGame');
 });
 
 test('map vote: the countdown starts the race; ties and no votes are settled at random', context => {
@@ -1149,8 +1168,8 @@ test('map vote: the countdown starts the race; ties and no votes are settled at 
     a.call('selectDog', { dog: 'gsp' }); b.call('selectDog', { dog: 'ralph' });
     a.call('skipToMapVote');
     votes.forEach((mapId, i) => mapId && [a, b][i].call('voteMap', { mapId }));
-    context.mock.timers.tick(14999);
-    assert.equal(latest(room.code, 'raceStarted'), undefined, 'not before 15 s');
+    context.mock.timers.tick(119999);
+    assert.equal(latest(room.code, 'raceStarted'), undefined, 'not before two minutes');
     context.mock.timers.tick(1);
     const mapId = latest(room.code, 'raceStarted')?.mapId;
     a.call('leaveGame'); b.call('leaveGame');
@@ -1754,7 +1773,7 @@ test('Grand Prix: it can win the map vote like any map', context => {
   assert.equal(tom.call('voteMap', { mapId: 'gp2' }).success, true);
   assert.equal(berri.call('voteMap', { mapId: 'gp2' }).success, true);
   assert.equal(berri.call('voteMap', { mapId: 'gp7' }).success, false);
-  context.mock.timers.tick(15000);
+  context.mock.timers.tick(120000);
   const start = latest(room.code, 'raceStarted');
   assert.equal(start.mapId, 'farmyard');
   assert.deepEqual(start.grandPrix, { id: 'gp2', name: 'Grand Prix 2', round: 1, of: 4 });

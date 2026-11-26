@@ -18,6 +18,11 @@ export const onTouch = asked || (typeof window !== 'undefined' && typeof navigat
 // A dog turns this much sharper on a phone (Tom, 2026-11-23: "too hard on mobile to turn"), steering with the ◀ ▶ buttons
 export const TOUCH_TURN = 1.25;
 
+// On a phone on its side the picture is short, and the dogs in it small (Tom's iPhone 13, 2026-11-26: "the dogs are almost
+// too small"): the camera looks through a longer lens there, which draws everything this much bigger.  A tablet is left alone
+export const PHONE_ZOOM = 1.3;
+export const phoneZoom = () => (onTouch && typeof window !== 'undefined' && window.innerHeight <= 480 ? PHONE_ZOOM : 1);
+
 export const touchInput = {
   turn: 0, drift: false, brake: false,
   jump: () => {}, useItem: () => {},       // (set by the race's PlayerInput while it is on)

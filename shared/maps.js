@@ -19,7 +19,7 @@ export const PROCEDURAL_TRACKS = { wendover: WENDOVER_WOODS, treat_road: TREAT_R
   desert_dunes: DESERT, speed_bowl: SPEED_BOWL, kombu_house: KOMBU_HOUSE, neon_nexus: NEON,
   yorkshire_dales: DALES, boneyard: BONEYARD, the_vets: VETS, monkey_jungle: JUNGLE };
 const PROCEDURAL_DESCRIPTIONS = {
-  wendover: `${(WENDOVER_WOODS.length / 1000).toFixed(2)} km through the woods · bluebells and deer · through the hollow log · swim the beck · round the old oak · the Treetop Walk · the long drift off the ridge · jump the fallen log`,
+  wendover: `${(WENDOVER_WOODS.length / 1000).toFixed(2)} km through the woods, and fast · downhill past the deer · the Speed Tunnel · jump the beck · High Path or Low Path · boosts over the ridge · the long drift · fallen trees to jump`,
   yorkshire_dales: `${(DALES.length / 1000).toFixed(2)} km over the fells · zig-zags up Cheese Fell, and the goat path across a hairpin · flat out down the other side · sheep · through the cave, out of the waterfall and down the stream, rock to rock`,
   boneyard: `${(BONEYARD.length / 1000).toFixed(2)} km in the rain · a lap the shape of a bone · Golden Bones all the way round · muddy water to wade and swim · rolling bones and mud spouts`,
   the_vets: `${(VETS.length / 1000).toFixed(2)} km inside the vets · in on the treadmill · three storeys of syringes, giant pills, cones of shame and vets in masks · out of the top-floor window`,
