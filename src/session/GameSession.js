@@ -466,7 +466,7 @@ export class GameSession {
         if (!room || !player) return;
         const was = room.players.find(each => each.id === oldId)?.name ?? 'A player';
         this.set({ room: { ...room, players: room.players.map(each => (each.id === oldId ? player : each)) } });
-        if (left) this.#say(`${was} left: the computer has their dog again`);
+        if (left) this.#say(`${was} left: the computer has their dog now`);
         else if (player.id !== this.state.socketId) this.#say(`${player.name} joined: they have the computer’s dog`);
       },
 

@@ -622,7 +622,7 @@ test('race standings rank by lap, checkpoint and distance, follow overtakes, and
   assert.deepEqual(order(), ['Sam', 'Berri', 'Tom'], 'finishers stay first while the rest keep racing');
 
   berri.call('leaveGame');
-  assert.deepEqual(order(), ['Sam', 'Tom'], 'a player who leaves drops off the board');
+  assert.deepEqual(order(), ['Sam', 'CPU', 'Tom'], 'the dog of a player who leaves stays in the race, as a computer dog (Tom, 2026-11-27: "if a player leaves the race the dog should stay in")');
   tom.call('leaveGame'); sam.call('leaveGame');
 });
 
@@ -1860,7 +1860,8 @@ test('a refresh: the seat is held for a minute, the dog jogs on by itself, and t
   context.mock.timers.tick(59999);
   assert.equal(events('playerLeft').length, 0);
   context.mock.timers.tick(1);
-  assert.deepEqual(events('playerLeft').at(-1), { playerId: berri.id });
+  assert.equal(events('playerLeft').length, 0, 'her dog stays in the race');
+  assert.deepEqual([events('playerReplaced').at(-1).oldId, events('playerReplaced').at(-1).left, events('playerReplaced').at(-1).player.bot], [berri.id, true, true]);
   assert.equal(client().call('resume', { token }).success, false, 'too late');
   // a browser that never said who it was leaves at once (and Tom leaving the usual way empties the room)
   tom.call('leaveGame');

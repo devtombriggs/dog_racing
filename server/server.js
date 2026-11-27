@@ -2132,9 +2132,10 @@ function leaveRoom(socket, id = id) {
   if (!room) return;
 
   const leaving = room.players.get(id);
-  // A player who took over a computer dog and leaves while that race is still on: the dog is the computer's again, and races
-  // on (Tom, 2026-11-27: "once he left... that dog/player disappeared from the game")
-  if (leaving?.tookOver && IN_A_RACE.includes(room.status)) {
+  // A player who leaves (or is kicked, or drops for good) while a race is on: their dog is a computer dog from there, and
+  // races on (Tom, 2026-11-27: "if a player leaves the race the dog should stay in").  It goes with the other computer dogs
+  // when the room is back in the lobby.  (The last person out takes the room with them, as before.)
+  if (leaving && !leaving.bot && IN_A_RACE.includes(room.status) && humans(room).length > 1) {
     handBack(room, leaving);
   } else {
     if (leaving) { clearTimeout(activeSpecials.get(leaving)?.timer); activeSpecials.delete(leaving); }
