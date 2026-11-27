@@ -1950,11 +1950,11 @@ test('Kombu\'s Kelp Dive: further up the road the further back he is (as far as 
   // Poppy's wave: 5 s at 1.9 times her 18 m/s (17 for a 7, and she is an 8 since every dog got a point faster: Tom, 2026-11-27)
   assert.ok(Math.abs(KELP.distance - 17 * 1.06 * SPECIALS.black_lab.speed * SPECIALS.black_lab.durationMs / 1000) < 1e-9);
   assert.ok(KELP.distance > 150 && KELP.distance < 175, `${KELP.distance} m`);
-  // all of it from 6th, less for every place nearer the front, under a third of it from 2nd
+  // all of it from 6th, less for every place nearer the front, about 75 m of it from 2nd (Tom, 2026-11-27: from 2nd "his ult hardly did anything" at 48 m)
   assert.equal(kelpDistance(6), KELP.distance);
   assert.equal(kelpDistance(8), KELP.distance);
   for (let place = 2; place < 6; place++) assert.ok(kelpDistance(place) < kelpDistance(place + 1), `${place} goes less far than ${place + 1}`);
-  assert.ok(kelpDistance(2) > 40 && kelpDistance(2) < KELP.distance / 3, `${kelpDistance(2)} m from 2nd`);
+  assert.ok(kelpDistance(2) > 70 && kelpDistance(2) < 80 && kelpDistance(2) < KELP.distance / 2, `${kelpDistance(2)} m from 2nd`);
   assert.equal(kelpDistance(1), kelpDistance(2));
   const at = s => { const p = FARM.pointAt(s); return [p.x, p.y, p.z]; };
   const along = position => FARM.query(position[0], position[2]).s;
@@ -2919,4 +2919,61 @@ test('friends (Tom, 2026-11-27): asked by username and accepted; the list says w
   db.deleteUser(users[2].id);
   assert.deepEqual(alfie.call('friends').friends, []);
   alfie.call('disconnect');
+});
+
+test('a player who took over a computer dog and leaves mid-race hands it back: the same dog races on as a computer dog (Tom, 2026-11-27)', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client(), berri = client(), sam = client();
+  const room = tom.call('hostGame', { mapId: 'farmyard', name: 'Tom' }).room;
+  tom.call('selectDog', { dog: 'gsp' }); tom.call('setBots', { count: 2, level: 'hard' });
+  tom.call('startRace'); tom.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const live = rooms.get(room.code), at = live.players.get(tom.id).position;
+  const second = () => { tom.call('playerMove', { position: at, rotation: 0, animation: 'Run', respawnRevision: 0 }); for (let i = 0; i < 20; i++) context.mock.timers.tick(50); };
+  second();
+  // Berri jumps in and takes the dog; Sam joins the lobby; then both leave
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri', jumpIn: true }); berri.call('backInRace');
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  const hers = live.players.get(berri.id), his = live.players.get(sam.id), dogs = [hers.dog, his.dog];
+  assert.equal(live.players.size, 3);
+  const leftBefore = server.events.filter(e => e.room === room.code && e.event === 'playerLeft').length;
+  berri.call('leaveGame'); sam.call('disconnect');
+  assert.equal(live.players.size, 3, 'nobody has gone from the race');
+  assert.equal(server.events.filter(e => e.room === room.code && e.event === 'playerLeft').length, leftBefore, 'and nobody is told a dog has left');
+  for (const dog of [hers, his]) assert.deepEqual([dog.bot, dog.name, dog.level, dog.away, dog.inLobby, dog.id.startsWith('bot-'), live.players.get(dog.id) === dog], [true, 'CPU', 'hard', false, false, true, true]);
+  assert.deepEqual([hers.dog, his.dog], dogs);
+  const told = latest(room.code, 'playerReplaced');
+  assert.deepEqual([told.left, told.player.name, told.player.bot], [true, 'CPU', true]);
+  // both run on by themselves
+  const before = [hers, his].map(dog => FARM.query(dog.position[0], dog.position[2]).s);
+  for (let t = 0; t < 4; t++) second();
+  [hers, his].forEach((dog, k) => assert.ok(((FARM.query(dog.position[0], dog.position[2]).s - before[k]) % FARM.length + FARM.length) % FARM.length > 15, `${dog.dog} has run on`));
+  // and can be taken over again
+  assert.equal(berri.call('joinGame', { roomCode: room.code, name: 'Berri' }).success, true);
+  // the host leaving ends the room (the only one who was there from the start); the rest go with it or carry on
+  for (const p of [berri, tom]) p.call('leaveGame');
+  assert.equal(rooms.has(room.code), false);
+});
+
+test('back from the map vote (Tom, 2026-11-27): the host calls it off and everyone is at character select again with their dogs; it can be started again', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  assert.equal(tom.call('cancelMapVote').success, false, 'nothing to go back from yet');
+  tom.call('skipToMapVote');
+  berri.call('voteMap', { mapId: 'frostpeak' });
+  assert.equal(berri.call('cancelMapVote').error, 'Only the host can go back');
+  assert.equal(tom.call('cancelMapVote').success, true);
+  const back = latest(room.code, 'lobbyUpdated');
+  assert.deepEqual([back.status, back.voteMsLeft, Object.keys(back.votes).length, back.players.map(p => p.dog).join()], ['lobby', null, 0, 'gsp,pablo']);
+  // the old vote's clock does not start a race behind everyone's back
+  context.mock.timers.tick(130000);
+  assert.equal(rooms.get(room.code).status, 'lobby');
+  // a dog can be changed, and the vote held again
+  assert.equal(berri.call('selectDog', { dog: 'ralph' }).success, true);
+  assert.equal(tom.call('skipToMapVote').success, true);
+  assert.equal(latest(room.code, 'lobbyUpdated').status, 'voting');
+  for (const p of [tom, berri]) p.call('leaveGame');
 });

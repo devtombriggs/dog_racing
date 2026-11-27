@@ -3,6 +3,7 @@ import { DRIFT } from '../../../shared/drift.js';
 import { applyTurnPose, applySkidPose, skidSway, lowestPaw, pawStance } from './animation.js';
 import { createDriftEffects } from './driftEffects.js';
 import { createSkateboard } from './skateboard.js';
+import { createTaco } from './taco.js';
 import { createWheelFire } from './wheelFire.js';
 
 // How a skid looks, for any dog in the race: the player's own (LocalDog) and everyone else's (RemoteDog,
@@ -30,7 +31,7 @@ export class SkidView {
     this.hop = 1;             // how far through the hop that starts a skid (1 and over: done)
     this.skid = null;
     this.stance = null;       // where its paws are, standing (animation.js pawStance)
-    this.board = null;        // Ralph's skateboard
+    this.board = null;        // Ralph's skateboard, or Nacho's taco
     this.effects = null;      // dust and sparks (made the first time it skids)
     this.fire = null;         // Jimmy's wheel fire downhill (wheelFire.js)
     this.posed = false;       // it has moved the model about, and has to put it back
@@ -47,7 +48,9 @@ export class SkidView {
     const board = config.skid.board;
     if (board && !this.board) {
       const { front, back, side } = this.stance;
-      this.board = createSkateboard({ length: front - back + 0.2 * config.scale, width: Math.max(side * 2 + 0.07 * config.scale, 0.12 * config.scale), colour: board.colour, size: board.size });
+      // (board.kind 'taco': Nacho's, in place of the skateboard)
+      const make = board.kind === 'taco' ? createTaco : createSkateboard;
+      this.board = make({ length: front - back + (board.longer ?? 0.2) * config.scale, width: Math.max(side * 2 + 0.07 * config.scale, 0.12 * config.scale), colour: board.colour, size: board.size });
       this.board.object.position.z = (front + back) / 2;
       this.board.holder = new THREE.Group();          // (turned and leant with the dog)
       this.board.holder.add(this.board.object);

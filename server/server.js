@@ -1495,6 +1495,25 @@ function takeOver(room, player, { id, name, userId, device }) {
   console.log(`${name} took over a computer dog in ${room.code}`);
 }
 
+// ...and the other way: the dog a player took over is a computer dog again, the same dog in the same place
+function handBack(room, player) {
+  const oldId = player.id;
+  let id = `bot-${room.code}-${player.slot}`;
+  for (let n = 2; room.players.has(id); n++) id = `bot-${room.code}-${player.slot}-${n}`;
+  room.players.delete(oldId);
+  Object.assign(player, { id, name: 'CPU', bot: true, level: room.bots?.level ?? 'medium', userId: null, inLobby: false, satOut: false, tookOver: false,
+    away: false, voice: false, loaded: true });
+  room.players.set(id, player);
+  for (const toy of room.hazards.values()) if (toy.owner === oldId) toy.owner = id;
+  if (room.status === 'racing' && !botDrivers.has(player)) {
+    const driver = createBot({ mapId: room.mapId, dog: player.dog, level: player.level, seed: Date.now() >>> 0, heightAt: BALL_GROUND[room.mapId] ?? null });
+    driver.place(player.position, player.rotation);
+    botDrivers.set(player, driver);
+    if (!room.botTimer) { room.botTickedAt = Date.now(); room.botTimer = setInterval(() => tickBots(room), BOT_TICK_MS); room.botTimer.unref?.(); }
+  }
+  io.to(room.code).emit('playerReplaced', { oldId, player, left: true });
+}
+
 function playerName(value, fallback) {
   return typeof value === 'string'
     ? value.replace(/\s+/g, ' ').trim().slice(0, 24) || fallback
@@ -2113,12 +2132,18 @@ function leaveRoom(socket, id = id) {
   if (!room) return;
 
   const leaving = room.players.get(id);
-  if (leaving) { clearTimeout(activeSpecials.get(leaving)?.timer); activeSpecials.delete(leaving); }
-  room.players.delete(id);
+  // A player who took over a computer dog and leaves while that race is still on: the dog is the computer's again, and races
+  // on (Tom, 2026-11-27: "once he left... that dog/player disappeared from the game")
+  if (leaving?.tookOver && IN_A_RACE.includes(room.status)) {
+    handBack(room, leaving);
+  } else {
+    if (leaving) { clearTimeout(activeSpecials.get(leaving)?.timer); activeSpecials.delete(leaving); }
+    room.players.delete(id);
 
-  io.to(roomCode).emit('playerLeft', {
-    playerId: id
-  });
+    io.to(roomCode).emit('playerLeft', {
+      playerId: id
+    });
+  }
 
   room.votes?.delete(id);
 
@@ -2546,6 +2571,20 @@ io.on('connection', (socket) => {
     }
     callback?.({ success: true });
     beginMapVote(room);
+  });
+
+  // BACK (host): call the map vote off; everyone is at character select again, with the dogs they picked (Tom, 2026-11-27:
+  // "on map select the host should be able to go back")
+  socket.on('cancelMapVote', (callback) => {
+    const room = rooms.get(playerRooms.get(playerId));
+    if (!room || room.status !== 'voting') return callback?.({ success: false, error: 'There is no map vote to go back from' });
+    if (room.hostId !== playerId) return callback?.({ success: false, error: 'Only the host can go back' });
+    clearMapVote(room);
+    room.votes = new Map();
+    room.voteEndsAt = 0;
+    room.status = 'lobby';
+    callback?.({ success: true });
+    updateLobby(room);
   });
 
   // VOTE FOR A MAP

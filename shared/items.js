@@ -86,6 +86,16 @@ export const COLLAR = {
   durationMs: 5000,     // how long the golden shield lasts once the collar is on
 };
 
+// Boosts stack (Tom, 2026-11-27: "if you get or have a speed boost and get another speed boost, you should go even faster";
+// "cap the twice top speed"): a Golden Bone, another Golden Bone on top of it, the boost out of a skid, the little extra
+// in a skid, a speed pad, a landing boost and a burrow's dash each multiply the dog's top speed while they last, each on
+// its own clock, and all of them together never more than BOOST_CAP times it.  (Until then only a pad and a bone did: of
+// the rest, the best one counted.)  A special's own speed is not a boost: it is not capped, and boosts go on top as before.
+// Two speed pads do not stack with each other: they are part of the road, and a row of them would be a different map.
+export const BOOST_CAP = 2;
+/** The dog's top speed multiplier from every boost it has just now: their product, at most BOOST_CAP */
+export const stackBoosts = (...boosts) => Math.min(BOOST_CAP, boosts.reduce((all, boost) => all * Math.max(1, boost ?? 1), 1));
+
 // What a golden bone does to the dog that eats it (the item, or one picked up off the road)
 export const BONE_BOOST = {
   speedMultiplier: 1.3,       // top speed while boosted (brief: ~1.25; raised to be clearly felt)

@@ -31,6 +31,9 @@ const BOARD_SKID = {
   bend: { thigh: -0.22, shin: 0.4, metatarsus: -0.22, upperarm: 0.26, forearm: -0.38, pastern: 0.12 },
   life: SKID_LIFE
 };
+// Nacho hops into a hard-shell taco (src/game/dogs/taco.js) and slides round in it (Tom, 2026-11-27: "do the mexican dog
+// drifting style on a taco").  His legs as Ralph's on his board; the looks only: his drift is what it was
+const TACO_SKID = { ...BOARD_SKID, board: { kind: 'taco', size: 0.55, longer: 0.34 } };
 // Jimmy's wheels lock and slide round behind him: he braces his front legs and steers the cart through it
 const CART_SKID = {
   hop: ['Jump', 0.5], slide: 'Idle', pitch: -0.03,
@@ -355,7 +358,7 @@ export const DOGS = {
     model: '/models/nacho.glb',
     stats: DOG_STATS.nacho,
     perk: 'Small enough for Ralph’s burrows',
-    skid: CROUCH_SKID,
+    skid: TACO_SKID,
     // (Poppy's frame made tiny, in a sombrero and a poncho.  The smallest dog: about 0.75 m at the back here, 1.1 to the top
     //  of his hat.  His legs go like a sewing machine)
     scale: 1.35,

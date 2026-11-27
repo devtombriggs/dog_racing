@@ -4,7 +4,7 @@ import { bellyBounce, ghostsThrough, jumpsInSpecial, SPECIALS } from '../../../s
 import { woodlandPlankAt, woodlandSwimMultiplier, woodlandBogAt, BOG_SPEED } from '../../../shared/wendoverData.js';
 import { BASE_SPEED, downhillSpeed, downhillShare, swimSpeed } from '../../../shared/dogStats.js';
 import { JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../../../shared/handling.js';
-import { PAD_KICK } from '../../../shared/items.js';
+import { PAD_KICK, stackBoosts } from '../../../shared/items.js';
 import { SLALOM } from '../../../shared/slalom.js';
 import { DRIFT, AUTO_DRIFT, DRIFT_ARC, driftPerks, driftCanStart, driftArc, driftSteering, driftStep, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow, autoDriftHeld, autoDriftCurvature } from '../../../shared/drift.js';
 import { DRIFT_HUD_COLOURS } from './driftEffects.js';
@@ -377,9 +377,10 @@ export class LocalDog extends DogAvatar {
     this.driftBoostUntil = performance.now() + (earned.seconds + earned.easeOut) * 1000;
     this.driftBoost = earned;
     // (a Golden Bone's boost and a skid's do not add up: no kick on top of a bone)
-    const boosted = this.sprintSpeed * earned.speed;
+    // (on top of a Golden Bone, if it has one)
+    const boosted = this.sprintSpeed * stackBoosts(earned.speed, this.race.goldenBones.speedMultiplier());
     // (its first burst of speed is fed in over a quarter of a second: the dog surges, it does not jump forward)
-    if (this.currentSpeed > 0 && this.currentSpeed < boosted && !this.race.goldenBones.isBoosting()) {
+    if (this.currentSpeed > 0 && this.currentSpeed < boosted) {
       const give = Math.min(boosted - this.currentSpeed, this.sprintSpeed * (earned.speed - 1) * earned.kick);
       this.kick = { left: give, rate: give / DRIFT_ARC.kickSeconds, upTo: boosted };
     }
@@ -644,19 +645,23 @@ export class LocalDog extends DogAvatar {
       : THREE.MathUtils.clamp(1 - HANDLING.hillEffect * slope, 0.8, 1.08);
     frame.terrainMultiplier = terrainMultiplier;
     frame.inWater = Boolean(inWater);
-    // the boost out of a skid (it does not add to a Golden Bone, a boost pad or a landing boost: the best of them counts)
+    // the boost out of a skid (it stacks with a Golden Bone, a boost pad and a landing boost: shared/items.js stackBoosts)
     const driftLeft = (this.driftBoostUntil - padNow) / 1000;
-    const driftNow = goldenBones.isBoosting() || !this.driftBoost ? 1 : driftBoostNow(driftLeft, this.driftBoost.speed, this.driftBoost.easeOut);
+    const driftNow = !this.driftBoost ? 1 : driftBoostNow(driftLeft, this.driftBoost.speed, this.driftBoost.easeOut);
     // Wet ground (the mud run): a dog slides where it was going and is slow to pick up speed
     const wet = coastalTrack?.rules.slip, slip = frame.slip = wet && !this.isJumping ? coastalGround.slippery ?? 0 : 0;
     const maxSpeed = frame.maxSpeed =
       sprintSpeed *
       terrainMultiplier *
       hillMultiplier *
-      (performance.now() < this.burrowBoostUntil ? this.burrowBoost : 1) *
-      Math.max(kickNow, driftNow, this.drift && !goldenBones.isBoosting() ? driftSpeedNow((performance.now() - this.drift.startedAt) / 1000, this.driftPerks) : 1, performance.now() < this.launchBoostUntil ? this.launchBoost ?? world.launchTrack.launch.exitSpeedMultiplier : 1) *      // (a landing boost, a boost pad's and a skid's do not add up)
+      // (every boost it has multiplies, never more than twice its top speed between them: Tom, 2026-11-27)
+      stackBoosts(
+        performance.now() < this.burrowBoostUntil ? this.burrowBoost : 1,
+        kickNow, driftNow,
+        this.drift ? driftSpeedNow((performance.now() - this.drift.startedAt) / 1000, this.driftPerks) : 1,
+        performance.now() < this.launchBoostUntil ? this.launchBoost ?? world.launchTrack.launch.exitSpeedMultiplier : 1,
+        goldenBones.speedMultiplier()) *      // (a landing boost, a boost pad's and a skid's do not add up)
       (world.proceduralTrack && performance.now() < this.recoveryUntil ? world.proceduralTrack.rules.respawnSpeedMultiplier : 1) *
-      goldenBones.speedMultiplier() *
       (special?.speed ?? 1) *
       (performance.now() < this.quakeUntil ? this.quakeSpeed : 1) *      // (Jazz's Earthquake)
       downhillSpeed(stats, slope) *      // (Jimmy's wheels, where the road drops)

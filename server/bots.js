@@ -19,7 +19,7 @@ import { PROCEDURAL_TRACKS } from '../shared/maps.js';
 import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { DOG_STATS, DOG_STRIDE_BANDS, STAT_EFFECT, BASE_SPEED, statScale, turnSpeedLoss, pickupShare, downhillSpeed } from '../shared/dogStats.js';
 import { HANDLING, JUMP, STEEP_JUMP, DROP, WALL, speedAfterWall } from '../shared/handling.js';
-import { BONE_BOOST, PAD_KICK, TOY } from '../shared/items.js';
+import { BONE_BOOST, PAD_KICK, TOY, stackBoosts } from '../shared/items.js';
 import { SPECIALS, SPECIAL_ITEM, BURROWERS, bellyBounce, jumpsInSpecial } from '../shared/specials.js';
 import { DRIFT, driftPerks, driftArc, driftCurvature, driftChargeRate, driftTier, driftBoost, driftBoostNow, driftSpeedNow } from '../shared/drift.js';
 import { WENDOVER, woodlandWaterAt, woodlandDogY, woodlandSwimMultiplier } from '../shared/wendoverData.js';
@@ -282,7 +282,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   let skid = null, skidBoost = null, inBend = false, wide = null;
   let roughPass = false;         // on a rough short cut, and not slowed by it
   let roughChoice = null;        // { key, take }: whether it is taking the rough short cut it is beside, made up once each lap
-  let time = 0, startAt = between(L.reaction), stunUntil = 0, boneUntil = -1, effect = null, kick = null;       // kick: { speed, until, quick } from a held boost pad
+  let time = 0, startAt = between(L.reaction), stunUntil = 0, boneUntil = -1, boneBoosts = [], effect = null, kick = null;       // kick: { speed, until, quick } from a held boost pad
   let progressAt = 0, progressS = 0, travelled = 0, finishing = false;
   // how it is driving
   const lane = (random() - 0.5) * 0.5, phase = [random() * 7, random() * 7];
@@ -307,7 +307,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       effect = { speed: change.speed, until: time + change.seconds };
       attempt += 1;                        // (a fresh go at whatever it got wrong)
       speed = change.running ? sprintSpeed * change.speed : 0;
-      boneUntil = -1; kick = null;
+      boneUntil = -1; boneBoosts = []; kick = null;
     }
     progressAt = time; progressS = travelled;
   }
@@ -317,19 +317,20 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     const hill = ground.hills ? 1
       : route.steep && slope < 0 ? Math.min(1.75, 1 - 1.7 * slope)
       : clamp(1 - HANDLING.hillEffect * slope, 0.8, 1.08);
-    const boneLeft = boneUntil - time;
-    const bone = boneLeft <= 0 ? 0 : Math.min(1, boneLeft / BONE_BOOST.easeOut);
+    // (each Golden Bone it has eaten that is still going: a bone on a bone is two boosts)
+    const boneBoost = boneBoosts.reduce((all, until) => { const left = until - time; return left <= 0 ? all : all * (1 + (BONE_BOOST.speedMultiplier - 1) * Math.min(1, left / BONE_BOOST.easeOut)); }, 1);
+    const landing = effect && time < effect.until ? effect.speed : 1;
     const kickLeft = kick ? kick.until - time : 0, padBoost = kickLeft > 0 ? 1 + (kick.speed - 1) * Math.min(1, kickLeft / PAD_KICK.easeOut) : 1;
     return sprintSpeed * ground.speed * hill
-      // (a landing boost and a boost pad's do not add up: the greater of the two; a slow-down after a fall still counts)
-      * (padBoost > 1 && !(effect && time < effect.until && effect.speed < 1) ? Math.max(padBoost, effect && time < effect.until ? effect.speed : 1) : effect && time < effect.until ? effect.speed : 1)
-      * (1 + (BONE_BOOST.speedMultiplier - 1) * bone)
+      // (its boosts multiply, never more than twice its top speed between them, as a player's do: shared/items.js stackBoosts.
+      // A slow-down after a fall still counts, and is no boost)
+      * (landing < 1 ? landing : 1)
+      * stackBoosts(padBoost, landing, boneBoost, skid ? driftSpeedNow(time - skid.from, perks) : 1,
+        skidBoost ? driftBoostNow(skidBoost.until - time, skidBoost.speed, skidBoost.easeOut) : 1)
       * (ground.rough && !roughPass ? ground.rough : 1)          // (a short cut over rough ground: slow, but for a dog that came on to it on a Golden Bone)
       * (world.special?.speed ?? 1)
       * (world.slowed ?? 1)                                      // (Jazz's Earthquake)
       * downhillSpeed(stats, slope)                              // (Jimmy's wheels, where the road drops)
-      // (a little faster than flat out in a skid, building the longer it is held, and more for a slow dog; out of one, its boost.  The better of the two, and neither on top of a Golden Bone)
-      * (boneLeft > 0 ? 1 : Math.max(skid ? driftSpeedNow(time - skid.from, perks) : 1, skidBoost ? driftBoostNow(skidBoost.until - time, skidBoost.speed, skidBoost.easeOut) : 1))
       * (time < stunUntil ? 0.15 : 1);
   }
 
@@ -366,7 +367,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
       } else if (Math.abs(bend) < BEND * 0.6 || time >= skid.until) {
         // out of the bend (or it has held it as long as it dares): let go
         const earned = driftBoost(driftTier(skid.charge), perks);
-        if (earned && boneUntil <= time) {                 // (a Golden Bone's boost and a skid's do not add up)
+        if (earned) {                                      // (on top of a Golden Bone, if it has one)
           skidBoost = { ...earned, until: time + earned.seconds + earned.easeOut };
           if (speed > 0 && speed < sprintSpeed * earned.speed) speed = Math.min(sprintSpeed * earned.speed, speed + sprintSpeed * (earned.speed - 1) * earned.kick);
         }
@@ -756,11 +757,11 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
   return {
     place, step,
     /** Knocked over: nearly stopped, and slow until it is back on its paws. */
-    hit(stunMs) { stunUntil = time + stunMs / 1000; speed *= 0.15; boneUntil = -1; kick = null; skid = skidBoost = null; },
+    hit(stunMs) { stunUntil = time + stunMs / 1000; speed *= 0.15; boneUntil = -1; boneBoosts = []; kick = null; skid = skidBoost = null; },
     /** A golden bone (the item, or one off the road). */
     boost() {
       boneUntil = time + BONE_BOOST.duration + BONE_BOOST.easeOut;
-      skidBoost = null;
+      boneBoosts = [...boneBoosts.filter(until => until > time), boneUntil].slice(-4);
       if (speed > 0) speed += sprintSpeed * (BONE_BOOST.speedMultiplier - 1) * BONE_BOOST.instantKick;
     },
     /** Its special has begun: straight up to full pace. */

@@ -87,7 +87,7 @@ export const SPECIALS = {
 // Kombu's Kelp Dive: seaweed comes up out of the ground, pulls him under, and puts him down further up
 // the road.  How far goes by his place in the race: from last of six, as far as Poppy travels on her wave
 // (her top speed, times the wave's, for as long as it lasts: about 160 m); a place nearer the front, a good
-// deal less each time, down to under a third of it from 2nd (about 48 m), so that a Kombu who is already
+// deal less each time, down to under half of it from 2nd (about 75 m), so that a Kombu who is already
 // well up does not jump the whole field.  Whoever is in between is passed, the leader included.  He is
 // put down on plain road (never in a jump, a pool or a hazard: a little short of it instead), and on the
 // last lap never nearer the finish than `beforeFinish`.
@@ -95,8 +95,10 @@ const wave = SPECIALS.black_lab;
 export const KELP = {
   seconds: 1.1,          // how long he is under
   distance: BASE_SPEED.sprint * statScale(DOG_STATS.black_lab.speed, STAT_EFFECT.speed) * wave.speed * wave.durationMs / 1000,
-  fromSecond: 0.3,       // the share of that distance he goes from 2nd place...
-  perPlace: 0.175,       // ...and how much more of it for each place further back (all of it from 6th)
+  // (Tom, 2026-11-27, playing Kombu in 2nd: "his ult hardly did anything".  From 2nd it was 0.3 of it, 48 m, of which he would
+  //  have run 19 m anyway in the time he is under; now 0.44, about 75 m.  Still all of it from 6th)
+  fromSecond: 0.44,      // the share of that distance he goes from 2nd place...
+  perPlace: 0.14,        // ...and how much more of it for each place further back (all of it from 6th)
   beforeFinish: 20,      // metres short of the finish line he stops, on the last lap
   worthIt: 5,            // if it would move him on less than this he is not moved (he gets a golden bone's dash instead)
   boostSeconds: 1.0, speedMultiplier: 1.2,     // the dash he comes up with

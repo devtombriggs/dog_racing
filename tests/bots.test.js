@@ -1,3 +1,4 @@
+import { BOOST_CAP, stackBoosts } from '../shared/items.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { botRoute, createBot } from '../server/bots.js';
@@ -185,7 +186,9 @@ test('computer dogs drift: at some bends, not for long, into the turn, with a bo
   // Ralph gets the super boost from his, as a player's Ralph does
   const ralph = [1, 2, 3].map(seed => watch('ralph', 'hard', seed)), most = driftPerks('ralph').boost.speed;
   assert.ok(ralph.some(r => r.boosts > 0 && r.fastest > 1.3), `Ralph: ${ralph.map(r => r.fastest.toFixed(2))}`);
-  assert.ok(ralph.every(r => r.fastest <= most + 0.01), `never more than the super boost gives: ${ralph.map(r => r.fastest.toFixed(2))}`);
+  // (boosts stack since Tom, 2026-11-27: into the next skid still on the boost out of the last, he has both; never more than twice his top speed)
+  const stacked = Math.min(BOOST_CAP, most * (driftPerks('ralph').speed + DRIFT.speedGain));
+  assert.ok(ralph.every(r => r.fastest <= stacked * 1.09), `never more than the super boost and a skid give together: ${ralph.map(r => r.fastest.toFixed(2))}`);
   assert.ok(DRIFT_PERKS.ralph);
 });
 
@@ -221,4 +224,31 @@ test('Wendover Woods: every level gets over the fallen log, from a run-up, from 
     assert.ok(over, `${level} ${dog} from ${back} m: stuck at the log`);
     if (back === 80) assert.equal(hits, 0, `${level} ${dog}: hit the log from a run-up`);
   }
+});
+
+test('boosts stack (Tom, 2026-11-27): each one multiplies the top speed, a bone on a bone too, and all together never more than twice it', async () => {
+  const { BONE_BOOST } = await import('../shared/items.js');
+  const bone = BONE_BOOST.speedMultiplier;
+  assert.equal(stackBoosts(), 1); assert.equal(stackBoosts(1, 1, undefined), 1);
+  assert.equal(stackBoosts(bone), bone);
+  assert.ok(Math.abs(stackBoosts(bone, bone) - bone * bone) < 1e-9 && stackBoosts(bone, bone) > 1.6, 'a bone on a bone');
+  assert.ok(Math.abs(stackBoosts(bone, driftPerks('ralph').boost.speed) - bone * 1.4) < 1e-9, 'a bone and the super boost out of a skid');
+  assert.equal(stackBoosts(bone, bone, bone), BOOST_CAP); assert.equal(BOOST_CAP, 2);
+  assert.equal(stackBoosts(0.5, bone), bone, 'a slow-down is not a boost: it is counted elsewhere');
+  // a computer dog too: a second bone while the first is going is faster than one, and no faster than the cap
+  const fastest = (bones) => {
+    const bot = createBot({ mapId: 'modbury_heights', dog: 'gsp', level: 'hard', seed: 5 });
+    const route = botRoute('modbury_heights'), start = route.pointAt(40);
+    bot.place([start.x, start.y, start.z], start.heading);
+    let top = 0;
+    for (let step = 0; step < 240; step++) {
+      if (step === 100) for (let n = 0; n < bones; n++) bot.boost();
+      bot.step(0.05, {});
+      if (step >= 100 && step < 130) top = Math.max(top, bot.speed / bot.sprintSpeed);       // (the second and a half after the bones)
+    }
+    return top;
+  };
+  const [none, one, two, four] = [0, 1, 2, 4].map(fastest);
+  assert.ok(one > none + 0.15 && two > one + 0.15, `none ${none.toFixed(2)}, one bone ${one.toFixed(2)}, two ${two.toFixed(2)}`);
+  assert.ok(four <= BOOST_CAP * 1.09 + 0.01 && four >= two, `four bones ${four.toFixed(2)}`);
 });

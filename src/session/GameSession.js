@@ -367,6 +367,8 @@ export class GameSession {
           if (updatedRoom.voteMsLeft != null) this.voteDeadline = performance.now() + updatedRoom.voteMsLeft;
           if (['selection', 'garage', 'shop'].includes(this.state.screen)) this.set({ screen: 'mapVote' });
         }
+        // (the host has called the vote off: back to character select)
+        if (updatedRoom.status === 'lobby' && this.state.screen === 'mapVote') this.set({ screen: 'selection' });
       },
 
       raceStarted: (data) => {
@@ -458,11 +460,14 @@ export class GameSession {
       },
 
       // Someone has joined a race that is going by taking over one of its computer dogs
-      playerReplaced: ({ oldId, player }) => {
+      // (left: the other way, a player who had taken one over has gone, and the dog is the computer's again)
+      playerReplaced: ({ oldId, player, left }) => {
         const room = this.state.room;
         if (!room || !player) return;
+        const was = room.players.find(each => each.id === oldId)?.name ?? 'A player';
         this.set({ room: { ...room, players: room.players.map(each => (each.id === oldId ? player : each)) } });
-        if (player.id !== this.state.socketId) this.#say(`${player.name} joined: they have the computer’s dog`);
+        if (left) this.#say(`${was} left: the computer has their dog again`);
+        else if (player.id !== this.state.socketId) this.#say(`${player.name} joined: they have the computer’s dog`);
       },
 
       // Removed from the room by its host (kicked: free to come back; banned: not until the host says)
@@ -825,6 +830,16 @@ export class GameSession {
     this.set({ error: '' });
     this.socket?.emit('skipToMapVote', (response) => {
       if (!response?.success) this.set({ error: response?.error || 'Could not move on to the map vote' });
+    });
+  };
+
+  // Back from the map screen to character select.  The map vote: host only, and everyone goes back, keeping their dogs.
+  // Single player and split screen: just this screen
+  backToDogs = () => {
+    this.set({ error: '' });
+    if (this.state.screen !== 'mapVote') { this.set({ screen: 'selection' }); return; }
+    this.socket?.emit('cancelMapVote', (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Could not go back' });
     });
   };
 

@@ -149,6 +149,8 @@ export function MapScreen({ session, state }) {
 
       <footer className="zr-footer">
         <button className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="focus" onClick={session.leaveGame}>Leave Game</button>
+        {/* (back to character select: Tom, 2026-11-27.  In a map vote it is the host's, and takes everyone back) */}
+        {(!voting || host) && <button className="zr-btn zr-btn--small" disabled={!connected} onClick={session.backToDogs}>← Back to Dogs</button>}
         {/* (the vote is too late to change them: they are settled in the lobby) */}
         <BotSettings session={session} room={room} canChange={!voting && connected && room?.hostId === socketId} />
         <p>

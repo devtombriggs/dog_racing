@@ -135,11 +135,13 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
     }
   }).catch(err => console.warn('[GoldenBones] model failed to load:', err));
 
-  let boostStart = -Infinity;            // seconds (performance clock)
+  // (every bone eaten while another's boost is still going is a boost of its own, on its own clock: shared/items.js stackBoosts)
+  let boostStarts = [];                  // seconds (performance clock), the newest last
+  const begin = (t) => { boostStarts = [...boostStarts.filter(start => t - start < C.duration + C.easeOut), t].slice(-4); };
   const othersBoostStart = new Map();    // other dogs boosting: id -> start
   const now = () => performance.now() / 1000;
 
-  function boostAmount(t = now(), start = boostStart) {      // 1 while boosted, easing to 0 afterwards
+  function boostAmount(t = now(), start = boostStarts.at(-1) ?? -Infinity) {      // 1 while boosted, easing to 0 afterwards (the newest bone's, unless told which)
     const e = t - start;
     if (e < 0) return 0;
     if (e <= C.duration) return 1;
@@ -214,7 +216,7 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
           const dy = playerPosition.y - b.base.y;
           if (flat.length() < C.pickupRadius && dy > -1.5 && dy < C.floatHeight + 2) {
             b.state = 'collect'; b.stateTime = 0; collected = true;
-            boostStart = t;
+            begin(t);
           }
         }
         // collect: bone pops and shrinks, a flash swells and fades, then everything hides
@@ -261,14 +263,14 @@ export function createGoldenBones({ scene, renderer, placements, config = {} }) 
     stopBoost(playerId) { othersBoostStart.delete(playerId); },
 
     /** Multiplier for the dog's top speed right now (1 when not boosted). */
-    speedMultiplier() { return 1 + (C.speedMultiplier - 1) * boostAmount(); },
+    speedMultiplier() { const t = now(); return boostStarts.reduce((all, start) => all * (1 + (C.speedMultiplier - 1) * boostAmount(t, start)), 1); },
     accelerationMultiplier() { return 1 + (C.accelerationMultiplier - 1) * boostAmount(); },
     /** Extra speed (m/s) to add the moment a bone is taken, for a dog whose sprint speed is given. */
     instantKick(sprintSpeed) { return sprintSpeed * (C.speedMultiplier - 1) * C.instantKick; },
     isBoosting() { return boostAmount() > 0; },
     /** Start a boost without a pickup on the road (the Golden Bone item). */
-    startBoost() { boostStart = now(); },
-    cancelBoost() { boostStart = -Infinity; },
+    startBoost() { begin(now()); },
+    cancelBoost() { boostStarts = []; },
 
     dispose() {
       disposed = true;
