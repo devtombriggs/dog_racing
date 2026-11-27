@@ -216,6 +216,7 @@ function buildRoute(mapId) {
         rough: q.rough ?? null,
         hills: Boolean(track.speedFactor),
         kick: airborne ? null : q.kick ?? null,       // a boost pad whose boost stays with the dog
+        over: q.kick ?? null,                         // ...and the pad it is over, in the air (a dog flying or bouncing in its special gets it)
         hop: airborne ? null : q.hop ?? null,         // a kicker ramp (Squelch Hollow): it throws the dog up
       };
     }
@@ -611,10 +612,13 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     if (ground.hop && !jumping && time >= stunUntil && speed > 4) { jumping = true; jumpSpeed = ground.hop; jumpGravity = JUMP.gravity; }
 
     // ----- how fast
-    if (ground.kick && time >= stunUntil) {
-      if (!(kick && kick.until > time) && speed > 0) speed += sprintSpeed * (ground.kick.speed - 1) * PAD_KICK.instant;
+    // (Ralph and Barney flying and Enzo bouncing get the pads they pass over: Tom, 2026-11-27, Ralph's special was "slower
+    // and worse on the neon map because of all the speed boosts")
+    const pad = ground.kick ?? (world.special?.flyHeight || world.special?.bouncing ? ground.over : null);
+    if (pad && time >= stunUntil) {
+      if (!(kick && kick.until > time) && speed > 0) speed += sprintSpeed * (pad.speed - 1) * PAD_KICK.instant;
       // (a weaker pad never cuts short a stronger boost: a platform after a mega pad)
-      if (!(kick && kick.until > time && kick.speed > ground.kick.speed)) kick = { speed: ground.kick.speed, until: time + ground.kick.hold + PAD_KICK.easeOut, quick: ground.kick.quick ?? PAD_KICK.quick };
+      if (!(kick && kick.until > time && kick.speed > pad.speed)) kick = { speed: pad.speed, until: time + pad.hold + PAD_KICK.easeOut, quick: pad.quick ?? PAD_KICK.quick };
     }
     // (on a Golden Bone at any time since it came on to a rough short cut: carried the whole way across, as a player's dog is)
     if (!ground.rough) roughPass = false; else if (boneUntil > time) roughPass = true;
@@ -748,7 +752,7 @@ export function createBot({ mapId, dog, level = 'medium', seed = 1, heightAt = n
     else if (time - progressAt > STUCK_SECONDS) { stuck = true; progressAt = time; }
 
     return {
-      position, rotation: yaw, animation: skid ? 'Sprint' : animation, stuck,
+      position, up: Math.max(0, jumpHeight), rotation: yaw, animation: skid ? 'Sprint' : animation, stuck,
       drift: skid ? { side: skid.side, tier: driftTier(skid.charge) } : null,      // (for the players' games to draw)
       useItem: !finishing && wantsToUse({ ...world, swimming: ground.swimming }, dt),
     };

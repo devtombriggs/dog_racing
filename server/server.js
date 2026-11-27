@@ -5,7 +5,7 @@ import { env } from 'node:process';
 import { lapsFor, MAPS, MAP_IDS, DEFAULT_MAP, crossedFinishLine, PROCEDURAL_TRACKS, sampleGroundHeight } from '../shared/maps.js';
 import { SLALOM, slalomHits } from '../shared/slalom.js';
 import { TREAT_BOXES_BY_MAP, TREAT_BOX_RESPAWN_MS, touchesTreatBox, touchesGoldenBone, GOLDEN_BONE_RESPAWN_MS } from '../shared/treatBoxes.js';
-import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, frisbeeHits, BALL, TOY, HIT, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
+import { rollItem, forwardOf, ballPositionAt, ballRoute, ballSeconds, ballHeadingAt, distanceToSegment, frisbeeHits, BALL, TOY, HIT, PAD_KICK, FRISBEE, FIREWORK, FIREWORK_LIMIT, COLLAR, ITEM_IDS } from '../shared/items.js';
 import { fireworkRoute, stepFirework, fireworkPasses, inFireworkBlast } from '../shared/firework.js';
 import { launchFrisbee, stepFrisbee, roadAhead } from '../shared/frisbee.js';
 import { SPECIAL_ITEM, SPECIAL_HIT, KELP, SHEEP, QUAKE, HEX, quakeSeconds, kelpDistance, specialDurationMs, specialChance, comebackGain, specialFor, borrowedSpecial, BURROWERS, specialTouches, ropeTrips, ghostsThrough, pheasantFlightMs, dragonFireworks } from '../shared/specials.js';
@@ -432,7 +432,8 @@ function useItem(room, player) {
     }
     const hazard = {
       id: `toy-${room.nextItemId++}`, owner: player.id, placedAt: Date.now(),
-      position: [x - forward[0] * TOY.dropBehind, y, z - forward[2] * TOY.dropBehind], rotationY: player.rotation
+      // (on the ground, however high the dog was when it let go: Tom, 2026-11-27, "when you jump and place a kong they stay in the air")
+      position: [x - forward[0] * TOY.dropBehind, y - (player.up ?? 0), z - forward[2] * TOY.dropBehind], rotationY: player.rotation
     };
     // dropped on a moving platform (Neon Nexus) it rides along on it; dropped over nothing there it falls to the level below
     const track = PROCEDURAL_TRACKS[room.mapId];
@@ -667,7 +668,7 @@ function placeSheep(room, sheep) {
 
 function tickSheep(room) {
   if (rooms.get(room.code) !== room || room.status !== 'racing') { stopSheep(room); return; }
-  const now = Date.now(), dt = SHEEP.tickMs / 1000, moved = [], L = PICKUP_PATHS[room.mapId].length;
+  const now = Date.now(), dt = SHEEP.tickMs / 1000, moved = [], L = PICKUP_PATHS[room.mapId].length, padTrack = PROCEDURAL_TRACKS[room.mapId];
   // the dogs a sheep could go for, and where each is on the road
   const dogs = [...room.players.values()].filter(dog => !dog.finished && !burrowRides.has(dog)).map(dog => ({ dog, ...roadPlace(room, dog.position) }));
   for (const sheep of room.sheep.values()) {
@@ -676,14 +677,21 @@ function tickSheep(room) {
       io.to(room.code).emit('sheepGone', { id: sheep.id, position: sheep.position });
       continue;
     }
-    sheep.s += SHEEP.speed * dt;
+    // (over a boost pad whose boost stays with a dog, it stays with a sheep too: on Neon Nexus the dogs they are after are on
+    // one nearly all the way round, and the sheep could not catch them.  Tom, 2026-11-27)
+    const pad = padTrack?.query(sheep.position[0], sheep.position[2], -1, sheep.position[1]).kick;
+    if (pad && !(sheep.kick && sheep.kick.until > now && sheep.kick.speed > pad.speed)) sheep.kick = { speed: pad.speed, until: now + (pad.hold + PAD_KICK.easeOut) * 1000 };
+    const kickLeft = sheep.kick ? (sheep.kick.until - now) / 1000 : 0;
+    const from = sheep.position;
+    sheep.s += SHEEP.speed * (kickLeft > 0 ? 1 + (sheep.kick.speed - 1) * Math.min(1, kickLeft / PAD_KICK.easeOut) : 1) * dt;
     // it veers towards the nearest dog up the road in front of it
     const aheadBy = place => (((place.s - sheep.s) % L) + L) % L;
     const quarry = dogs.filter(place => place.dog.id !== sheep.owner && now >= place.dog.hitImmuneUntil && aheadBy(place) <= SHEEP.sees)
       .sort((a, b) => aheadBy(a) - aheadBy(b))[0];
     if (quarry) sheep.lateral += Math.max(-SHEEP.steer * dt, Math.min(SHEEP.steer * dt, quarry.across - sheep.lateral));
     placeSheep(room, sheep);
-    const near = (position, radius) => Math.hypot(position[0] - sheep.position[0], position[2] - sheep.position[2]) <= radius;
+    // (anything it has passed since the last step counts: at a pad's speed a step is longer than a dog)
+    const near = (position, radius) => distanceToSegment([position[0], 0, position[2]], [from[0], 0, from[2]], [sheep.position[0], 0, sheep.position[2]]) <= radius;
     // chew toys in the way go flying
     for (const toy of [...room.hazards.values()]) {
       if (!near(toy.position, SHEEP.hitRadius)) continue;
@@ -1881,6 +1889,8 @@ function applyMove(room, player, data) {
   }
 
   const previousPosition = [...player.position];
+  // (how far off the ground the dog is, jumping or flying: what it drops lands on the ground)
+  player.up = Number.isFinite(data.up) ? Math.max(0, Math.min(30, data.up)) : 0;
   // (skidding round a corner, and which sparks it has: passed on for the other games to draw; shared/drift.js)
   const side = data.drift?.side, tier = data.drift?.tier;
   player.drift = side === 1 || side === -1 ? { side, tier: tier === 1 || tier === 2 || tier === 3 ? tier : 0 } : null;
@@ -2070,7 +2080,7 @@ function tickBots(room) {
       running = true;
       driver.finish();
       const out = driver.step(dt, {});
-      Object.assign(player, { position: out.position, rotation: out.rotation, animation: out.animation });
+      Object.assign(player, { position: out.position, up: out.up ?? 0, rotation: out.rotation, animation: out.animation });
       io.to(room.code).emit('playerMoved', { playerId: player.id, position: player.position, rotation: player.rotation, animation: player.animation, drift: player.drift ?? null });
       continue;
     }

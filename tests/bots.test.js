@@ -252,3 +252,24 @@ test('boosts stack (Tom, 2026-11-27): each one multiplies the top speed, a bone 
   assert.ok(one > none + 0.15 && two > one + 0.15, `none ${none.toFixed(2)}, one bone ${one.toFixed(2)}, two ${two.toFixed(2)}`);
   assert.ok(four <= BOOST_CAP * 1.09 + 0.01 && four >= two, `four bones ${four.toFixed(2)}`);
 });
+
+test('Ralph flying and Enzo bouncing get the boost pads they pass over (Tom, 2026-11-27: Ralph\'s special was "slower and worse on the neon map because of all the speed boosts")', async () => {
+  const { SPECIALS } = await import('../shared/specials.js');
+  const { DOG_STATS, BASE_SPEED, STAT_EFFECT, statScale } = await import('../shared/dogStats.js');
+  for (const dog of ['ralph', 'barney', 'enzo']) {
+    const route = botRoute('neon_nexus'), start = route.pointAt(30), spec = SPECIALS[dog];
+    const fastest = special => {
+      const bot = createBot({ mapId: 'neon_nexus', dog, level: 'hard', seed: 7 });
+      bot.place([start.x, start.y, start.z], start.heading);
+      for (let t = 0; t < 2; t += TICK) bot.step(TICK, {});
+      if (special) bot.specialStarted();
+      let best = 0;
+      for (let t = 0; t < 5; t += TICK) { bot.step(TICK, special ? { special } : {}); best = Math.max(best, bot.speed); }
+      return best;
+    };
+    const sprint = BASE_SPEED.sprint * statScale(DOG_STATS[dog].speed, STAT_EFFECT.speed);
+    const running = fastest(null), inSpecial = fastest(spec);
+    assert.ok(running > sprint * 1.5, `${dog} running is on the pads (${running.toFixed(1)} m/s)`);
+    assert.ok(inSpecial > running * 1.15, `${dog} in the special is faster than running: ${inSpecial.toFixed(1)} against ${running.toFixed(1)} m/s`);
+  }
+});

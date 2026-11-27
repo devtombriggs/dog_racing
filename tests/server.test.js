@@ -2978,3 +2978,46 @@ test('back from the map vote (Tom, 2026-11-27): the host calls it off and everyo
   assert.equal(latest(room.code, 'lobbyUpdated').status, 'voting');
   for (const p of [tom, berri]) p.call('leaveGame');
 });
+
+test('a chew toy dropped in mid-air lands on the ground (Tom, 2026-11-27: "when you jump and place a kong they stay in the air")', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client();
+  const room = tom.call('hostGame', { mapId: 'farmyard', name: 'Tom' }).room;
+  tom.call('selectDog', { dog: 'gsp' }); tom.call('startRace'); tom.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const live = rooms.get(room.code), seat = live.players.get(tom.id), ground = [...seat.position];
+  const placed = () => server.events.filter(e => e.room === room.code && e.event === 'hazardPlaced').at(-1).data;
+  // 1.5 m up in a jump
+  seat.item = 'toy';
+  tom.call('playerMove', { position: [ground[0], ground[1] + 1.5, ground[2]], up: 1.5, rotation: seat.rotation, animation: 'Jump', respawnRevision: 0 });
+  tom.call('useItem');
+  assert.ok(Math.abs(placed().position[1] - ground[1]) < 1e-6, `on the ground: ${placed().position[1]} against ${ground[1]}`);
+  // ...and on the ground, where it always was
+  seat.item = 'toy';
+  tom.call('playerMove', { position: ground, up: 0, rotation: seat.rotation, animation: 'Run', respawnRevision: 0 });
+  tom.call('useItem');
+  assert.ok(Math.abs(placed().position[1] - ground[1]) < 1e-6);
+  tom.call('leaveGame');
+});
+
+test('Rocky\'s sheep keep a boost pad\'s boost, so they still catch dogs on Neon Nexus (Tom, 2026-11-27)', async context => {
+  const { SHEEP } = await import('../shared/specials.js');
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const far = mapId => {
+    const tom = client();
+    const room = tom.call('hostGame', { mapId, name: 'Tom' }).room;
+    tom.call('selectDog', { dog: 'rocky' }); tom.call('startRace'); tom.call('raceLoaded');
+    for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+    const live = rooms.get(room.code), seat = live.players.get(tom.id);
+    seat.item = 'special';
+    tom.call('useItem');
+    const sheep = [...live.sheep.values()][2], from = sheep.s;
+    for (let i = 0; i < 120; i++) context.mock.timers.tick(50);
+    const gone = sheep.s - from;
+    tom.call('leaveGame');
+    return gone;
+  };
+  const plain = far('farmyard'), neon = far('neon_nexus');
+  assert.ok(Math.abs(plain - SHEEP.speed * 6) < 3, `no faster where there are no such pads (${plain.toFixed(0)} m in 6 s)`);
+  assert.ok(neon > plain * 1.4, `faster over Neon's pads: ${neon.toFixed(0)} m against ${plain.toFixed(0)} m`);
+});

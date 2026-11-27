@@ -168,6 +168,7 @@ export class LocalDog extends DogAvatar {
   get moveMessage() {
     return {
       position: this.position.toArray(),
+      up: Math.max(0, this.jumpHeight),       // (how far off the ground it is: a chew toy it drops lands on the ground)
       rotation: this.group.rotation.y,
       animation: this.drift ? 'Sprint' : this.currentAnimation,      // (in a skid the others' games pose the dog themselves: skidView.js)
       drift: this.drift ? { side: this.drift.side, tier: driftTier(this.drift.charge) } : null,
@@ -610,7 +611,9 @@ export class LocalDog extends DogAvatar {
     const coastalGround = coastalTrack?.query(position.x, position.z, -1, position.y);
     // a boost pad whose boost stays with the dog after the pad (Neon Nexus)
     const padNow = performance.now();
-    if (coastalGround?.kick && !this.isJumping && padNow >= this.stunUntil) {
+    // (Ralph and Barney flying and Enzo bouncing get the pads they pass over: Tom, 2026-11-27, Ralph's special was "slower
+    // and worse on the neon map because of all the speed boosts")
+    if (coastalGround?.kick && (!this.isJumping || special?.flyHeight || special?.bouncing) && padNow >= this.stunUntil) {
       const pad = coastalGround.kick;
       if (!(this.padKick && this.padKick.until > padNow) && this.currentSpeed > 0) this.currentSpeed += this.sprintSpeed * (pad.speed - 1) * PAD_KICK.instant;
       // (a weaker pad never cuts short a stronger boost: landing on a platform just after a mega pad)
