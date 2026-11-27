@@ -25,11 +25,20 @@ const CONTROL_POINTS = [
   [-390, -120, 51, 10, 'D'], [-450, -200, 43, 10, 'D'], [-540, -240, 34, 10, 'D'], [-620, -190, 25, 10, 'D'], [-600, -110, 16, 10, 'D'], [-660, -40, 8, 11, 'D'],
   [-640, 30, 2, 12, 'E'], [-580, 62, 0.9, 12, 'E'], [-500, 68, -0.95, 12, 'E'], [-430, 62, 0.8, 12, 'E'],
   // the Seabed Tunnel: down off the cove's far shore, out along the sea bed, a bend one way and a bend the other, and back up
-  [-402, 76, 0.9, 9.5, 'T'], [-376, 108, -3.2, 9.5, 'T'], [-346, 144, -6.6, 10, 'T'], [-300, 170, -6.8, 10, 'T'], [-248, 160, -6.8, 10, 'T'], [-200, 172, -6.8, 10, 'T'],
-  [-162, 146, -6.5, 10, 'T'], [-150, 100, -3.4, 9.5, 'T'], [-134, 58, 0.7, 9.5, 'T'],
+  // (Tom, 2026-11-27: "make it bigger so the camera doesn't stick out": 14 m wide where it was 10, 7.5 m high where it was 4.4,
+  // and its floor 3 m deeper, in a trench in the sea bed, so that the taller tube is still under the water)
+  [-402, 76, 0.9, 13, 'T'], [-376, 108, -3.8, 14, 'T'], [-346, 144, -8.9, 14, 'T'], [-300, 170, -10, 14, 'T'], [-248, 160, -10, 14, 'T'], [-200, 172, -9.8, 14, 'T'],
+  [-162, 146, -7.6, 14, 'T'], [-150, 100, -3.7, 14, 'T'], [-134, 58, 0.7, 13, 'T'],
   [-106, 33, 1.3, 11, 'F'],
 ];
-const TUNNEL = { clear: 0.45, height: 4.4 };      // a dog is kept this far in from the glass; how high the tube is inside
+// a dog is kept `clear` in from the glass; `height`: how high the tube is inside, in the middle; `shape`: the tube across the road,
+// from the foot of one side over to the middle, [share of the half width, share of the height]: upright sides, an arch over
+const TUNNEL = { clear: 0.45, height: 7.5, shape: [[1, 0], [1, 0.48], [0.86, 0.72], [0.5, 0.92], [0, 1]] };
+// Speed pads along the tunnel (Tom, 2026-11-27: "add speed pads in here as well"): how far into it each one starts, and where
+// across the road its middle is.  Clear of the box rows and bones in there.  The boost stays with the dog `hold` seconds.
+const TUNNEL_PADS = { at: [[30, 0], [100, -1.6], [190, 1.6], [275, -1.6], [385, 0]], long: 10, half: 3.6, speed: 1.45, hold: 1.3 };
+const SEA_BED = -8, TRENCH = -12;       // the sea bed goes no deeper than this; the trail cut into it (the tunnel's trench) no deeper than this
+const RUN_UP = 60;                      // metres from a checkpoint to the break in a bridge: a dog put back there is at speed again by the jump
 const BOARDWALK_U = [36.1, 36.95];      // spline parameter range covered by the wooden boardwalk (section F: out of the tunnel, to the start)
 
 // Ravines cut across the clifftop trail, each crossed by a wooden bridge with its middle missing: the
@@ -75,7 +84,7 @@ const bump = (x, c, w) => Math.exp(-(((x - c) / w) ** 2));
 /** Z of the waterline at a given X. The cove is the notch around x = -505; the headland is at x = -345. */
 export function shorelineZ(x) { return 46 + 6 * Math.sin(x / 70) + 25 * bump(x, -345, 60) - 34 * bump(x, -505, 85); }
 function lowland(x, z) {             // beach and sea bed
-  let h = Math.max(-8, Math.min(3.2, (shorelineZ(x) - z) * 0.045));
+  let h = Math.max(SEA_BED, Math.min(3.2, (shorelineZ(x) - z) * 0.045));
   if (h > 0.5) h += 1.2 * (0.5 + 0.5 * fbm(x / 24, z / 24, 3)) * sstep(0.5, 2.6, h);   // dunes at the back of the beach
   return h;
 }
@@ -151,6 +160,7 @@ function buildTrack() {
   const SH = [smoothPeriodic(sh[0], 4), smoothPeriodic(sh[1], 4)], BANK = [smoothPeriodic(bankRaw[0], 5), smoothPeriodic(bankRaw[1], 5)], DROPW = [smoothPeriodic(dropRaw[0], 5), smoothPeriodic(dropRaw[1], 5)];
   for (let i = 0; i < N; i++) for (let sd = 0; sd < 2; sd++) if (dropRaw[sd][i]) SH[sd][i] = 0;      // an exposed edge has no shoulder at all
 
+  const strips = [];       // the speed pads (filled in below, once the tunnel is known)
   const wrapIndex = i => ((i % N) + N) % N, yawAt = i => Math.atan2(TX[i], TZ[i]);
   const indexAtS = s => wrapIndex(Math.round((((s % LENGTH) + LENGTH) % LENGTH) / LENGTH * N));
 
@@ -201,12 +211,12 @@ function buildTrack() {
       const reach = ex > 0.01 ? 1 : sstep(hw + 34, hw + 12, a);
       H = Math.max(H - ravine.depth * cut * reach, Math.min(H, lowland(x, z)));
     }
-    return Math.max(-8, H);
+    return Math.max(TRENCH, H);
   }
   /** Height of the landscape (trail cut included) at any point. Used to build the terrain mesh and for dogs off the trail. */
   function terrainHeight(x, z) {
     const list = buckets.get(Math.floor(x / CELL) * 100000 + Math.floor(z / CELL));
-    if (!list) return Math.max(-8, natural(x, z));
+    if (!list) return Math.max(SEA_BED, natural(x, z));
     let best = -1, bd = Infinity;
     for (let k = 0; k < list.length; k++) { const i = list[k], d = (x - X[i]) ** 2 + (z - Z[i]) ** 2; if (d < bd) { bd = d; best = i; } }
     return heightFromProjection(x, z, project(x, z, best));
@@ -234,6 +244,9 @@ function buildTrack() {
       q.surface = 'tunnel'; q.inTunnel = true; q.exposedEdge = false;
       const glass = hw - TUNNEL.clear;
       if (a > glass) { const sgn = sd === 0 ? 1 : -1; q.blocked = true; q.clampX = p.px + p.nx * sgn * glass; q.clampZ = p.pz + p.nz * sgn * glass; }
+      // a speed pad under it: its boost stays with the dog for `hold` seconds after it (as on Treat Road)
+      const strip = strips.find(each => q.s >= each.sStart && q.s <= each.sEnd && p.lateral >= each.latMin && p.lateral <= each.latMax);
+      if (strip) q.kick = strip;
     } else if (ravine) {
       // a bridge over a ravine: railed, so the dog cannot leave by the side; the planks are missing in the middle
       q.surface = 'bridge'; q.onBridge = true; q.exposedEdge = false;
@@ -254,6 +267,13 @@ function buildTrack() {
     q.movement = q.waterDepth > 0.5 ? 'swim' : q.inWater ? 'wade' : 'run';
     q.dogY = q.movement === 'swim' ? SEA_LEVEL - 0.42 : q.y;     // where to draw the dog (it floats when swimming)
     return q;
+  }
+
+  /** How high the tunnel's glass is above its floor, `lateral` metres from the middle of a road `halfWidth` to its edge */
+  function tunnelRoof(lateral, halfWidth) {
+    const share = Math.min(1, Math.abs(lateral) / halfWidth), shape = TUNNEL.shape;
+    for (let k = shape.length - 1; k > 0; k--) { const [x1, y1] = shape[k], [x0, y0] = shape[k - 1]; if (share <= x0 && x0 > x1) return TUNNEL.height * (y1 + (y0 - y1) * (share - x1) / (x0 - x1)); }
+    return TUNNEL.height * shape[1][1];
   }
 
   function pointAt(s, lateral = 0) {
@@ -319,6 +339,15 @@ function buildTrack() {
   for (let c = 0; c < cpCount; c++) { const i = wrapIndex(Math.round(c * N / cpCount)); every.push({ index: c, sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] }); }
   // (none on the climb nobody runs; one at the foot of the lift, and one at the top that only a ride up it reaches)
   const checkpoints = every.filter(cp => cp.s < launch.padStart - 8 || cp.s > launch.landingS + 20);
+  // None just before a broken bridge, or on one (Tom, 2026-11-27: "the dogs got stuck at the last two jumps": the tunnel made the
+  // lap longer, which moved every checkpoint, and two came to rest a metre or two before a break: a dog that fell was put back
+  // with no run-up, and fell again, for ever).  One that would be there is RUN_UP before the break instead, or just past the bridge.
+  for (const cp of checkpoints) {
+    const c = chasms.find(each => cp.s > each.gapStart - RUN_UP && cp.s < each.ravineEnd + 4);
+    if (!c) continue;
+    const p = pointAt(cp.s < c.gapEnd ? c.gapStart - RUN_UP : c.ravineEnd + 4), i = p.index;
+    Object.assign(cp, { sampleIndex: i, s: S[i], position: [X[i], Y[i], Z[i]], rotationY: yawAt(i), halfWidth: W[i] / 2, section: SEC[i] });
+  }
   for (const [s, launchLanding] of [[launch.padStart - 8, false], [launch.landingS, true]]) {
     const p = pointAt(s);
     checkpoints.push({ s, launchLanding, sampleIndex: p.index, position: [p.x, p.y, p.z], rotationY: p.rotationY, halfWidth: p.halfWidth, section: p.section });
@@ -333,6 +362,8 @@ function buildTrack() {
   // (the water crossing is the cove: the tunnel is under the sea, but dry)
   const wet = []; for (let i = 0; i < N; i++) if (Y[i] < SEA_LEVEL - 0.05 && SEC[i] !== 'T') wet.push(i);
   const tube = []; for (let i = 0; i < N; i++) if (SEC[i] === 'T') tube.push(i);
+  for (const [into, centre] of TUNNEL_PADS.at) { const sStart = S[tube[0]] + into;
+    strips.push({ id: `pad-${strips.length}`, sStart, sEnd: sStart + TUNNEL_PADS.long, latMin: centre - TUNNEL_PADS.half, latMax: centre + TUNNEL_PADS.half, speed: TUNNEL_PADS.speed, hold: TUNNEL_PADS.hold }); }
   const exposedIdx = []; for (let i = 0; i < N; i++) if (dropRaw[0][i] || dropRaw[1][i]) exposedIdx.push(i);
   const boardIdx = []; for (let i = 0; i < N; i++) if (BOARD[i]) boardIdx.push(i);
 
@@ -349,12 +380,15 @@ function buildTrack() {
     chasms,
     boardwalk: { firstIndex: boardIdx[0], lastIndex: boardIdx[boardIdx.length - 1] },
     // the Seabed Tunnel: where it is, how high inside, and how deep its floor goes
-    tunnel: { firstIndex: tube[0], lastIndex: tube[tube.length - 1], sStart: S[tube[0]], sEnd: S[tube[tube.length - 1]], height: TUNNEL.height, clear: TUNNEL.clear, depth: SEA_LEVEL - Math.min(...tube.map(i => Y[i])) },
+    tunnel: { firstIndex: tube[0], lastIndex: tube[tube.length - 1], sStart: S[tube[0]], sEnd: S[tube[tube.length - 1]], height: TUNNEL.height, clear: TUNNEL.clear, shape: TUNNEL.shape, depth: SEA_LEVEL - Math.min(...tube.map(i => Y[i])) },
+    strips,
+    // glass either side and overhead in the tunnel: the camera is kept inside it (game/ChaseCamera.js)
+    enclosed: 'T', headroom: q => (q.inTunnel ? tunnelRoof(q.lateral, q.halfWidth) : Infinity),
     // gapClearance: over a bridge's missing middle (query().gap) a dog lower than this above the deck falls;
     // a dog in mid-jump is higher and carries over
     rules: { hasBarriers: false, fallStartsBelow: 1.5, respawnDelaySeconds: 1.0, respawnPenaltySeconds: 1.5, respawnSpeedMultiplier: 0.55, gravity: 24, killPlaneY: -60,
       gapClearance: 0.2 },
-    query, pointAt, indexAtS, isGap, isGapSegment, launchPoint, terrainHeight, naturalHeight: (x, z) => Math.max(-8, natural(x, z)), speedFactor, shorelineZ,
+    query, pointAt, indexAtS, isGap, isGapSegment, launchPoint, terrainHeight, naturalHeight: (x, z) => Math.max(SEA_BED, natural(x, z)), speedFactor, shorelineZ,
   };
 }
 

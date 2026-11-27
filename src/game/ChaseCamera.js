@@ -84,9 +84,15 @@ export function confineToWalls(track) {
       if (!inside) break;
       reach = f;
     }
-    if (reach >= 1) return;
-    // nearer the dog, and a little lower with it, so that the dog is still in the picture
-    place.x = dog.x + dx * reach; place.z = dog.z + dz * reach;
-    place.y = dog.y + (place.y - dog.y) * (0.55 + 0.45 * reach);
+    if (reach < 1) {
+      // nearer the dog, and a little lower with it, so that the dog is still in the picture
+      place.x = dog.x + dx * reach; place.z = dog.z + dz * reach;
+      place.y = dog.y + (place.y - dog.y) * (0.55 + 0.45 * reach);
+    }
+    // and under the roof, where the track says how high it is there (track.headroom: the glass of Modbury's Seabed Tunnel)
+    if (track.headroom) {
+      const q = track.query(place.x, place.z, here.index, dog.y), roof = q.trackY + track.headroom(q) - 1.2;      // (clear of the ribs)
+      if (place.y > roof) place.y = Math.max(roof, dog.y + 1);
+    }
   };
 }

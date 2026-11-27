@@ -50,7 +50,7 @@ export const SHOP_ITEMS = [
   // (the characters: Tom, 2026-11-26.  Jimmy was the first, while there was nobody else; he is free again)
   { id: 'dog_ziggy', kind: 'character', dog: 'ziggy', name: 'Ziggy', blurb: 'The whippet. Lightning Run: for a few seconds she is faster than anything on four legs.', price: 5000 },
   { id: 'dog_barney', kind: 'character', dog: 'barney', name: 'Barney', blurb: 'The basset hound. Ear-copter: his ears spin and he flies over everyone.', price: 5000 },
-  { id: 'dog_merlin', kind: 'character', dog: 'merlin', name: 'Merlin', blurb: 'The Brussels griffon wizard. Every special he is given is some dog’s: any of theirs, or his own Hocus Croakus.', price: 5000 },
+  { id: 'dog_merlin', kind: 'character', dog: 'merlin', name: 'Merlin', blurb: 'The Brussels griffon wizard. Every special he is given is that of a dog in the race with him, or his own Hocus Croakus.', price: 5000 },
   { id: 'dog_nacho', kind: 'character', dog: 'nacho', name: 'Nacho', blurb: 'The chihuahua. Gigante Mode: he grows as big as a horse and flattens whoever is in his way. Fits down Ralph’s burrows.', price: 5000 },
 ];
 export const SHOP_ITEM = Object.fromEntries(SHOP_ITEMS.map(item => [item.id, item]));

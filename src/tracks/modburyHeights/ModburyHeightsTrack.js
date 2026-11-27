@@ -341,7 +341,8 @@ function buildSky(group, D, animated) {
 const TUBE = (() => {
   const K = T.tunnel, segs = []; let prev = null;
   // (wherever any of the inside of the tube is at the height of the sea, with a little to spare)
-  for (let i = K.firstIndex - 2; i <= K.lastIndex + 2; i += 2) {
+  // (in 6 m pieces: the bigger tube of 2026-11-27 is at the surface for longer, and there are only `max` pieces)
+  for (let i = K.firstIndex - 3; i <= K.lastIndex + 3; i += 3) {
     const at = S.y[i] < 1.4 && S.y[i] + K.height > -0.7;
     if (at && prev !== null) segs.push([S.x[prev], S.z[prev], S.x[i], S.z[i], (S.width[prev] + S.width[i]) / 4 + 0.12]);
     prev = at ? i : null;
@@ -368,7 +369,8 @@ function buildTunnel(group, D, animated) {
   const merged = list => mergeGeometries(list.map(g => (g.index ? g.toNonIndexed() : g)));
   const K = T.tunnel, a = K.firstIndex, b = K.lastIndex, H = K.height, r = rng(2611), o = new THREE.Object3D(), ic = new THREE.Color();
   // the shape of the tube across the road: [share of the half width, height]: upright sides, an arch over
-  const SHAPE = [[-1, 0], [-1, 1.5], [-0.82, 2.75], [-0.5, 3.75], [0, H], [0.5, 3.75], [0.82, 2.75], [1, 1.5], [1, 0]];
+  // (shared/modburyData.js TUNNEL.shape, which the camera is kept under too)
+  const SHAPE = [...K.shape.map(([share, up]) => [-share, up * H]), ...K.shape.slice(0, -1).reverse().map(([share, up]) => [share, up * H])];
   const out = i => S.width[i] / 2 + 0.12;
   const place = (i, share, up) => [S.x[i] + S.normalX[i] * share * out(i), S.y[i] + up, S.z[i] + S.normalZ[i] * share * out(i)];
 
@@ -386,7 +388,7 @@ function buildTunnel(group, D, animated) {
     const mesh = new THREE.InstancedMesh(bg, bm, ribs.length * (SHAPE.length - 1)); let n = 0;
     const va = new THREE.Vector3(), vb = new THREE.Vector3(), up = new THREE.Vector3(0, 0, 1);
     for (const i of ribs) {
-      const mouth = i === a || i === b, thick = mouth ? 0.9 : 0.3;
+      const mouth = i === a || i === b, thick = mouth ? 1.1 : 0.36;
       for (let k = 0; k < SHAPE.length - 1; k++) {
         va.set(...place(i, SHAPE[k][0], SHAPE[k][1])); vb.set(...place(i, SHAPE[k + 1][0], SHAPE[k + 1][1]));
         o.position.copy(va).add(vb).multiplyScalar(0.5); o.quaternion.setFromUnitVectors(up, vb.clone().sub(va).normalize()); o.scale.set(thick, thick, va.distanceTo(vb) + thick * 0.6); o.updateMatrix();
@@ -404,6 +406,25 @@ function buildTunnel(group, D, animated) {
     const lg = new THREE.BoxGeometry(0.5, 0.08, 1.2), lm = new THREE.MeshBasicMaterial({ color: 0xbff6ff }), lights = new THREE.InstancedMesh(lg, lm, Math.floor((b - a) / 3 + 1) * 2); let ln = 0;
     for (let i = a; i <= b; i += 3) for (const side of [-0.8, 0.8]) { const [x, y, z] = place(i, side, 0.07); o.position.set(x, y, z); o.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(S.tangentX[i], S.tangentZ[i])); o.scale.set(1, 1, 1); o.updateMatrix(); lights.setMatrixAt(ln++, o.matrix); }
     lights.count = ln; lights.name = 'Modbury_Tunnel_Lights'; group.add(lights); D.push(lg, lm, lights); }
+
+  // ----- the speed pads (Tom, 2026-11-27): orange, with arrows running the way the dogs go
+  { const c = document.createElement('canvas'); c.width = c.height = 64; const g2 = c.getContext('2d');
+    g2.fillStyle = 'rgba(255,150,30,0.95)'; g2.fillRect(0, 0, 64, 64); g2.strokeStyle = '#fff6d8'; g2.lineWidth = 9; g2.lineCap = 'round'; g2.lineJoin = 'round';
+    for (const x of [8, 40]) { g2.beginPath(); g2.moveTo(x, 8); g2.lineTo(x + 18, 32); g2.lineTo(x, 56); g2.stroke(); }
+    const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace;
+    const pos = [], uv = [], idx = [];
+    for (const strip of T.strips) {
+      const steps = Math.max(2, Math.round((strip.sEnd - strip.sStart) / 1.5)), base = pos.length / 3;
+      for (let k = 0; k <= steps; k++) {
+        const s = strip.sStart + (strip.sEnd - strip.sStart) * k / steps, u = (s - strip.sStart) / 3.2;
+        for (const [lat, v] of [[strip.latMin, 0], [strip.latMax, 1]]) { const p = T.pointAt(s, lat); pos.push(p.x, p.y + 0.06, p.z); uv.push(u, v * (strip.latMax - strip.latMin) / 3.2); }
+        if (k < steps) { const n = base + k * 2; idx.push(n, n + 1, n + 2, n + 1, n + 3, n + 2); }
+      }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+    const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const pads = new THREE.Mesh(g, m); pads.name = 'Modbury_Tunnel_SpeedPads'; pads.renderOrder = 1; group.add(pads); D.push(g, m, tex);
+    animated.push(t => { tex.offset.x = -t * 1.8; }); }
 
   // ----- under the sea: the water all round (a box seen from inside it: deep blue below, lighter towards the surface), and the
   // surface overhead from below

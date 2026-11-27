@@ -256,3 +256,33 @@ test('drift: a skid is a little faster than flat out from the start, and builds 
   assert.ok(driftSpeedNow(10) < DRIFT_BOOST.speed && driftSpeedNow(10, slow) < SUPER_DRIFT_BOOST.speed, 'never as fast as the boost out of it');
   assert.ok(driftSpeedNow(1, slow) > driftSpeedNow(1, plain), 'a slow dog stays ahead of the rest');
 });
+
+test('drift: a skidding dog is let down on to its paws the same on a hill as on the flat (Tom, 2026-11-27: "the dogs float when drifting")', async () => {
+  const THREE = await import('three');
+  const { lowestPaw, pawStance } = await import('../src/game/dogs/animation.js');
+  const group = new THREE.Group(), model = new THREE.Group(), bones = {};
+  group.position.set(40, 12, -7); group.rotation.y = 0.8; group.add(model); model.scale.setScalar(3);
+  for (const [name, x, z] of [['pawL', 0.07, 0.3], ['pawR', -0.07, 0.3], ['hindpawL', 0.07, -0.25], ['hindpawR', -0.07, -0.25]]) {
+    bones[name] = new THREE.Bone(); bones[name].position.set(x, 0.02, z); model.add(bones[name]);
+  }
+  const { rest } = pawStance(group, bones);
+  assert.ok(Math.abs(rest - 0.06) < 1e-9);
+  // standing, on the flat and on any hill: its paws are where they are when it stands, so it is not moved
+  for (const pitch of [0, 0.35, -0.35, 0.6]) {
+    model.rotation.x = pitch;
+    assert.ok(Math.abs(lowestPaw(group, model, bones, pitch) - rest) < 1e-9, `pitch ${pitch}: ${lowestPaw(group, model, bones, pitch)}`);
+    // (measured straight up and down, as it used to be, the downhill paws of a dog on a steep hill are far below its middle)
+    if (pitch) assert.ok(rest - (Math.min(...Object.values(bones).map(bone => bone.getWorldPosition(new THREE.Vector3()).y)) - group.position.y) > 0.2);
+  }
+  // legs folded (paws 5 cm of model nearer the body): let down by that much, times its size, on a hill as on the flat
+  for (const bone of Object.values(bones)) bone.position.y = 0.07;
+  for (const pitch of [0, 0.35, -0.35]) {
+    model.rotation.x = pitch; model.position.y = 0;
+    model.position.y += rest - lowestPaw(group, model, bones, pitch);
+    assert.ok(Math.abs(model.position.y + 0.15) < 1e-9, `pitch ${pitch}: let down ${-model.position.y}`);
+    assert.ok(Math.abs(lowestPaw(group, model, bones, pitch) - rest) < 1e-9, 'and then its paws are on the road');
+  }
+  // the skid's own sit-back and its lean are not taken out: the paw they put lowest is the one that comes to the road
+  model.position.y = 0; model.rotation.set(0.35 - 0.1, 0, 0.2);
+  assert.ok(lowestPaw(group, model, bones, 0.35) < 0.21 - 0.02);
+});

@@ -2621,12 +2621,16 @@ test('the shuffle: Merlin always 2nd, nobody lost or doubled, laps and checkpoin
 
 // Tom, 2026-11-26: "nerf merlin... keep his ult but also give him the chance to get and use everyone else's... Have a picture of the
 // dog instead of the ULT depending on who's he gets"
-test('Merlin is given any dog\'s special (his own among them, never the twins\' rope): everyone is told whose, and that is the one he uses', async (context) => {
+test('Merlin is given the special of a dog in the race (his own among them, never the twins\' rope): everyone is told whose, and that is the one he uses', async (context) => {
   context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
   const { SPECIALS, borrowedSpecial } = await import('../shared/specials.js');
   // the pick: every dog's but the twins', each as likely as another; a dog that does not borrow gets its own
-  const picks = new Set(Array.from({ length: 400 }, (_, k) => borrowedSpecial('merlin', () => (k + 0.5) / 400)));
-  assert.deepEqual([...picks].sort(), Object.keys(SPECIALS).filter(id => id !== 'baz_naz').sort());
+  // (Tom, 2026-11-27: only from the dogs in the race with him)
+  const field = ['merlin', 'gsp', 'ziggy', 'ziggy', 'baz_naz', 'nacho', undefined];
+  const picks = new Set(Array.from({ length: 400 }, (_, k) => borrowedSpecial('merlin', () => (k + 0.5) / 400, field)));
+  assert.deepEqual([...picks].sort(), ['gsp', 'merlin', 'nacho', 'ziggy']);
+  assert.equal(borrowedSpecial('merlin', () => 0.99), 'merlin', 'alone, his own');
+  assert.equal(borrowedSpecial('merlin', () => 0.99, ['merlin', 'baz_naz']), 'merlin', 'with only the twins, his own');
   assert.equal(borrowedSpecial('gsp', () => 0.3), 'gsp');
   const mapId = 'speed_bowl', T = PROCEDURAL_TRACKS[mapId];
   const merlin = client(), other = client();
@@ -2641,17 +2645,17 @@ test('Merlin is given any dog\'s special (his own among them, never the twins\' 
   move(other, 80); move(merlin, 30);
   const live = rooms.get(room.code), seat = live.players.get(merlin.id);
   // given Ziggy's: the server says so when it tells everyone what he holds, and that is what starts
-  const ids = Object.keys(SPECIALS).filter(id => id !== 'baz_naz');
-  context.mock.method(Math, 'random', () => (ids.indexOf('ziggy') + 0.5) / ids.length);
+  const ids = ['merlin', 'gsp'];        // (the two dogs in this race)
+  context.mock.method(Math, 'random', () => (ids.indexOf('gsp') + 0.5) / ids.length);
   const box = TREAT_BOXES_BY_MAP[mapId][0];
   seat.item = null;
   merlin.call('playerMove', { position: box.groundPosition, rotation: 0, animation: 'Sprint', respawnRevision: 0 });
   const given = events('itemChanged').filter(e => e.playerId === merlin.id).at(-1);
   if (given?.item === 'special') {
-    assert.equal(given.as, 'ziggy');
+    assert.equal(given.as, 'gsp');
     merlin.call('useItem');
     const started = events('specialStarted').at(-1);
-    assert.deepEqual([started.playerId, started.kind, started.as], [merlin.id, 'flash', 'ziggy']);
+    assert.deepEqual([started.playerId, started.kind, started.as], [merlin.id, SPECIALS.gsp.kind, 'gsp']);
     assert.equal(seat.specialAs, null);
   }
   // (and whatever the box gave: handed a special straight, the same holds)

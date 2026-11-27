@@ -138,8 +138,9 @@ export class SkidView {
       if (config.drop) {
         model.position.y -= config.drop * avatar.config.scale * weight;      // (on to its belly)
       } else {
-        const paws = lowestPaw(avatar.group, avatar.bones);
-        if (Number.isFinite(paws)) model.position.y += (avatar.group.position.y + (this.stance?.rest ?? 0) - paws) * weight;
+        // (measured as on the flat, whatever hill it is on: animation.js lowestPaw)
+        const paws = lowestPaw(avatar.group, model, avatar.bones, pitch);
+        if (Number.isFinite(paws)) model.position.y += ((this.stance?.rest ?? 0) - paws) * weight;
       }
       if (board) model.position.y += board.deckTop * weight;              // (standing on the board, not the road)
     }

@@ -66,9 +66,8 @@ test('Water Park: the rubber rings drift down the lagoon (Tom, 2026-11-21), and 
       assert.equal(T.ringAt(ring.x, ring.z, false, t)?.id, ring.id);
       // drifting on, down the lagoon, a little from side to side
       if (later[k].rise === 1) assert.ok(Math.abs(later[k].s - ring.s - R.flow) < 0.01);
-      // a dog that has fallen in and is swimming cannot get back on one, but near the start of the lagoon
-      const nearStart = ring.s - T.pools[0].sStart < R.mount;
-      assert.equal(Boolean(T.ringAt(ring.x, ring.z, true, t)), nearStart, `${ring.id} at ${ring.s.toFixed(0)}`);
+      // a dog that has fallen in and is swimming can get back on any of them (Tom, 2026-11-27: "allow you to jump back on them")
+      assert.equal(T.ringAt(ring.x, ring.z, true, t)?.id, ring.id, `${ring.id} at ${ring.s.toFixed(0)}`);
     }
   }
 });

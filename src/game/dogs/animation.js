@@ -126,11 +126,25 @@ export function pawStance(group, bones) {
 }
 
 const PAWS = ['pawL', 'pawR', 'hindpawL', 'hindpawR'], pawAt = new THREE.Vector3();
-/** The height of the dog's lowest paw joint (world).  group: the dog in the scene, with its model posed */
-export function lowestPaw(group, bones) {
+/**
+ * How high the dog's lowest paw joint is above the road under it (metres), as `pawStance().rest` is when it stands.
+ * group: the dog in the scene; model: its model, posed.  slopePitch: the tilt it has for the hill it is on (model.rotation.x
+ * without the skid's own): that is taken out, so that the answer is the same on a hill as on the flat (Tom, 2026-11-27: "the
+ * dogs float when drifting", the snow map most.  Measured straight up and down, the downhill paws of a dog tilted with a slope
+ * are far below its middle, and it was lifted until they were level with it: off the ground).  Its lean and the skid's own
+ * sit-back are left in: the paw they put lowest is the one on the ground.
+ */
+export function lowestPaw(group, model, bones, slopePitch = 0) {
   group.updateWorldMatrix(true, true);
+  const cos = Math.cos(slopePitch), sin = Math.sin(slopePitch);
   let lowest = Infinity;
-  for (const name of PAWS) if (bones[name]) lowest = Math.min(lowest, bones[name].getWorldPosition(pawAt).y);
+  for (const name of PAWS) {
+    if (!bones[name]) continue;
+    (model.parent ?? group).worldToLocal(bones[name].getWorldPosition(pawAt));     // (in what the model is placed in: the dog, or a twin's holder)
+    // (turned back about the model's own middle by the slope's tilt: a rotation about x by -slopePitch: y cos + z sin)
+    const y = pawAt.y - model.position.y, z = pawAt.z - model.position.z;
+    lowest = Math.min(lowest, model.position.y + y * cos + z * sin);
+  }
   return lowest;
 }
 

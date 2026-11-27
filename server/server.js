@@ -377,7 +377,7 @@ function grantItem(room, player) {
   player.item = FORCE_ITEM ?? (special ? SPECIAL_ITEM : rollItem(place, standings.length, Math.random, { noFirework: !fireworkAllowed(room) }));
   if (player.item === 'firework' && !FORCE_ITEM) room.fireworksGiven = (room.fireworksGiven ?? 0) + 1, room.fireworkGivenAt = Date.now();
   // (Merlin: whose special it is this time; everyone is told, so that what he holds shows that dog's picture)
-  player.specialAs = player.item === SPECIAL_ITEM ? borrowedSpecial(player.dog) : null;
+  player.specialAs = player.item === SPECIAL_ITEM ? borrowedSpecial(player.dog, Math.random, [...room.players.values()].map(each => each.dog)) : null;
   io.to(room.code).emit('itemChanged', { playerId: player.id, item: player.item, ...(player.specialAs && specialFor(player.dog)?.borrows ? { as: player.specialAs } : {}) });
 }
 

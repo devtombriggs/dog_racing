@@ -295,7 +295,9 @@ export const DOGS = {
     skid: CROUCH_SKID,
     // (Meela's frame at Casper's size: Tom, 2026-11-26 "she needs to be casper size not like a greyhound".  About 1.6 m at
     //  the top of her head here.  At the same pace her legs turn over much quicker than Meela's)
-    scale: 1.85,
+    // (Tom, 2026-11-27: "make ziggy the same size as casper she's too small atm".  At 1.85 she was Casper's height already, 1.6 m,
+    //  but a whippet is half his width, so from behind she looked much the smaller dog.  2.15: 1.9 m at the top of her head)
+    scale: 2.15,
     size: 0.7,
     strideBands: DOG_STRIDE_BANDS.ziggy,
     maxStrideRate: 2.0,

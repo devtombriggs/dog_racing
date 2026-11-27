@@ -960,8 +960,8 @@ export class LocalDog extends DogAvatar {
     const { delta, special } = frame;
 
     // The Water Park's rubber rings: a dog that comes down on one (or runs on to one from the shallows) is thrown up and
-    // on, at no less than its full pace, which carries it to the next ring.  A dog that has fallen in and is swimming can get on
-    // one only near the start of the lagoon (Tom, 2026-11-21: "you shouldn't be able to bounce back on, you need to swim")
+    // on, at no less than its full pace, which carries it to the next ring.  A dog that has fallen in and is swimming can get back
+    // on any of them (Tom, 2026-11-27: "allow you to jump back on them")
     const { proceduralTrack } = this.race.world, bounce = proceduralTrack?.rules.bounce;
     const swimmingNow = Boolean(bounce) && !this.isJumping && proceduralTrack.query(this.position.x, this.position.z).movement === 'swim';
     if (bounce && !special && this.jumpHeight < 0.5 && this.verticalVelocity <= 0

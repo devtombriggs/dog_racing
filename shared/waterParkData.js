@@ -69,9 +69,10 @@ const swimShare = swimming => swimSpeed(swimming * 10);      // (stats here are 
 const RIVER_FLOW = 0.15;                // the Lazy River carries every dog along by this much of its top speed
 const SLIDE_SPEED = 1.45;               // share of top speed on the slide
 // The rings drift down the lagoon like a lazy river, `flow` m/s, swaying `sway` metres from side to side as they go; at the far end
-// each sinks and comes up again at the start.  A dog can get on one only from the deck or the shallows near the start (within
-// `mount` metres of it): one that falls off further out has to swim the rest
-const RING = { spacing: 13.5, radius: 2.4, zigzag: 1.1, flow: 2.2, sway: 1.5, swayPeriod: 6, mount: 14 };
+// each sinks and comes up again at the start.  A dog that falls off can swim to any ring and get back on (Tom, 2026-11-27:
+// "finding the rings impossible to jump on... allow you to jump back on them"; from 2026-11-21 until then it could not: only
+// from the deck or the shallows at the start)
+const RING = { spacing: 13.5, radius: 2.4, zigzag: 1.1, flow: 2.2, sway: 1.5, swayPeriod: 6 };
 // A ring throws a dog up at `force` (falling back at `gravity`: 0.8 s in the air, nearly 2 m up) and on at
 // `pace` whatever dog it is: exactly the speed that comes down on the next ring, which has drifted on meanwhile
 const BOUNCE = { force: 9.5, gravity: 24 };
@@ -174,9 +175,8 @@ function buildTrack() {
     return out;
   }
   const rings = ringsAt(0);
-  /** The ring a dog at (x, z) is on at t seconds, or null.  swimming: a dog in the water gets on only near the start of the lagoon */
-  const ringAt = (x, z, swimming = false, t = clock) => ringsAt(t).find(ring => ring.rise > 0.6 && (x - ring.x) ** 2 + (z - ring.z) ** 2 <= ring.radius ** 2
-    && (!swimming || ring.s - pools[0].sStart < RING.mount)) ?? null;
+  /** The ring a dog at (x, z) is on at t seconds, or null.  (swimming: whether it is in the water; it gets on all the same) */
+  const ringAt = (x, z, swimming = false, t = clock) => ringsAt(t).find(ring => ring.rise > 0.6 && (x - ring.x) ** 2 + (z - ring.z) ** 2 <= ring.radius ** 2) ?? null;
 
   // ---------- the slide, and the jump off the end of it over the splash pool
   const gapStartIndex = indexAtS(sAtU(AT.slideEnd + 0.12)), gapEndIndex = indexAtS(sAtU(AT.slideEnd + 0.8));

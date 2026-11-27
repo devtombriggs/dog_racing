@@ -232,10 +232,14 @@ export const BURROWERS = ['ralph', 'nacho'];
 
 // The specials Merlin cannot borrow: the twins' Trip Wire is a rope between two dogs, and he is one
 const NOT_BORROWED = ['baz_naz'];
-/** Whose special a dog that `borrows` is given this time: a dog's id, any of them as likely as another (its own too) */
-export function borrowedSpecial(dog, random = Math.random) {
+/**
+ * Whose special a dog that `borrows` is given this time: a dog's id, any of them as likely as another (its own too).
+ * racing: the dogs in this race (Tom, 2026-11-27: "merlins ult should only be able to use ults from dogs that are currently
+ * racing, not every dog"): his own, and that of each other kind of dog on the road with him.
+ */
+export function borrowedSpecial(dog, random = Math.random, racing = []) {
   if (!SPECIALS[dog]?.borrows) return dog;
-  const from = Object.keys(SPECIALS).filter(id => !NOT_BORROWED.includes(id));
+  const from = [...new Set([dog, ...racing])].filter(id => SPECIALS[id] && !NOT_BORROWED.includes(id));
   return from[Math.min(from.length - 1, Math.floor(random() * from.length))];
 }
 

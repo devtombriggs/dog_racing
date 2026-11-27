@@ -34,7 +34,7 @@ const SPECIAL_WORDS = {
   ziggy: 'Four and a half seconds faster than anything on four legs, lightning at her heels, and she steers it herself',
   nacho: 'Grows as big as a horse for six seconds: faster, unstoppable, and any dog in his way is flattened',
   barney: 'His ears spin like rotor blades and he flies over everyone, and nothing can hit him',
-  merlin: 'A wizard’s luck: each special he is given is some dog’s, any of them. His own turns every other dog into a hopping frog, then shuffles the field and lands him in 2nd',
+  merlin: 'A wizard’s luck: each special he is given is his own or that of a dog in the race with him. His own turns every other dog into a hopping frog, then shuffles the field and lands him in 2nd',
   jimmy: 'Turns into a dragon, much faster, and fires up to five fireworks at the leader: more the further back he is',
   black_lab: 'Rides her own wave for five seconds: the fastest of the lot, but it steers itself',
 };

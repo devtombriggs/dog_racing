@@ -8,7 +8,7 @@ import { TREAT_ROAD } from '../shared/treatRoadData.js';
 import { MODBURY_HEIGHTS as COAST } from '../shared/modburyData.js';
 import { TREAT_BOXES_BY_MAP } from '../shared/treatBoxes.js';
 import { FARMYARD as FARM } from '../shared/farmData.js';
-import { GOLDEN_BONE_SPOTS } from '../shared/pickupSpots.js';
+import { GOLDEN_BONE_SPOTS, BOX_ROW_S, BONE_S } from '../shared/pickupSpots.js';
 import { FROSTPEAK_CANNON, FROSTPEAK_SLALOM, FROSTPEAK_SKI_SLOPE } from '../shared/frostpeakCannon.js';
 import frostpeak from '../shared/frostpeak.json' with { type: 'json' };
 
@@ -157,7 +157,21 @@ test('Modbury: the Seabed Tunnel (Tom, 2026-11-26) is under the sea, dry, walled
     if (Math.abs(s.curvature[i]) > 1 / 70 && Math.sign(turn) !== way) { way = Math.sign(turn); bends += 1; }
     assert.ok(Math.abs(s.curvature[i]) < 1 / 20, `a bend ${Math.abs(1 / s.curvature[i]).toFixed(0)} m round at ${s.s[i].toFixed(0)} m`);
   }
-  assert.ok(under > 250, `${under.toFixed(0)} m of it wholly under water`);
+  // (Tom, 2026-11-27: "make it bigger so the camera doesn't stick out": 14 m wide and 7.5 m high, so less of it is wholly under)
+  assert.ok(under > 180, `${under.toFixed(0)} m of it wholly under water`);
+  assert.ok(K.height >= 7 && s.width[Math.round((K.firstIndex + K.lastIndex) / 2)] >= 13.5);
+  // the camera's roof: highest in the middle, lower at the glass, and nothing outside the tunnel
+  assert.equal(COAST.enclosed, 'T');
+  assert.equal(COAST.headroom({ inTunnel: true, lateral: 0, halfWidth: 7 }), K.height);
+  assert.ok(COAST.headroom({ inTunnel: true, lateral: 6.9, halfWidth: 7 }) > 3.5 && COAST.headroom({ inTunnel: false }) === Infinity);
+  // speed pads in the tunnel (Tom, 2026-11-27), each one found by a dog running over it, none beside it, none on a pickup
+  assert.equal(COAST.strips.length, 5);
+  for (const pad of COAST.strips) {
+    assert.ok(pad.sStart > K.sStart + 20 && pad.sEnd < K.sEnd - 20 && pad.speed > 1 && pad.hold > 0);
+    const on = COAST.pointAt((pad.sStart + pad.sEnd) / 2, (pad.latMin + pad.latMax) / 2), off = COAST.pointAt((pad.sStart + pad.sEnd) / 2, pad.latMax + 1.5);
+    assert.equal(COAST.query(on.x, on.z).kick, pad); assert.equal(COAST.query(off.x, off.z).kick, undefined);
+    for (const spot of [...BOX_ROW_S.modbury_heights, ...BONE_S.modbury_heights]) assert.ok(spot < pad.sStart - 12 || spot > pad.sEnd + 12, `a pickup at ${spot.toFixed(0)} on the pad at ${pad.sStart.toFixed(0)}`);
+  }
   assert.ok(bends >= 4 && turned > Math.PI, `${bends} bends, ${(turned * 180 / Math.PI).toFixed(0)} degrees of turning`);
   // out of the tunnel there is dry land before the start line, and the cove is still the only swim
   assert.ok(COAST.waterCrossing.sEnd < K.sStart && COAST.length - K.sEnd > 90);
@@ -291,7 +305,9 @@ test('Modbury ravines: a broken bridge on a straight after every checkpoint run-
       assert.ok(Math.abs(T.query(railed.clampX, railed.clampZ).lateral) < mid.halfWidth);
     }
     // a fall puts the dog back at the last checkpoint: far enough back to be at full speed again
-    const before = T.checkpoints.filter(cp => cp.s < c.ravineStart).at(-1);
+    // (Tom, 2026-11-27: "the dogs got stuck at the last two jumps": the one a fallen dog goes back to is the last one before the
+    // BREAK, and two of those were on the bridge itself, a metre or two short of it)
+    const before = T.checkpoints.filter(cp => cp.s < c.gapEnd).at(-1);
     assert.ok(c.gapStart - before.s > 45, `run-up of ${(c.gapStart - before.s).toFixed(0)} m`);
     assert.ok(Math.abs(T.samples.curvature[T.indexAtS(c.s)]) < 0.01, 'on a straight');
   }
