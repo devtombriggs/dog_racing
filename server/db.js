@@ -72,7 +72,18 @@ const SCHEMA = `
     item_id TEXT NOT NULL,
     PRIMARY KEY (user_id, dog, slot)
   );
+  -- friends (Tom, 2026-11-27): one row for each pair, from the player who asked to the player they asked; accepted once that
+  -- player says yes.  Either may end it.
+  CREATE TABLE IF NOT EXISTS friends (
+    from_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    accepted INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (from_id, to_id)
+  );
 `;
+
+export const MAX_FRIENDS = 100;
 
 export const SESSION_DAYS = 60;
 export const USERNAME = { min: 3, max: 16, pattern: /^[A-Za-z0-9_][A-Za-z0-9_ .-]*[A-Za-z0-9_]$/ };
@@ -201,6 +212,36 @@ export function openDb(path = ':memory:', { now = () => Date.now(), admins = [] 
     user: id => publicUser(userRow.get(id)),
     /** Deletes an account and everything kept about it: its sign-ins, sessions and race results (ON DELETE CASCADE) */
     deleteUser: id => Number(q('DELETE FROM users WHERE id = ?').run(id).changes) > 0,
+
+    // ---------- friends ----------
+    /** A player's friends, who has asked them, and whom they have asked: { friends, incoming, outgoing }, each [{ id, username }] by name */
+    friendsOf(userId) {
+      const rows = q(`SELECT u.id, u.username, f.accepted, f.from_id AS fromId FROM friends f
+        JOIN users u ON u.id = CASE WHEN f.from_id = ? THEN f.to_id ELSE f.from_id END
+        WHERE f.from_id = ? OR f.to_id = ? ORDER BY u.username_key`).all(userId, userId, userId);
+      const list = keep => rows.filter(keep).map(row => ({ id: Number(row.id), username: row.username }));
+      return { friends: list(row => row.accepted), incoming: list(row => !row.accepted && Number(row.fromId) !== userId), outgoing: list(row => !row.accepted && Number(row.fromId) === userId) };
+    },
+    /** Ask a player, by username, to be friends (or say yes, if they have already asked).  Returns { id, username, accepted }.  Throws AccountError. */
+    askFriend(userId, username) {
+      const other = q('SELECT id, username FROM users WHERE username_key = ?').get(String(username ?? '').trim().toLowerCase());
+      if (!other) throw new AccountError('There is no player with that username');
+      const otherId = Number(other.id);
+      if (otherId === userId) throw new AccountError('That is you');
+      return transaction(() => {
+        const theirs = q('SELECT accepted FROM friends WHERE from_id = ? AND to_id = ?').get(otherId, userId);
+        if (theirs) { q('UPDATE friends SET accepted = 1 WHERE from_id = ? AND to_id = ?').run(otherId, userId); return { id: otherId, username: other.username, accepted: true }; }
+        const mine = q('SELECT accepted FROM friends WHERE from_id = ? AND to_id = ?').get(userId, otherId);
+        if (mine) return { id: otherId, username: other.username, accepted: Boolean(mine.accepted) };
+        if (Number(q('SELECT COUNT(*) AS n FROM friends WHERE from_id = ? OR to_id = ?').get(userId, userId).n) >= MAX_FRIENDS) throw new AccountError('Your friends list is full');
+        q('INSERT INTO friends (from_id, to_id, accepted, created_at) VALUES (?, ?, 0, ?)').run(userId, otherId, now());
+        return { id: otherId, username: other.username, accepted: false };
+      });
+    },
+    /** Say yes to a player who asked; true if they had */
+    acceptFriend: (userId, otherId) => Number(q('UPDATE friends SET accepted = 1 WHERE from_id = ? AND to_id = ? AND accepted = 0').run(otherId, userId).changes) > 0,
+    /** No longer friends (or: no to a player who asked, or taking back an ask); true if there was anything between them */
+    removeFriend: (userId, otherId) => Number(q('DELETE FROM friends WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)').run(userId, otherId, otherId, userId).changes) > 0,
 
     // ---------- sessions ----------
     createSession(userId) {

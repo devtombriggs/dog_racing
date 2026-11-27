@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { MAPS } from '../../../shared/maps.js';
 import { DOGS } from '../../config/dogs.js';
-import { formatTime } from '../../utils/format.js';
+import { formatTime, ordinal } from '../../utils/format.js';
 
 // A clock to redraw the seconds left (before the race ends, the next race starts, or the room goes back to the lobby)
 function useClock(running) {
@@ -48,14 +48,48 @@ function GrandPrixTable({ grandPrix, socketId }) {
 // back to the lobby once it is all over
 // buttons: false for the other players' shares of a split screen (player 1's has them)
 // coins: what the race paid this player ({ race, grandPrix, total }: shared/shop.js), once the server has said
-export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = null, grandPrix = null, socketId = null, buttons = true, coins = null }) {
+// Home while others are still running: Watch the race puts the results away and the camera behind another dog, with
+// arrows (and the arrow keys) to go from dog to dog (Tom, 2026-11-27: "spectate by jumping to each character view")
+// standings: the race order; spectating: the id of the dog being watched (session.state.spectating)
+export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = null, grandPrix = null, socketId = null, buttons = true, coins = null, standings = [], spectating = null }) {
   const over = lobbyReturnAt !== null;
   const clockNow = useClock(over || raceEndsAt !== null);
+  const [watching, setWatching] = useState(false);
+  const running = standings.filter(entry => !entry.finished && entry.playerId !== socketId);
+  const canWatch = buttons && finishTime !== null && !over && running.length > 0;
+  const watchingNow = watching && canWatch;
+  useEffect(() => {
+    if (!watchingNow) return undefined;
+    const onKey = (event) => {
+      if (event.repeat) return;
+      if (event.code === 'ArrowRight' || event.code === 'KeyD') session.spectate(1);
+      else if (event.code === 'ArrowLeft' || event.code === 'KeyA') session.spectate(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [watchingNow, session]);
+  // (nobody left to watch, or the race is over: the results come back, and the session puts the camera back: GameSession.spectate)
 
   // still racing, and the first dog is home: the time left, top centre, out of the way of the road
   if (finishTime === null && !over) {
     if (raceEndsAt === null) return null;
     return <div className="race-ending" role="status">First dog home · race ends in {secondsTo(raceEndsAt, clockNow)} s</div>;
+  }
+
+  if (watchingNow) {
+    const dog = standings.find(entry => entry.playerId === spectating);
+    return (
+      <div className="race-spectate" role="group" aria-label="Watching the race">
+        <button className="zr-btn zr-btn--small" aria-label="The dog before" onClick={() => session.spectate(-1)}>◀</button>
+        <div className="race-spectate__who" role="status">
+          <small>Watching{raceEndsAt !== null ? ` · race ends in ${secondsTo(raceEndsAt, clockNow)} s` : ''}</small>
+          <b>{dog ? `${ordinal(dog.place)} · ${dog.name} — ${DOGS[dog.dog]?.displayName ?? 'Dog'}` : '…'}</b>
+        </div>
+        <button className="zr-btn zr-btn--small" aria-label="The next dog" onClick={() => session.spectate(1)}>▶</button>
+        <button className="zr-btn zr-btn--small zr-btn--quiet" onClick={() => { setWatching(false); session.spectate(0); }}>Results</button>
+        <button className="zr-btn zr-btn--small zr-btn--quiet" onClick={session.backToLobby}>Back to Lobby</button>
+      </div>
+    );
   }
 
   const table = over && grandPrix;
@@ -93,8 +127,9 @@ export function ResultsPanel({ session, finishTime, lobbyReturnAt, raceEndsAt = 
 
       {buttons && (
         <div className="race-results__buttons">
-          {over && !midGrandPrix && <button className="zr-btn zr-btn--yellow" onClick={session.returnToLobby}>Back to Lobby</button>}
-          <button className="zr-btn zr-btn--quiet" onClick={session.leaveGame}>Main Menu</button>
+          {canWatch && <button className="zr-btn zr-btn--yellow" onClick={() => { setWatching(true); session.spectate(1); }}>Watch the Race</button>}
+          {/* (no Main Menu here: Tom, 2026-11-27.  The lobby has Leave Game, and the Esc menu still quits) */}
+          {!midGrandPrix && <button className={`zr-btn${over ? ' zr-btn--yellow' : ' zr-btn--quiet'}`} onClick={session.backToLobby}>Back to Lobby</button>}
         </div>
       )}
     </div>

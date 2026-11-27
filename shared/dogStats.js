@@ -5,24 +5,26 @@
 // Each dog is rated 1 to 10.  A 7 is the handling the game was tuned around.
 // drift: how good a drifter (shared/drift.js): roughly the reverse of speed, so the slow dogs make their time in the corners
 // downhill: the Speed a dog runs on where the road drops (Jimmy on his wheels: downhillSpeed below); most dogs have none
+// (Tom, 2026-11-27: every dog a point of Speed faster, to speed the game up: "Meela still fastest, Ziggy is a 9 second fastest".
+//  Ziggy went up half a point, the rest one; Jimmy's downhill went with Meela's)
 export const DOG_STATS = {
-  gsp: { speed: 7.5, acceleration: 7, agility: 7, swimming: 6, drift: 6 },         // Pippa: the all-rounder (second fastest, nothing below 6; Tom, 2026-11-21: 8 ran away with it)
-  second_dog: { speed: 9, acceleration: 5, agility: 5, swimming: 4, drift: 4 },    // Meela (her card says 10 for speed: DOG_STATS_SHOWN)
-  black_lab: { speed: 7, acceleration: 7, agility: 8, swimming: 10, drift: 7 },    // Poppy
-  pablo: { speed: 6, acceleration: 9, agility: 10, swimming: 5, drift: 9 },
-  ralph: { speed: 5, acceleration: 10, agility: 9, swimming: 4, drift: 10 },
-  enzo: { speed: 6, acceleration: 6, agility: 8, swimming: 4, drift: 9 },
-  rocky: { speed: 7, acceleration: 7, agility: 10, swimming: 6, drift: 7 },
-  kombu: { speed: 7, acceleration: 8, agility: 9, swimming: 4, drift: 7 },         // (his special is a strong one)
-  jazz: { speed: 6.5, acceleration: 9, agility: 10, swimming: 5.5, drift: 8 },         // the Great Dane: Pablo, and a shade better
-  baz_naz: { speed: 6, acceleration: 8.5, agility: 9.5, swimming: 5, drift: 9 },       // Baz and Naz, the pug twins: Pablo's speed and swimming, just under him on the rest
-  casper: { speed: 6, acceleration: 8.5, agility: 9.5, swimming: 4.5, drift: 8.5 },    // the Patterdale terrier: Pablo, a little less of everything but speed
+  gsp: { speed: 8.5, acceleration: 7, agility: 7, swimming: 6, drift: 6 },         // Pippa: the all-rounder (second fastest, nothing below 6; Tom, 2026-11-21: 8 ran away with it)
+  second_dog: { speed: 10, acceleration: 5, agility: 5, swimming: 4, drift: 4 },    // Meela (her card says 10 for speed: DOG_STATS_SHOWN)
+  black_lab: { speed: 8, acceleration: 7, agility: 8, swimming: 10, drift: 7 },    // Poppy
+  pablo: { speed: 7, acceleration: 9, agility: 10, swimming: 5, drift: 9 },
+  ralph: { speed: 6, acceleration: 10, agility: 9, swimming: 4, drift: 10 },
+  enzo: { speed: 7, acceleration: 6, agility: 8, swimming: 4, drift: 9 },
+  rocky: { speed: 8, acceleration: 7, agility: 10, swimming: 6, drift: 7 },
+  kombu: { speed: 8, acceleration: 8, agility: 9, swimming: 4, drift: 7 },         // (his special is a strong one)
+  jazz: { speed: 7.5, acceleration: 9, agility: 10, swimming: 5.5, drift: 8 },         // the Great Dane: Pablo, and a shade better
+  baz_naz: { speed: 7, acceleration: 8.5, agility: 9.5, swimming: 5, drift: 9 },       // Baz and Naz, the pug twins: Pablo's speed and swimming, just under him on the rest
+  casper: { speed: 7, acceleration: 8.5, agility: 9.5, swimming: 4.5, drift: 8.5 },    // the Patterdale terrier: Pablo, a little less of everything but speed
   // The three dogs from the Shop (Tom, 2026-11-26).  None is better than the free dogs, only different:
-  ziggy: { speed: 8.5, acceleration: 7, agility: 6, swimming: 3, drift: 4.5 },          // the whippet: nearly Meela's speed, quicker off the mark, and no swimmer
-  barney: { speed: 5.5, acceleration: 10, agility: 9, swimming: 4.5, drift: 9.5 },      // the basset hound: Ralph, a shade better ("similar stats to ralph just slightly better")
-  merlin: { speed: 6.5, acceleration: 8, agility: 9, swimming: 5, drift: 8 },
-  nacho: { speed: 6, acceleration: 10, agility: 10, swimming: 3, drift: 9 },            // the chihuahua: his sheet's 6 / 10 / 10; Pablo's pace and drift, and no swimmer           // the Brussels griffon: his card's 7 / 8 / 9, with Jazz's speed
-  jimmy: { speed: 4.5, acceleration: 9, agility: 8.5, swimming: 4, drift: 10, downhill: 9 },   // the Chinese crested in his wheel cart: the slowest dog (under Ralph all round), but Meela's speed downhill
+  ziggy: { speed: 9, acceleration: 7, agility: 6, swimming: 3, drift: 4.5 },          // the whippet: nearly Meela's speed, quicker off the mark, and no swimmer
+  barney: { speed: 6.5, acceleration: 10, agility: 9, swimming: 4.5, drift: 9.5 },      // the basset hound: Ralph, a shade better ("similar stats to ralph just slightly better")
+  merlin: { speed: 7.5, acceleration: 8, agility: 9, swimming: 5, drift: 8 },
+  nacho: { speed: 7, acceleration: 10, agility: 10, swimming: 3, drift: 9 },            // the chihuahua: his sheet's 6 / 10 / 10; Pablo's pace and drift, and no swimmer           // the Brussels griffon: his card's 7 / 8 / 9, with Jazz's speed
+  jimmy: { speed: 5.5, acceleration: 9, agility: 8.5, swimming: 4, drift: 10, downhill: 10 },   // the Chinese crested in his wheel cart: the slowest dog (under Ralph all round), but Meela's speed downhill
 };
 
 // What a dog's card says where that is not the number it runs on: Meela is shown as a 10 for speed, and runs as a 9

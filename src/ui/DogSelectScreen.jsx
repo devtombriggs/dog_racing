@@ -10,6 +10,7 @@ import { restrictMenuPad } from './menuPad.js';
 import { useAccount } from './useAccount.js';
 import { SHOP_ITEM, LOCKED_DOGS, dogUnlocked } from '../../shared/shop.js';
 import { Coins } from './shopArt.jsx';
+import { LobbyPlayers } from './LobbyPlayers.jsx';
 
 // (in alphabetical order of their names)
 // by name; the dogs from the Shop after all the others, at the bottom (Tom, 2026-11-26)
@@ -63,6 +64,8 @@ export function DogSelectScreen({ session, state }) {
   const locked = id => !dogUnlocked(id, wallet?.owned ?? []);
   const myDog = room?.players.find(player => player.id === socketId)?.dog ?? null;
   const multiplayer = !room?.singlePlayer;
+  // a race is on and this player is in the lobby (they went back, or it is still going): no changing dogs until it is over
+  const raceOn = ['loading', 'countdown', 'racing', 'finished'].includes(room?.status);
   const waitingFor = room?.players.filter(player => !player.dog).length ?? 0;
   const takenBy = id => room?.players.find(player => player.dog === id && player.id !== socketId);
 
@@ -82,8 +85,11 @@ export function DogSelectScreen({ session, state }) {
         {local ? `${turn === 0 ? `Player 1 picks first, then ${players === 2 ? 'player 2' : 'the others in turn'}.` : `Player ${turn + 1}: your turn.`} You race ${(players === 2 ? ['on the left half', 'on the right half'] : ['in the top left', 'in the top right', 'in the bottom left', 'in the bottom right'])[turn]} of the screen.`
           : !room || room.players.length < 2
             ? 'Pick your partner. Own the track.'
+            : raceOn ? 'A race is on · the next one starts from here when it is over'
             : `One of each dog per race · ${room.players.filter(player => player.dog).length} of ${room.players.length} players have picked`}
       </p>
+
+      {multiplayer && !local && room && <LobbyPlayers session={session} room={room} socketId={socketId} password={state.roomPassword} />}
 
       <section className="zr-board zr-board--dogs">
         <aside className="zr-detail" aria-live="polite">
@@ -104,8 +110,8 @@ export function DogSelectScreen({ session, state }) {
           {locked(shown) ? (
             <p className="zr-detail__locked"><b>In the Shop</b><Coins amount={SHOP_ITEM[LOCKED_DOGS[shown]].price} /></p>
           ) : (
-            <button className="zr-btn zr-btn--yellow" disabled={!connected || Boolean(taken) || (multiplayer && !local && myDog === shown)} onClick={() => pick(shown)}>
-              {taken ? `Taken · ${taken.name}` : myDog === shown ? 'Your pick ✓' : `Choose ${dog.displayName}`}
+            <button className="zr-btn zr-btn--yellow" disabled={!connected || raceOn || Boolean(taken) || (multiplayer && !local && myDog === shown)} onClick={() => pick(shown)}>
+              {taken ? `Taken · ${taken.name}` : myDog === shown ? 'Your pick ✓' : raceOn ? 'Race in progress' : `Choose ${dog.displayName}`}
             </button>
           )}
         </aside>
@@ -123,7 +129,7 @@ export function DogSelectScreen({ session, state }) {
                 <button
                   key={id}
                   className={`zr-tile${shown === id ? ' zr-tile--shown' : ''}${myDog === id ? ' zr-tile--mine' : ''}${other ? ' zr-tile--taken' : ''}${locked(id) ? ' zr-tile--locked' : ''}`}
-                  {...tileHandlers(id, shown, show, chosen => { if (!takenBy(chosen) && !locked(chosen)) pick(chosen); })}
+                  {...tileHandlers(id, shown, show, chosen => { if (!takenBy(chosen) && !locked(chosen) && !raceOn) pick(chosen); })}
                   onBlur={() => session.hoverDog(null)}
                   aria-label={`${DOGS[id].name}. ${locked(id) ? 'Locked: buy in the Shop. ' : ''}${other ? `Taken by ${other.name}. ` : ''}${STAT_LABELS.map(([key, label]) => `${label} ${shownStat(id, key)} out of 10`).join(', ')}`}
                   aria-disabled={Boolean(other)}
@@ -143,7 +149,7 @@ export function DogSelectScreen({ session, state }) {
                 </button>
               );
             })}
-            <button className="zr-tile zr-tile--wide" data-tile="random" disabled={!connected || free.length === 0}
+            <button className="zr-tile zr-tile--wide" data-tile="random" disabled={!connected || raceOn || free.length === 0}
               onClick={() => pick(free[Math.floor(Math.random() * free.length)])} aria-label="Random: any dog that is free">
               <b aria-hidden="true">?</b>Random
             </button>
@@ -153,6 +159,8 @@ export function DogSelectScreen({ session, state }) {
 
       <footer className="zr-footer">
         <button className="zr-btn zr-btn--quiet zr-btn--small" data-pad-back="focus" onClick={session.leaveGame}>Leave Game</button>
+        {/* (the Garage from here: Tom, 2026-11-27.  Back from it is this screen again) */}
+        {!local && <button className="zr-btn zr-btn--small" onClick={() => session.openGarage(locked(shown) ? null : shown)}>Garage</button>}
         {!local && <label className="zr-toggle">
           <input type="checkbox" checked={accessibilityMode} onChange={(event) => session.setAccessibilityMode(event.target.checked)} />
           <span>Accessibility mode<small>Runs for you · ↑ jump · ↓ use item · hold ← → round a bend to drift</small></span>
@@ -169,13 +177,14 @@ export function DogSelectScreen({ session, state }) {
         )}
         <p>
           {!connected ? 'Disconnected. Reconnecting to the server…'
+            : raceOn ? 'Waiting for the race to finish'
             : !multiplayer || !myDog ? 'Choose a dog to continue'
               : room?.hostId === socketId
                 ? `Press Next when everyone is in${waitingFor ? ` (${waitingFor} still picking: they will get a free dog)` : ''}`
                 : 'Waiting for the host to start the map vote'}
         </p>
         {multiplayer && room?.hostId === socketId && (
-          <button className="zr-btn zr-btn--yellow zr-btn--small" onClick={session.skipToMapVote} disabled={!connected}>Next: Map Vote →</button>
+          <button className="zr-btn zr-btn--yellow zr-btn--small" onClick={session.skipToMapVote} disabled={!connected || raceOn}>Next: Map Vote →</button>
         )}
       </footer>
       {error && <p className="zr-screen__error" role="alert">{error}</p>}

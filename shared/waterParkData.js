@@ -176,6 +176,7 @@ function buildTrack() {
   }
   const rings = ringsAt(0);
   /** The ring a dog at (x, z) is on at t seconds, or null.  (swimming: whether it is in the water; it gets on all the same) */
+  // eslint-disable-next-line no-unused-vars -- (kept in its place: the callers pass it)
   const ringAt = (x, z, swimming = false, t = clock) => ringsAt(t).find(ring => ring.rise > 0.6 && (x - ring.x) ** 2 + (z - ring.z) ** 2 <= ring.radius ** 2) ?? null;
 
   // ---------- the slide, and the jump off the end of it over the splash pool

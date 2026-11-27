@@ -73,7 +73,7 @@ test('lobby browser lists existing games and updates names, maps, counts and hos
   const room = host.call('hostGame', { name: '  Tom   Smith  ', mapId: 'frostpeak' }).room;
   browser.call('watchLobbies');
   assert.deepEqual(latest(browser.id, 'lobbiesUpdated'), [{
-    code: room.code, hostName: 'Tom Smith', mapId: 'frostpeak', playerCount: 1, maxPlayers: 6
+    code: room.code, hostName: 'Tom Smith', mapId: 'frostpeak', playerCount: 1, maxPlayers: 6, locked: false, status: 'lobby', raceMs: null, computerDogs: 0
   }]);
   const joined = guest.call('joinGame', { roomCode: room.code, name: 'Sarah' });
   assert.equal(joined.room.players[1].name, 'Sarah');
@@ -121,14 +121,18 @@ test('full rooms remain listed, reject extra players and reopen when a player le
   assert.deepEqual(lobbies(), []);
 });
 
-test('starting a race removes the listing and stale join attempts fail cleanly', () => {
+test('a room that is racing stays listed, as in a race (Tom, 2026-11-27), and stale join attempts fail cleanly', () => {
   const host = client(), guest = client();
   const room = host.call('hostGame', { name: 'Racer' }).room;
   host.call('selectDog', { dog: 'gsp' });
   host.call('setReady', { ready: true });
   assert.equal(host.call('startRace').success, true);
-  assert.deepEqual(lobbies(), []);
-  assert.equal(guest.call('joinGame', { roomCode: room.code }).error, 'Race has already started');
+  // (one player, and the computer dogs that fill the grid are counted apart)
+  assert.deepEqual(lobbies().map(l => [l.code, l.status, l.playerCount, l.raceMs]), [[room.code, 'race', 1, null]]);
+  assert.equal(lobbies()[0].computerDogs, rooms.get(room.code).players.size - 1);
+  // (it can be joined by taking over a computer dog: see the jump-in test; with none to take, not until it is over)
+  for (const bot of [...rooms.get(room.code).players.values()].filter(p => p.bot)) rooms.get(room.code).players.delete(bot.id);
+  assert.equal(guest.call('joinGame', { roomCode: room.code }).error, 'This race has no computer dog to take over: join when it is over');
   host.call('leaveGame');
   assert.equal(guest.call('joinGame', { roomCode: room.code }).error, 'Room not found');
 });
@@ -1135,7 +1139,7 @@ test('map vote: a full room starts it on its own, it runs the full two minutes u
   const voting = latest(room.code, 'lobbyUpdated');
   assert.equal(voting.status, 'voting', 'all six dogs picked: the vote starts by itself');
   assert.equal(voting.voteMsLeft, 120000);
-  assert.deepEqual(lobbies().filter(l => l.code === room.code), [], 'no joining once the vote is on');
+  assert.deepEqual(lobbies().filter(l => l.code === room.code).map(l => l.status), ['voting'], 'listed as voting once the vote is on: not to be joined');
   assert.equal(a.call('voteMap', { mapId: 'nowhere' }).success, false);
   a.call('voteMap', { mapId: 'frostpeak' }); b.call('voteMap', { mapId: 'treat_road' });
   assert.deepEqual(latest(room.code, 'lobbyUpdated').votes, { [a.id]: 'frostpeak', [b.id]: 'treat_road' });
@@ -1943,8 +1947,8 @@ test('reconnecting before the server has noticed the old connection is dead: the
 test('Kombu\'s Kelp Dive: further up the road the further back he is (as far as Poppy\'s wave carries her, from last), past whoever is in between', async context => {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const { KELP, SPECIALS, kelpDistance } = await import('../shared/specials.js');
-  // Poppy's wave: 5 s at 1.9 times her 17 m/s
-  assert.equal(KELP.distance, 17 * SPECIALS.black_lab.speed * SPECIALS.black_lab.durationMs / 1000);
+  // Poppy's wave: 5 s at 1.9 times her 18 m/s (17 for a 7, and she is an 8 since every dog got a point faster: Tom, 2026-11-27)
+  assert.ok(Math.abs(KELP.distance - 17 * 1.06 * SPECIALS.black_lab.speed * SPECIALS.black_lab.durationMs / 1000) < 1e-9);
   assert.ok(KELP.distance > 150 && KELP.distance < 175, `${KELP.distance} m`);
   // all of it from 6th, less for every place nearer the front, under a third of it from 2nd
   assert.equal(kelpDistance(6), KELP.distance);
@@ -2677,3 +2681,242 @@ test('Nacho: Gigante Mode knocks over a dog in his way, and he may go down Ralph
   assert.ok(!specialTouches(giant, [0, 0, 0], 0, [8, 0, 0]), 'nor one well out to the side');
 });
 
+
+test('back to the lobby at any time (Tom, 2026-11-27): the dog runs on by itself, the others see where everyone is, and the dog can be taken back', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'farmyard', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  // (where each is, outside a race: told by their game)
+  berri.call('setWhere', { where: 'garage' });
+  assert.equal(latest(room.code, 'lobbyUpdated').players.find(p => p.id === berri.id).where, 'garage');
+  berri.call('setWhere', { where: 'lobby' });
+  tom.call('startRace');
+  for (const p of [tom, berri]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const events = name => server.events.filter(e => e.room === room.code && e.event === name).map(e => e.data);
+  const grid = id => latest(room.code, 'raceStarted').players.find(p => p.id === id).position;
+  const move = (who, position, revision = 0) => who.call('playerMove', { position, rotation: 0, animation: 'Run', respawnRevision: revision });
+  const second = () => { move(tom, grid(tom.id)); for (let i = 0; i < 20; i++) context.mock.timers.tick(50); };
+  second();
+  // Berri goes back to the lobby: the room is still racing, with its clock, and she is in the lobby
+  assert.equal(berri.call('toLobby').success, true);
+  const now = latest(room.code, 'lobbyUpdated'), her = now.players.find(p => p.id === berri.id);
+  assert.equal(now.status, 'racing'); assert.ok(now.raceMs >= 1000, `${now.raceMs} ms into the race`);
+  assert.deepEqual([her.inLobby, her.satOut, her.away], [true, true, 'lobby']);
+  assert.deepEqual(events('playerAway').at(-1), { playerId: berri.id, away: true, lobby: true });
+  assert.equal(lobbies().find(l => l.code === room.code).status, 'race');
+  // her dog runs on by itself, and her own game's moves no longer count
+  const before = FARM.query(grid(berri.id)[0], grid(berri.id)[2]).s;
+  for (let t = 0; t < 4; t++) second();
+  move(berri, grid(berri.id));
+  const driven = server.events.findLast(e => e.room === room.code && e.event === 'playerMoved' && e.data.playerId === berri.id).data.position;
+  assert.ok(((FARM.query(driven[0], driven[2]).s - before) % FARM.length + FARM.length) % FARM.length > 15, 'her dog has run on by itself');
+  // she takes it back: the race as it stands, and the dog is hers once her game has it on screen
+  const back = berri.call('rejoinRace');
+  assert.equal(back.success, true); assert.equal(back.race.status, 'racing'); assert.deepEqual(back.race.you.position, rooms.get(room.code).players.get(berri.id).position);
+  assert.equal(berri.call('backInRace').success, true);
+  const again = rooms.get(room.code).players.get(berri.id);
+  assert.deepEqual([again.inLobby, again.away, again.satOut], [false, false, true], 'racing again, but the race no longer counts for her');
+  assert.equal(tom.call('rejoinRace').success, false, 'Tom never left');
+  // both in the lobby: nobody is racing, so the race is called off and the room is a lobby again
+  berri.call('toLobby');
+  assert.equal(rooms.get(room.code).status, 'racing');
+  tom.call('toLobby');
+  const lobby = latest(room.code, 'lobbyUpdated');
+  assert.equal(lobby.status, 'lobby'); assert.equal(lobby.raceMs, null);
+  assert.ok(lobby.players.every(p => !p.bot && !p.inLobby && !p.satOut && !p.away), 'everyone back, the computer dogs gone');
+  assert.equal(events('returnedToLobby').length, 1);
+  for (const p of [tom, berri]) p.call('leaveGame');
+});
+
+test('back to the lobby: the race ends without waiting for a dog whose player has left it, pays that player nothing, and single player calls the race off', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client(), berri = client();
+  const room = tom.call('hostGame', { mapId: 'farmyard', name: 'Tom' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri' });
+  tom.call('selectDog', { dog: 'gsp' }); berri.call('selectDog', { dog: 'pablo' });
+  tom.call('startRace');
+  for (const p of [tom, berri]) p.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const live = rooms.get(room.code);
+  // Tom is home; Berri, the only other player, goes to the lobby: nobody is left to wait for
+  Object.assign(live.players.get(tom.id), { finished: true, finishTime: 60 });
+  berri.call('toLobby');
+  assert.equal(live.status, 'finished');
+  assert.equal(live.players.get(berri.id).satOut, true);
+  // ...and once it is over, Back to Lobby is the whole room, as before
+  assert.equal(tom.call('toLobby').success, true);
+  assert.equal(live.status, 'lobby');
+  for (const p of [tom, berri]) p.call('leaveGame');
+  // single player: there is nobody to leave the race to
+  const solo = client(), game = solo.call('hostGame', { singlePlayer: true, name: 'Solo' }).room;
+  solo.call('selectDog', { dog: 'gsp' }); solo.call('setReady', { ready: true }); solo.call('startRace'); solo.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  assert.equal(rooms.get(game.code).status, 'racing');
+  solo.call('toLobby');
+  assert.equal(rooms.get(game.code).status, 'lobby');
+  assert.ok([...rooms.get(game.code).players.values()].every(p => !p.bot));
+  solo.call('leaveGame');
+});
+
+test('a password to get in, set by the host (Tom, 2026-11-27): the list says the room is locked, never the password; a wrong one is refused', () => {
+  const host = client(), friend = client(), stranger = client();
+  const room = host.call('hostGame', { name: 'Tom', password: '  woof  ' }).room;
+  assert.equal(room.locked, true);
+  assert.equal(JSON.stringify(room).includes('woof'), false, 'the password is not in what the room is told');
+  assert.equal(lobbies().find(l => l.code === room.code).locked, true);
+  assert.equal(JSON.stringify(lobbies()).includes('woof'), false);
+  const none = stranger.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  assert.deepEqual([none.success, none.needsPassword, none.error], [false, true, 'This game needs a password']);
+  const wrong = stranger.call('joinGame', { roomCode: room.code, name: 'Sam', password: 'meow' });
+  assert.deepEqual([wrong.success, wrong.needsPassword, wrong.error], [false, true, 'Wrong password']);
+  assert.equal(friend.call('joinGame', { roomCode: room.code, name: 'Berri', password: 'woof' }).success, true);
+  assert.equal(rooms.get(room.code).players.size, 2);
+  // (no password: an open room, as before)
+  const open = stranger.call('hostGame', { name: 'Sam', password: '   ' }).room;
+  assert.equal(open.locked, false);
+  for (const p of [host, friend, stranger]) p.call('leaveGame');
+});
+
+test('kick and ban (Tom, 2026-11-27): only the host; a kicked player may come back, a banned one may not (their browser, or their account) until the host lets them', () => {
+  const host = client(), berri = client(), sam = client();
+  const room = host.call('hostGame', { name: 'Tom', device: 'device-tom-1' }).room;
+  berri.call('joinGame', { roomCode: room.code, name: 'Berri', device: 'device-berri-1' });
+  sam.call('joinGame', { roomCode: room.code, name: 'Sam', device: 'device-sam-11' });
+  const live = rooms.get(room.code);
+  assert.equal(JSON.stringify(latest(room.code, 'lobbyUpdated')).includes('device-'), false, 'which browser a player is on is not told to the room');
+  // only the host, and never themselves
+  assert.equal(berri.call('kickPlayer', { playerId: sam.id }).success, false);
+  assert.equal(host.call('kickPlayer', { playerId: host.id }).success, false);
+  assert.equal(live.players.size, 3);
+  // a kick: out, told so, and free to come back
+  assert.equal(host.call('kickPlayer', { playerId: sam.id }).success, true);
+  assert.equal(live.players.has(sam.id), false);
+  assert.deepEqual(latest(sam.id, 'kicked'), { roomCode: room.code, banned: false, hostName: 'Tom' });
+  assert.deepEqual(latest(room.code, 'playerLeft'), { playerId: sam.id });
+  assert.equal(sam.call('joinGame', { roomCode: room.code, name: 'Sam', device: 'device-sam-11' }).success, true);
+  // a ban: out, on the list, and not back in by the same browser under another name
+  assert.equal(host.call('kickPlayer', { playerId: sam.id, ban: true }).success, true);
+  assert.equal(latest(sam.id, 'kicked').banned, true);
+  const banned = latest(room.code, 'lobbyUpdated').banned;
+  assert.deepEqual(banned.map(b => b.name), ['Sam']);
+  assert.equal(sam.call('joinGame', { roomCode: room.code, name: 'Not Sam', device: 'device-sam-11' }).error, 'The host has banned you from this game');
+  assert.equal(live.players.size, 2);
+  // the host lets them back in (not anyone else)
+  assert.equal(berri.call('unbanPlayer', { id: banned[0].id }).success, false);
+  assert.equal(host.call('unbanPlayer', { id: banned[0].id }).success, true);
+  assert.deepEqual(latest(room.code, 'lobbyUpdated').banned, []);
+  assert.equal(sam.call('joinGame', { roomCode: room.code, name: 'Sam', device: 'device-sam-11' }).success, true);
+  // a ban is on the account of a player who is signed in
+  live.players.get(sam.id).userId = 77;
+  host.call('kickPlayer', { playerId: sam.id, ban: true });
+  assert.deepEqual(live.banned.map(b => [b.name, b.userId, b.device]), [['Sam', 77, 'device-sam-11']]);
+  for (const p of [host, berri, sam]) p.call('leaveGame');
+  assert.equal(rooms.has(room.code), false, 'and the ban goes with the room');
+});
+
+test('jump in (Tom, 2026-11-27): joining a room in a race takes over a computer dog where it is, by the new name; it does not count; or join its lobby and watch the clock', context => {
+  context.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1000 });
+  const tom = client(), berri = client(), sam = client();
+  const room = tom.call('hostGame', { mapId: 'farmyard', name: 'Tom' }).room;
+  tom.call('selectDog', { dog: 'gsp' });
+  tom.call('setBots', { count: 3, level: 'medium' });
+  tom.call('startRace'); tom.call('raceLoaded');
+  for (let i = 0; i < 3; i++) context.mock.timers.tick(1000);
+  const live = rooms.get(room.code), grid = [...latest(room.code, 'raceStarted').players];
+  const move = () => tom.call('playerMove', { position: grid.find(p => p.id === tom.id).position, rotation: 0, animation: 'Run', respawnRevision: 0 });
+  for (let t = 0; t < 40; t++) { move(); context.mock.timers.tick(50); }
+  const botsBefore = [...live.players.values()].filter(p => p.bot);
+  assert.ok(botsBefore.length >= 2, 'computer dogs fill the grid');
+  // Berri jumps in: she has one of the computer dogs, where it was, and the race as it stands
+  const joined = berri.call('joinGame', { roomCode: room.code, name: 'Berri', jumpIn: true });
+  assert.equal(joined.success, true);
+  const hers = live.players.get(berri.id), replaced = latest(room.code, 'playerReplaced');
+  assert.ok(botsBefore.some(bot => bot === hers), 'the same dog, now hers');
+  assert.deepEqual([hers.name, hers.bot, hers.satOut, hers.inLobby, hers.away], ['Berri', false, true, false, true]);
+  assert.ok(replaced.oldId.startsWith('bot-') && replaced.player.id === berri.id && replaced.player.name === 'Berri');
+  assert.equal(live.players.has(replaced.oldId), false);
+  assert.equal(joined.race.status, 'racing'); assert.deepEqual(joined.race.you.position, hers.position);
+  assert.ok(joined.race.players.some(p => p.id === berri.id && p.dog === hers.dog));
+  assert.equal(latest(room.code, 'raceStandings').standings.find(e => e.playerId === berri.id).name, 'Berri');
+  assert.equal(lobbies().find(l => l.code === room.code).playerCount, 2);
+  assert.equal(lobbies().find(l => l.code === room.code).computerDogs, botsBefore.length - 1);
+  // her game has the map: the dog is hers to run
+  assert.equal(berri.call('backInRace').success, true);
+  assert.equal(hers.away, false);
+  const ahead = FARM.pointAt(FARM.query(hers.position[0], hers.position[2]).s + 2);
+  berri.call('playerMove', { position: [ahead.x, ahead.y, ahead.z], rotation: hers.rotation, animation: 'Run', respawnRevision: joined.race.you.respawnRevision });
+  assert.deepEqual(server.events.findLast(e => e.event === 'playerMoved' && e.data.playerId === berri.id).data.position, [ahead.x, ahead.y, ahead.z]);
+  // Sam joins its lobby instead: a dog is his too, running itself until he wants it
+  const waiting = sam.call('joinGame', { roomCode: room.code, name: 'Sam' });
+  assert.equal(waiting.success, true); assert.equal(waiting.race, null);
+  const his = live.players.get(sam.id);
+  assert.deepEqual([his.name, his.bot, his.inLobby, his.away, his.satOut], ['Sam', false, true, 'lobby', true]);
+  assert.ok(waiting.room.raceMs > 0, 'with the race clock');
+  assert.equal(sam.call('rejoinRace').success, true, 'and he can go into the race from the lobby');
+  // the race over: neither of them is on the leaderboards or paid, and both are in the lobby for the next race, with the dogs they had
+  hers.userId = 501; his.userId = 502;
+  const recorded = [];
+  const { db } = forTests, record = db.recordRace;
+  db.recordRace = rows => { recorded.push(...rows); };
+  for (const p of live.players.values()) if (!p.bot) Object.assign(p, { finished: true, finishTime: 90 });
+  tom.call('toLobby');            // (everyone home: Tom's move would end it; this is the same road)
+  db.recordRace = record;
+  assert.deepEqual(recorded.map(r => r.userId), []);
+  for (const p of [tom, berri, sam]) p.call('toLobby');
+  assert.equal(live.status, 'lobby');
+  assert.deepEqual([...live.players.values()].map(p => [p.name, p.bot ?? false, Boolean(p.dog), p.inLobby]).sort(), [['Berri', false, true, false], ['Sam', false, true, false], ['Tom', false, true, false]]);
+  for (const p of [tom, berri, sam]) p.call('leaveGame');
+});
+
+test('friends (Tom, 2026-11-27): asked by username and accepted; the list says who is online and what their room is doing; guests have none', async () => {
+  const { db } = forTests;
+  const users = ['Alfie', 'Bella', 'Coco'].map(name => db.createPasswordUser({ email: `${name}@friends.example.com`, username: name, password: 'longenough' }));
+  const ticketFor = user => new Promise((resolve) => {
+    const res = { writeHead() {}, setHeader() {}, getHeader() {}, end: text => resolve(JSON.parse(text).ticket) };
+    forTests.accounts.handle({ method: 'GET', url: '/api/me', headers: { cookie: `zr_session=${db.createSession(user.id)}` }, socket: {} }, res);
+  });
+  const [alfie, bella, guest] = [client(), client(), client()];
+  alfie.call('account', { ticket: await ticketFor(users[0]) });
+  bella.call('account', { ticket: await ticketFor(users[1]) });
+  assert.equal(guest.call('friends').error, 'Sign in to have friends');
+  assert.deepEqual(alfie.call('friends'), { success: true, friends: [], incoming: [], outgoing: [] });
+  // asking: by username, whatever its capitals; not yourself, not nobody
+  assert.equal(alfie.call('friendAsk', { username: 'nobody at all' }).error, 'There is no player with that username');
+  assert.equal(alfie.call('friendAsk', { username: 'alfie' }).error, 'That is you');
+  const asked = alfie.call('friendAsk', { username: ' bella ' });
+  assert.deepEqual([asked.success, asked.asked.accepted, asked.outgoing.map(u => u.username)], [true, false, ['Bella']]);
+  assert.ok(server.events.some(e => e.room === `user:${users[1].id}` && e.event === 'friendsChanged'), 'Bella is told');
+  assert.deepEqual(bella.call('friends').incoming, [{ id: users[0].id, username: 'Alfie' }]);
+  // yes: friends both ways, and each sees the other online
+  const yes = bella.call('friendAccept', { userId: users[0].id });
+  assert.deepEqual(yes.friends, [{ id: users[0].id, username: 'Alfie', online: true, playing: false, room: null }]);
+  assert.deepEqual(yes.incoming, []);
+  assert.deepEqual(alfie.call('friends').friends.map(f => [f.username, f.online]), [['Bella', true]]);
+  // (asking someone who has already asked you is saying yes)
+  db.askFriend(users[2].id, 'Alfie');
+  assert.equal(alfie.call('friendAsk', { username: 'Coco' }).asked.accepted, true);
+  assert.deepEqual(alfie.call('friends').friends.map(f => [f.username, f.online]), [['Bella', true], ['Coco', false]], 'Coco is not connected');
+  // Bella hosts a game with a password: Alfie's list says so, with what he needs to join it from the list
+  const room = bella.call('hostGame', { name: 'ignored', password: 'woof' }).room;
+  const there = alfie.call('friends').friends.find(f => f.username === 'Bella');
+  assert.deepEqual([there.online, there.playing, there.room.code, there.room.status, there.room.locked, there.room.playerCount], [true, true, room.code, 'lobby', true, 1]);
+  assert.equal(alfie.call('joinGame', { roomCode: room.code, password: 'woof' }).success, true);
+  alfie.call('leaveGame');
+  // playing alone: online and playing, nothing to join
+  bella.call('leaveGame'); bella.call('hostGame', { singlePlayer: true });
+  const alone = alfie.call('friends').friends.find(f => f.username === 'Bella');
+  assert.deepEqual([alone.online, alone.playing, alone.room], [true, true, null]);
+  bella.call('leaveGame');
+  // gone: offline; and no longer friends, for both
+  bella.call('disconnect');
+  assert.equal(alfie.call('friends').friends.find(f => f.username === 'Bella').online, false);
+  assert.deepEqual(alfie.call('friendRemove', { userId: users[1].id }).friends.map(f => f.username), ['Coco']);
+  assert.deepEqual(db.friendsOf(users[1].id), { friends: [], incoming: [], outgoing: [] });
+  // an account that is deleted is on nobody's list
+  db.deleteUser(users[2].id);
+  assert.deepEqual(alfie.call('friends').friends, []);
+  alfie.call('disconnect');
+});

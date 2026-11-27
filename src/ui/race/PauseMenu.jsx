@@ -47,6 +47,8 @@ export function PauseMenu({ session }) {
         )}
         <button className="zr-btn" aria-pressed={muted} onClick={() => gameAudio.toggleMuted()}>Sound: {muted ? 'off' : 'on'}</button>
         <VolumeSliders />
+        {/* (back to the lobby at any time: Tom, 2026-11-27.  With other players the race carries on and the dog runs itself) */}
+        <button className="zr-btn" onClick={() => { setOpen(false); session.backToLobby(); }}>{session.singlePlayer ? 'Back to Dog Select' : 'Back to Lobby'}</button>
         <button className="zr-btn zr-btn--quiet" onClick={session.leaveGame}>Quit to Main Menu</button>
         <small>Esc or Start closes this menu</small>
       </div>

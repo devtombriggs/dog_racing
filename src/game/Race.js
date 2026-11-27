@@ -181,6 +181,7 @@ export class Race {
   #events = null;
   #timer = null;
   #animationId = 0;
+  #watched = null;          // the other dog the camera is behind, once this player is home (session.state.spectating)
   #networkTimer = 0;
   #wasRacing = false;
   #goBannerCleared = false;
@@ -226,10 +227,10 @@ export class Race {
 
     remote.load(this.loader, {
       castShadow: this.world.castsShadows,
-      wanted: () => !this.#disposed && this.remotes.has(data.id),
+      wanted: () => !this.#disposed && this.remotes.get(remote.id) === remote,       // (remote.id: a player may take it over while it loads)
       onLoaded: () => {
         wear(remote, data.cosmetics);
-        this.specials.register(data.id, remote.specialsEntry);
+        this.specials.register(remote.id, remote.specialsEntry);
         this.#remoteModelsPending -= 1;
         this.#notifyLoaded();
       },
@@ -266,6 +267,19 @@ export class Race {
       playerMoved: (data) => {
         // (a dog in the middle of its special keeps the special's own clips)
         remotes.get(data.playerId)?.moved(data, specials.animating(data.playerId));
+      },
+
+      // A player has taken over a computer dog (jump in): the same dog, known by the player's id from now on
+      playerReplaced: ({ oldId, player }) => {
+        const remote = remotes.get(oldId);
+        if (!remote || !player || player.id === this.myId) return;
+        remotes.delete(oldId);
+        specials.unregister(oldId);
+        items.setHeld(oldId, null);
+        shields.stop(oldId);
+        remote.id = player.id;
+        remotes.set(player.id, remote);
+        if (remote.model) specials.register(player.id, remote.specialsEntry);
       },
 
       playerLeft: (data) => {
@@ -488,7 +502,15 @@ export class Race {
 
     // (the third number is the time since GO: the farm's tractor, animals and sails are placed by it,
     // exactly where the server has them)
-    world.update(seconds, player.position,
+    // Home, and watching another dog (Tom, 2026-11-27: "when the race finishes you should be able to spectate by jumping to
+    // each character view"): the camera sits behind that dog, and the world is drawn round it
+    const watchId = session.raceFinished ? session.state.spectating : null, watched = (watchId && remotes.get(watchId)) || null;
+    if (watched !== this.#watched) {
+      this.#watched = watched;
+      if (watched) this.chaseCamera.follow(watched.group, watched.config);
+      else this.chaseCamera.follow(local.group, local.config, () => local.travelYaw);
+    }
+    world.update(seconds, (watched?.group ?? player).position,
       session.raceStart !== null ? (performance.now() - session.raceStart) / 1000 : 0,
       () => [player.position, ...visibleRemotes().map(remote => remote.position)]);
     this.treatBoxes.update(seconds);
@@ -548,26 +570,30 @@ export class Race {
       this.#wasRacing = false;
 
       local.hold(delta);
-      remotes.forEach(remote => remote.mixer?.update(delta));
-      this.stage.render();
-      return;
-    }
+      // Before GO nothing moves.  Home, the others are still running: they go on being moved and drawn, with the camera
+      // behind this dog or the one being watched (until 2026-11-27 they froze where they were when this player finished)
+      if (!session.raceFinished) {
+        remotes.forEach(remote => remote.mixer?.update(delta));
+        this.stage.render();
+        return;
+      }
+    } else {
+      this.#wasRacing = true;
 
-    this.#wasRacing = true;
+      // (a phone: the same view through a longer lens, so the dogs are bigger)
+      const zoom = phoneZoom();
+      this.chaseCamera.easeFov(zoom === 1 ? local.fov : 2 * Math.atan(Math.tan(local.fov * Math.PI / 360) / zoom) * 180 / Math.PI, delta);
+      local.update(delta);
 
-    // (a phone: the same view through a longer lens, so the dogs are bigger)
-    const zoom = phoneZoom();
-    this.chaseCamera.easeFov(zoom === 1 ? local.fov : 2 * Math.atan(Math.tan(local.fov * Math.PI / 360) / zoom) * 180 / Math.PI, delta);
-    local.update(delta);
+      // ---------------------------------
+      // NETWORK UPDATES
+      // ---------------------------------
 
-    // ---------------------------------
-    // NETWORK UPDATES
-    // ---------------------------------
-
-    this.#networkTimer += delta;
-    if (this.#networkTimer >= NETWORK_INTERVAL) {
-      this.#networkTimer = 0;
-      socket.emit('playerMove', local.moveMessage);
+      this.#networkTimer += delta;
+      if (this.#networkTimer >= NETWORK_INTERVAL) {
+        this.#networkTimer = 0;
+        socket.emit('playerMove', local.moveMessage);
+      }
     }
 
     // ---------------------------------
@@ -605,8 +631,8 @@ export class Race {
       avatar.duo.update(delta, { speed, sprintSpeed: local.sprintSpeed, action: avatar.currentAction, spread, stack });
     }
 
-    this.chaseCamera.reach = specials.physics(local.id)?.giant ? 1.6 : 1;         // (Nacho's Gigante Mode: back far enough to see all of him)
-    this.chaseCamera.update(delta, Boolean(local.launchFlight));
+    this.chaseCamera.reach = specials.physics(watched?.id ?? local.id)?.giant ? 1.6 : 1;         // (Nacho's Gigante Mode: back far enough to see all of him)
+    this.chaseCamera.update(delta, watched ? false : Boolean(local.launchFlight));
     this.quake.shake(this.stage.camera);
     this.stage.render();
   };

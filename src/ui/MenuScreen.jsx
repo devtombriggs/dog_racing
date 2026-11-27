@@ -140,7 +140,7 @@ export function MenuScreen({ session, state }) {
               </div>
             )}
             <div className="zr-home__menu">
-              <button className="zr-btn zr-btn--yellow" data-pad-first="" disabled={!connected} onClick={named(session.hostGame)}>Host Game</button>
+              <button className="zr-btn zr-btn--yellow" data-pad-first="" disabled={!connected} onClick={named(session.openHostScreen)}>Host Game</button>
               <button className="zr-btn" disabled={!connected} onClick={named(session.openJoinScreen)}>Join Game</button>
               {/* (not on a phone: split screen is players sharing one screen with a keyboard and controllers) */}
               {!onTouch && <button className="zr-btn zr-btn--purple" disabled={!connected} onClick={session.openLocalJoinScreen} title="Two to four players on this screen: a keyboard and controllers">Split Screen</button>}

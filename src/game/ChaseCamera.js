@@ -12,6 +12,7 @@ export class ChaseCamera {
   // confine(place, dog): moves `place` (where the camera is, or is going) to somewhere it may be: indoors, inside the walls
   constructor(camera, target, config, heading = null, view = null, confine = null) {
     this.confine = confine;
+    this.view = view;
     this.camera = camera;
     this.target = target;
     this.heading = heading ?? (() => target.rotation.y);
@@ -29,6 +30,15 @@ export class ChaseCamera {
   #place() {
     this.turn.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, this.heading());
     return this.target.position.clone().add(this.offset.clone().multiplyScalar(this.reached).applyQuaternion(this.turn));
+  }
+
+  // Another dog to sit behind (watching the rest of the race once home: Race.js), or the player's own again
+  follow(target, config, heading = null) {
+    this.target = target;
+    this.heading = heading ?? (() => target.rotation.y);
+    this.offset.set(...(config.cameraOffset || [0, 4, -8])).multiplyScalar(this.view?.closer ?? 1);
+    this.lookHeight = (config.cameraLookHeight ?? 1.5) + (this.view?.look ?? 0);
+    this.snap();
   }
 
   // Straight to its place behind the dog (a respawn can be far away)

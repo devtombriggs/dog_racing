@@ -822,3 +822,87 @@ html[data-pad] .zr-btn:focus, html[data-pad] .zr-iconbtn:focus { transform: scal
   .zr-garage__dogs { grid-template-columns: repeat(6, 1fr); }
   .zr-garage__stage { min-height: 260px; }
 }
+
+/* ---------- the room's players and what each is doing (ui/LobbyPlayers.jsx), and a race still going ---------- */
+.zr-lobby {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 6px 10px;
+  margin: 0 0 clamp(4px, 1vh, 10px);
+  color: #fff; font: clamp(12px, 1.9vh, 15px)/1.25 var(--zr-text);
+}
+.zr-lobby__race {
+  display: flex; align-items: center; gap: 10px; padding: 5px 8px 5px 14px;
+  border: 2px solid var(--zr-yellow); border-radius: 999px; background: #14224fdd;
+}
+.zr-lobby__race b { color: var(--zr-yellow); font: 400 15px/1 var(--zr-display); letter-spacing: 0.04em; text-transform: uppercase; }
+.zr-lobby__race span { font-variant-numeric: tabular-nums; }
+.zr-lobby__players { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 8px; margin: 0; padding: 0; list-style: none; }
+.zr-lobby__player {
+  display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 8px;
+  border: 2px solid #ffffff55; border-radius: 999px; background: #14224fcc;
+}
+.zr-lobby__player i { flex: none; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; }
+.zr-lobby__player span { display: flex; flex-direction: column; text-align: left; }
+.zr-lobby__player b { font-weight: 700; }
+.zr-lobby__player small { color: #c4d3f5; }
+.zr-lobby__player--race { border-color: var(--zr-yellow); }
+.zr-lobby__player--race small { color: var(--zr-yellow); }
+.zr-lobby__player--done small { color: #9fe49b; }
+.zr-lobby__player--away { opacity: 0.7; }
+.zr-lobby__player--away small { color: #ffb3a8; }
+/* a dot before what a game in the list is doing: green in its lobby, yellow in a race */
+.zr-status { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; background: var(--zr-green); }
+.zr-status--race { background: var(--zr-yellow); }
+/* the host's own: kick or ban beside a player, the room's password, the banned list */
+.zr-lobby__more {
+  flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%;
+  background: #ffffff22; color: #fff; font: 700 12px/1 var(--zr-text); cursor: pointer;
+}
+.zr-lobby__more:hover, .zr-lobby__more:focus-visible { background: #d6453d; }
+.zr-lobby__kick { display: flex; flex-direction: row !important; gap: 4px; }
+.zr-btn--danger { background: linear-gradient(#f0635a, #c8322b); }
+.zr-lobby__host { display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 6px; position: relative; }
+.zr-lobby__host form, .zr-row__password { display: flex; align-items: center; gap: 6px; }
+.zr-lobby__host input, .zr-row__password input {
+  width: 170px; padding: 6px 12px; border: 2px solid #fff; border-radius: 999px;
+  background: #14224f; color: #fff; font: 14px/1.2 var(--zr-text);
+}
+.zr-lobby__host input:focus, .zr-row__password input:focus { outline: none; border-color: var(--zr-yellow); }
+.zr-lobby__banned {
+  position: absolute; top: 100%; right: 0; z-index: 5; min-width: 200px; margin: 6px 0 0; padding: 8px; list-style: none;
+  border: 2px solid #fff; border-radius: 14px; background: #17306f; box-shadow: 0 6px 0 #0b1c4a55;
+}
+.zr-lobby__banned li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 4px; }
+.zr-row__buttons { display: flex; flex-direction: column; gap: 6px; }
+
+/* ---------- friends, on the Join Game screen (ui/FriendsPanel.jsx) ---------- */
+.zr-friends { margin: 4px 0 14px; padding-top: 12px; border-top: 2px solid #ffffff30; text-align: left; }
+.zr-friends > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.zr-friends h3 { margin: 0; color: var(--zr-yellow); font: 400 20px/1.2 var(--zr-display); letter-spacing: 0.03em; }
+.zr-friends > p, .zr-friends__none { margin: 6px 0 12px; color: #c4d3f5; }
+.zr-friends__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 8px; padding: 8px 14px; border: 2px solid #ffffff30; border-radius: 14px; background: #ffffff12;
+}
+.zr-friends__row--asks { border-color: var(--zr-yellow); }
+.zr-friends__row--off { opacity: 0.65; }
+.zr-friends__buttons { display: flex; gap: 6px; }
+.zr-friends__add { display: flex; gap: 8px; margin-bottom: 10px; }
+.zr-friends__add input {
+  flex: 1; min-width: 0; padding: 8px 14px; border: 2px solid #fff; border-radius: 999px;
+  background: #14224f; color: #fff; font: 15px/1.2 var(--zr-text);
+}
+.zr-friends__add input:focus { outline: none; border-color: var(--zr-yellow); }
+.zr-status--off { background: #7f8bb0; }
+
+/* ---------- Create Game: the Password protected box, and the password under it once it is ticked (ui/HostScreen.jsx) ---------- */
+.zr-host { width: min(520px, 92vw); }
+.zr-host__lock { justify-content: center; margin: 14px auto 12px; text-align: left; }
+.zr-host__password { display: flex; flex-direction: column; gap: 6px; margin: 0 auto 14px; max-width: 340px; text-align: left; font-weight: 700; }
+.zr-host__password input {
+  padding: 10px 16px; border: 3px solid #fff; border-radius: 999px;
+  background: #14224f; color: #fff; font: 17px/1.2 var(--zr-text);
+}
+.zr-host__password input:focus { outline: none; border-color: var(--zr-yellow); }
+.zr-host__password small { color: #c4d3f5; font-weight: 400; }
+.zr-host__buttons { display: flex; justify-content: center; gap: 12px; margin-top: 6px; }

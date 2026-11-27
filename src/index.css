@@ -326,3 +326,14 @@ html.touch .pause-menu__panel button { margin: 4px !important; padding: 12px 10p
 .race-results__coins { display: flex; align-items: center; justify-content: center; gap: 0.4em; margin: 0 0 10px !important; color: var(--zr-yellow) !important; font: 400 22px/1 var(--zr-display); letter-spacing: 0.02em; }
 .race-results__coins img { width: 1.4em; height: 1.4em; }
 .race-results__coins small { margin-left: 0.6em; color: #c4d3f5; font: 700 13px/1 var(--zr-text); letter-spacing: 0; }
+
+/* Home, and watching another dog (ui/race/ResultsPanel.jsx): a bar at the bottom, out of the way of the road */
+.race-spectate {
+  position: absolute; bottom: 22px; left: 50%; z-index: 30; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border: 3px solid #fff; border-radius: 22px; background: linear-gradient(#234a9cf2, #17306ff2);
+  box-shadow: 0 6px 0 #0b1c4a55; color: #fff; max-width: 96vw;
+}
+.race-spectate__who { display: flex; flex-direction: column; min-width: min(240px, 34vw); padding: 0 6px; text-align: center; }
+.race-spectate__who small { color: #c4d3f5; font-size: 12px; }
+.race-spectate__who b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

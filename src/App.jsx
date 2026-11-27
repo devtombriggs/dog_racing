@@ -8,6 +8,7 @@ import { LeaderboardsScreen } from './ui/LeaderboardsScreen.jsx';
 import { ShopScreen } from './ui/ShopScreen.jsx';
 import { GarageScreen } from './ui/GarageScreen.jsx';
 import { JoinScreen } from './ui/JoinScreen.jsx';
+import { HostScreen } from './ui/HostScreen.jsx';
 import { LocalJoinScreen } from './ui/LocalJoinScreen.jsx';
 import { DogSelectScreen } from './ui/DogSelectScreen.jsx';
 import { MapScreen } from './ui/MapScreen.jsx';
@@ -21,6 +22,7 @@ const SCREENS = {
   shop: ShopScreen,
   garage: GarageScreen,
   join: JoinScreen,
+  host: HostScreen,
   localJoin: LocalJoinScreen,
   selection: DogSelectScreen,
   mapSelect: MapScreen,

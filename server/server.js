@@ -18,7 +18,7 @@ import { createBot, AWAY_DRIVER } from './bots.js';
 import { LOCAL_PLAYERS, RACE_DOGS, BOT_LEVEL_IDS } from '../shared/botLevels.js';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { openDb } from './db.js';
+import { openDb, AccountError } from './db.js';
 import { createAccounts, sessionTokenOf } from './accounts.js';
 import { coinsForRace, coinsForGrandPrix, dogUnlocked, cosmeticsFor, LOCKED_DOGS, SHOP_ITEM } from '../shared/shop.js';
 
@@ -1078,7 +1078,8 @@ function endRace(room) {
 // The race for the leaderboards: a row for each signed-in player still in it (guests and computer dogs are not kept)
 function recordRace(room) {
   const places = new Map(raceStandings(room).map(entry => [entry.playerId, entry.place]));
-  const results = [...room.players.values()].filter(player => player.userId && !player.bot).map(player => ({
+  // (nor a player who went back to the lobby and left their dog to run itself)
+  const results = [...room.players.values()].filter(player => player.userId && !player.bot && !player.satOut).map(player => ({
     userId: player.userId, mapId: room.mapId, dog: player.dog, place: places.get(player.id), racers: room.players.size,
     finished: player.finished, raceSeconds: player.finishTime, bestLap: player.bestLap,
     grandPrix: room.grandPrix?.id ?? null, singlePlayer: room.singlePlayer, humans: room.raceHumans ?? 1,
@@ -1180,7 +1181,12 @@ function returnToLobby(room) {
     player.finished = false;
     player.finishTime = null;
     player.animation = 'Idle';
+    // (a player who took over a computer dog keeps that dog for the next race, unless it is one from the Shop they do not own)
+    if (player.tookOver && !unlockAll() && !dogUnlocked(player.dog, walletOf(player).owned)) player.dog = null;
+    player.tookOver = false;
     player.ready = Boolean(player.dog);
+    player.inLobby = player.satOut = false;
+    if (player.away === 'lobby') { player.away = false; botDrivers.delete(player); }
   }
   io.to(room.code).emit('returnedToLobby', { roomCode: room.code });
   updateLobby(room);
@@ -1217,6 +1223,7 @@ function startRaceIn(room) {
     player.animation = 'Idle';
 
     player.loaded = Boolean(player.bot);       // (nothing to load)
+    if (player.inLobby && !player.away) player.away = 'lobby';       // (still in the lobby from the race before: their dog runs itself)
     player.lap = 1;
     player.checkpoint = 0;
     player.finished = false;
@@ -1327,6 +1334,11 @@ function getRoomData(room) {
     // map vote: playerId -> mapId, and how long is left (sent as a duration so clocks need not agree)
     votes: Object.fromEntries(room.votes ?? []),
     voteMsLeft: room.status === 'voting' ? Math.max(0, room.voteEndsAt - Date.now()) : null,
+    // a password is needed to join (the password itself is never sent); and who is banned, for the host to let back in
+    locked: Boolean(room.password),
+    banned: (room.banned ?? []).map(ban => ({ id: ban.id, name: ban.name })),
+    // how long the race has been going (sent as a duration, as above), for the lobby's clock; null before GO
+    raceMs: room.startedAt && IN_A_RACE.includes(room.status) ? Date.now() - room.startedAt : null,
     players: [...room.players.values()]
   };
 }
@@ -1382,19 +1394,105 @@ function finishMapVote(room) {
 
 
 function getLobbies() {
+  // (every room, whatever it is doing: Tom, 2026-11-27 "Room status - in game, in lobby, with a timer how long they've been racing")
   return [...rooms.values()]
-    .filter(room => !room.singlePlayer && room.status === 'lobby')
+    .filter(room => !room.singlePlayer && room.players.has(room.hostId))
     .map(room => ({
       code: room.code,
       hostName: room.players.get(room.hostId).name,
       mapId: room.mapId,
-      playerCount: room.players.size,
-      maxPlayers: MAX_PLAYERS
+      playerCount: humans(room).length,
+      maxPlayers: MAX_PLAYERS,
+      locked: Boolean(room.password),
+      // 'lobby' (picking dogs: it can be joined), 'voting' (on a map: about to race) or 'race', with how long it has been going (null before GO)
+      status: IN_A_RACE.includes(room.status) ? 'race' : room.status === 'voting' ? 'voting' : 'lobby',
+      raceMs: room.startedAt && IN_A_RACE.includes(room.status) ? Date.now() - room.startedAt : null,
+      computerDogs: [...room.players.values()].filter(player => player.bot).length
     }));
 }
 
 function updateLobbies() {
   io.to(LOBBY_BROWSER).emit('lobbiesUpdated', getLobbies());
+}
+
+// ---------------------------------
+// FRIENDS (Tom, 2026-11-27: "friends list with friends online as well would be good")
+// ---------------------------------
+// Players with an account ask each other by username (server/db.js friends).  A friend who is connected is online; if they
+// are in a multiplayer room, the list says what it is doing, and it can be joined from the list like any other.
+
+// who is connected: account id -> the connections signed in as them (each: () => the player id it has in a room)
+const online = new Map();
+function setOnline(userId, connection, on) {
+  if (!userId) return;
+  const set = online.get(userId) ?? new Set();
+  if (on) set.add(connection); else set.delete(connection);
+  if (set.size) online.set(userId, set); else online.delete(userId);
+}
+const userChannel = userId => `user:${userId}`;
+
+/** Where a friend is: null (not connected), or { room } with the room as the list of games has it (null: on the menus, or playing alone) */
+function presenceOf(userId) {
+  const connections = online.get(userId);
+  if (!connections?.size) return null;
+  for (const playerIdOf of connections) {
+    const room = rooms.get(playerRooms.get(playerIdOf()));
+    if (room && !room.singlePlayer && room.players.has(room.hostId)) return { room: getLobbies().find(lobby => lobby.code === room.code) ?? null };
+    if (room) return { room: null, playing: true };
+  }
+  return { room: null };
+}
+
+function friendsList(userId) {
+  const { friends, incoming, outgoing } = db.friendsOf(userId);
+  return { friends: friends.map(friend => { const where = presenceOf(friend.id); return { ...friend, online: Boolean(where), playing: Boolean(where?.playing || where?.room), room: where?.room ?? null }; }), incoming, outgoing };
+}
+
+// ---------------------------------
+// PASSWORD, KICK AND BAN (Tom, 2026-11-27)
+// ---------------------------------
+// A room may have a password, set when it is hosted.  Its host can remove a player (kick: they may come back) or ban
+// them: a ban is on their account, and for a guest on their browser (the id it keeps: `device`), and lasts as long as the room.
+
+// which browser a player is on, as it says (kept beside the player, not in what the room is told about them)
+const devices = new WeakMap();
+const deviceOf = data => (typeof data?.device === 'string' && data.device.length >= 8 && data.device.length <= 64 ? data.device : null);
+const roomPassword = value => (typeof value === 'string' && value.trim() ? value.trim().slice(0, 32) : null);
+const isBanned = (room, userId, device) => (room.banned ?? []).some(ban => (ban.userId && ban.userId === userId) || (ban.device && ban.device === device));
+
+function removePlayer(room, target, ban) {
+  if (ban) {
+    room.nextBanId = (room.nextBanId ?? 0) + 1;
+    room.banned.push({ id: room.nextBanId, name: target.name, userId: target.userId ?? null, device: devices.get(target) ?? null });
+  }
+  // (told before they are out of the room; their connection stops hearing the room; a seat held for them is no longer theirs)
+  io.to(target.id).emit('kicked', { roomCode: room.code, banned: Boolean(ban), hostName: room.players.get(room.hostId)?.name ?? 'The host' });
+  io.in?.(target.id)?.socketsLeave?.(room.code);
+  target.away = false;
+  botDrivers.delete(target);
+  leaveRoom(null, target.id);
+  if (rooms.get(room.code) === room) updateLobby(room);
+}
+
+// ---------------------------------
+// JUMP IN (Tom, 2026-11-27: "players should be able to see 4/6 players in game then an option to jump in. This should assign
+// you a random character and take control from an NPC, changing the name etc"; "doesn't count for coins or leaderboards...
+// just saves you waiting"; "have another button saying jump in or join lobby")
+// ---------------------------------
+// Someone joining a room that is racing is given one of its computer dogs: the dog is the same dog in the same place, and
+// it is now theirs, by their name.  Until they take it (jumping in, or Back into the Race from the lobby) it runs on by itself,
+// exactly as the dog of a player who has gone back to the lobby.  The race does not count for them.
+
+function takeOver(room, player, { id, name, userId, device }) {
+  const oldId = player.id;
+  room.players.delete(oldId);
+  Object.assign(player, { id, name, userId, bot: false, level: undefined, inLobby: true, satOut: true, tookOver: true,
+    away: player.finished ? false : 'lobby', where: 'lobby', voice: false });
+  devices.set(player, device);
+  room.players.set(id, player);
+  for (const toy of room.hazards.values()) if (toy.owner === oldId) toy.owner = id;      // (what it has left on the road is theirs too)
+  io.to(room.code).emit('playerReplaced', { oldId, player });
+  console.log(`${name} took over a computer dog in ${room.code}`);
 }
 
 function playerName(value, fallback) {
@@ -1439,7 +1537,11 @@ function createPlayer(socketId, name, slot = 0) {
     hitImmuneUntil: 0,
     slowUntil: 0,            // shaken by Jazz's Earthquake until then
     shieldUntil: 0,          // wearing the golden collar: shielded from everything but specials until then
-    away: false              // their connection has dropped and their seat is being held (see HELD SEATS)
+    away: false,             // their connection has dropped and their seat is being held (see HELD SEATS); 'stalled': gone quiet;
+                             // 'lobby': back in the lobby while the race goes on (BACK TO THE LOBBY)
+    inLobby: false,          // gone back to the lobby from a race that is still going: their dog runs itself
+    satOut: false,           // ...at some point in this race: it does not count for them (no coins, no leaderboard)
+    where: 'lobby'           // which screen they say they are on outside a race: 'lobby' | 'garage' | 'shop'
   };
 }
 
@@ -1809,7 +1911,42 @@ function applyMove(room, player, data) {
 const humans = room => [...room.players.values()].filter(player => !player.bot);
 
 // The race is over when every player is home; the computer dogs do not keep anyone waiting.
-const everyoneHome = room => humans(room).every(player => player.finished);
+// (nor do the dogs of players who have gone back to the lobby)
+const everyoneHome = room => humans(room).every(player => player.finished || player.inLobby);
+
+// ---------------------------------
+// BACK TO THE LOBBY, while the race goes on (Tom, 2026-11-27: "you should also be able to go back to the lobby at any time
+// and wait in the lobby, showing a status of each player e.g. still racing, in garage")
+// ---------------------------------
+// The player is in the lobby; their dog runs on by itself, so the race is the same for the others.  The race no longer
+// counts for them.  They may take the dog back (rejoinRace).  If nobody is left racing, the race is called off.
+
+function sitOut(room, player) {
+  player.inLobby = true;
+  player.satOut = true;
+  // (single player and split screen: there is nobody to leave the race to)
+  if (room.singlePlayer || humans(room).every(each => each.inLobby)) { abortRace(room); return; }
+  if (!player.finished) {
+    player.away = 'lobby';
+    if (room.status === 'racing' && !botDrivers.has(player)) driveAway(room, player);
+  }
+  io.to(room.code).emit('playerAway', { playerId: player.id, away: true, lobby: true });
+  if (room.status === 'loading') beginCountdown(room);
+  if (room.status === 'racing' && everyoneHome(room)) { endRace(room); return; }
+  if (room.status === 'racing' || room.status === 'finished') broadcastStandings(room);
+  updateLobby(room);
+}
+
+// Nobody is racing any more: no result, no coins, straight back to the lobby
+function abortRace(room) {
+  clearCountdown(room);
+  clearRaceEndTimers(room);
+  clearInterval(room.stallTimer); room.stallTimer = null;
+  for (const player of room.players.values()) endSpecial(room, player, 'done');
+  room.grandPrix = null;
+  room.status = 'finished';
+  returnToLobby(room);
+}
 
 function addBots(room) {
   removeBots(room);
@@ -2043,10 +2180,31 @@ io.on('connection', (socket) => {
   // The player's account, if they are signed in (server/accounts.js): from the session cookie the connection
   // came with, and after that whatever the game says (it signs in and out while connected)
   let account = socket.request ? db.userForSession(sessionTokenOf(socket.request)) : null;
+  // (who is online, for their friends: this connection, by the player id it has now)
+  const connection = () => playerId;
+  const signedInAs = (user) => {
+    if (account?.id) { setOnline(account.id, connection, false); socket.leave?.(userChannel(account.id)); }
+    account = user;
+    if (account?.id) { setOnline(account.id, connection, true); socket.join?.(userChannel(account.id)); }
+  };
+  { const user = account; account = null; signedInAs(user); }
   socket.on('account', (data, callback) => {
-    account = data?.ticket ? accounts.userForTicket(data.ticket) : null;
+    signedInAs(data?.ticket ? accounts.userForTicket(data.ticket) : null);
     callback?.({ user: account });
   });
+
+  // FRIENDS: the list; ask by username; yes or no to someone who asked; no longer friends
+  const friendsChanged = (...userIds) => { for (const id of userIds) io.to(userChannel(id)).emit('friendsChanged'); };
+  const friendly = (work) => (data, callback) => {
+    if (typeof data === 'function') { callback = data; data = {}; }
+    if (!account?.id) return callback?.({ success: false, error: 'Sign in to have friends' });
+    try { callback?.({ success: true, ...work(data ?? {}), ...friendsList(account.id) }); }
+    catch (error) { if (!(error instanceof AccountError)) console.error('Friends:', error); callback?.({ success: false, error: error instanceof AccountError ? error.message : 'Something went wrong' }); }
+  };
+  socket.on('friends', friendly(() => ({})));
+  socket.on('friendAsk', friendly(({ username }) => { const asked = db.askFriend(account.id, username); friendsChanged(asked.id); return { asked }; }));
+  socket.on('friendAccept', friendly(({ userId }) => { if (db.acceptFriend(account.id, Number(userId))) friendsChanged(Number(userId)); return {}; }));
+  socket.on('friendRemove', friendly(({ userId }) => { if (db.removeFriend(account.id, Number(userId))) friendsChanged(Number(userId)); return {}; }));
 
   // COMING BACK AFTER A REFRESH: the browser says who it was; if its seat is being held, it has it again
   socket.on('resume', (data, callback) => {
@@ -2076,8 +2234,9 @@ io.on('connection', (socket) => {
     hangUp(room, player);                         // (a new connection: the others start a new voice line to it)
     // In the lobby they are simply back.  In a race their dog runs on by itself until their game has
     // loaded the map and says so (backInRace).
-    const race = raceSnapshot(room, player);
-    if (!race) player.away = false;
+    // (a player who had gone back to the lobby is back in the lobby: their dog runs on by itself as before)
+    const race = player.inLobby ? null : raceSnapshot(room, player);
+    if (!race) player.away = player.inLobby && IN_A_RACE.includes(room.status) && !player.finished ? 'lobby' : false;
     console.log(`${player.name} is back in ${room.code}`);
     callback?.({ success: true, playerId, room: getRoomData(room), race });
     if (!race) { io.to(room.code).emit('playerAway', { playerId, away: false }); updateLobby(room); }
@@ -2120,6 +2279,7 @@ io.on('connection', (socket) => {
     const roomCode = generateRoomCode();
     const player = createPlayer(playerId, account?.username ?? playerName(data?.name, 'Host'));
     player.userId = account?.id ?? null;
+    devices.set(player, deviceOf(data));
     const localKey = data?.local === true && typeof data.localKey === 'string' && data.localKey.length >= 16 && data.localKey.length <= 64 ? data.localKey : null;
 
     const room = {
@@ -2129,6 +2289,10 @@ io.on('connection', (socket) => {
       // (split screen is a single-player room with up to three more seats, for the other players at the same
       // screen: only the page that made the room has the key to them)
       singlePlayer: data?.singlePlayer === true || localKey !== null,
+      // a password to get in, if the host set one (Tom, 2026-11-27: "so only friends can join"), and whoever the host has banned:
+      // [{ id, name, userId, device }], for as long as the room lasts (PASSWORD, KICK AND BAN)
+      password: roomPassword(data?.password),
+      banned: [],
       local: localKey !== null,
       localKey,
       // computer-controlled dogs: enough to fill the grid
@@ -2190,10 +2354,12 @@ io.on('connection', (socket) => {
       return callback({ success: false, error: 'This is a single-player game' });
     }
 
-    if (room.status !== 'lobby') {
+    // A room in a race can be joined by taking over one of its computer dogs (JUMP IN); one voting on its map is about to race
+    const racing = IN_A_RACE.includes(room.status) && !room.singlePlayer;
+    if (room.status !== 'lobby' && !racing) {
       return callback({
         success: false,
-        error: 'Race has already started'
+        error: room.status === 'voting' ? 'This game is about to start: join when it is racing' : 'Race has already started'
       });
     }
 
@@ -2204,11 +2370,37 @@ io.on('connection', (socket) => {
       });
     }
 
-    if (room.players.size >= MAX_PLAYERS) {
+    if ((racing ? humans(room).length : room.players.size) >= MAX_PLAYERS) {
       return callback({
         success: false,
         error: 'Room is full'
       });
+    }
+
+    // banned by the host (their account, or for a guest their browser), or the wrong password (not asked of another player
+    // at the same split screen)
+    if (isBanned(room, account?.id ?? null, deviceOf(data))) {
+      return callback({ success: false, error: 'The host has banned you from this game' });
+    }
+    if (room.password && !secondSeat && data?.password !== room.password) {
+      return callback({ success: false, needsPassword: true, error: typeof data?.password === 'string' && data.password ? 'Wrong password' : 'This game needs a password' });
+    }
+
+    if (racing) {
+      const bots = [...room.players.values()].filter(other => other.bot), running = bots.filter(other => !other.finished);
+      const from = running.length ? running : bots, bot = from[Math.floor(Math.random() * from.length)];
+      if (!bot) return callback({ success: false, error: 'This race has no computer dog to take over: join when it is over' });
+      leaveRoom(socket, playerId);
+      takeOver(room, bot, { id: playerId, name: account?.username ?? playerName(data?.name, 'Player'), userId: account?.id ?? null, device: deviceOf(data) });
+      playerRooms.set(playerId, roomCode);
+      socket.join(roomCode);
+      // (jumpIn: straight into the race, as a player coming back to it from the lobby: the dog is theirs once their game has the map)
+      const jumpIn = data?.jumpIn === true && room.status !== 'finished';
+      if (jumpIn) { bot.inLobby = false; bot.away = true; }
+      callback({ success: true, room: getRoomData(room), race: jumpIn ? raceSnapshot(room, bot) : null });
+      if (room.status === 'racing' || room.status === 'finished') broadcastStandings(room);
+      updateLobby(room);
+      return;
     }
 
     leaveRoom(socket, playerId);
@@ -2223,6 +2415,7 @@ io.on('connection', (socket) => {
       slot
     );
     player.userId = account?.id ?? null;
+    devices.set(player, deviceOf(data));
 
     room.players.set(playerId, player);
     playerRooms.set(playerId, roomCode);
@@ -2591,6 +2784,64 @@ io.on('connection', (socket) => {
     callback?.({ success: true });
   });
 
+  // KICK OR BAN (host): { playerId, ban }
+  socket.on('kickPlayer', (data, callback) => {
+    const room = rooms.get(playerRooms.get(playerId)), target = room?.players.get(data?.playerId);
+    if (!room || room.hostId !== playerId) return callback?.({ success: false, error: 'Only the host can remove a player' });
+    if (!target || target.bot || target.id === playerId || room.local) return callback?.({ success: false, error: 'That player is not in this game' });
+    removePlayer(room, target, data?.ban === true);
+    callback?.({ success: true });
+  });
+
+  // The room's password (host, at any time): { password }, empty for none.  Whoever is already in stays in
+  socket.on('setPassword', (data, callback) => {
+    const room = rooms.get(playerRooms.get(playerId));
+    if (!room || room.hostId !== playerId || room.singlePlayer) return callback?.({ success: false, error: 'Only the host can set a password' });
+    room.password = roomPassword(data?.password);
+    updateLobby(room);
+    callback?.({ success: true, locked: Boolean(room.password) });
+  });
+
+  // ...and let someone back in (host): { id } from the room's banned list
+  socket.on('unbanPlayer', (data, callback) => {
+    const room = rooms.get(playerRooms.get(playerId));
+    if (!room || room.hostId !== playerId) return callback?.({ success: false, error: 'Only the host can do that' });
+    room.banned = room.banned.filter(ban => ban.id !== data?.id);
+    updateLobby(room);
+    callback?.({ success: true });
+  });
+
+  // BACK TO THE LOBBY at any time.  Once the race is over, that is the whole room (as returnToLobby); before that, this player only
+  socket.on('toLobby', (callback) => {
+    const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);
+    if (!room || !player) return callback?.({ success: false, error: 'You are not in a room' });
+    if (!IN_A_RACE.includes(room.status) || player.inLobby) return callback?.({ success: true });
+    const gp = room.grandPrix, midGrandPrix = gp && gp.round < GRAND_PRIX[gp.id].maps.length - 1;
+    if (room.status === 'finished' && !midGrandPrix) returnToLobby(room);
+    else sitOut(room, player);
+    callback?.({ success: true });
+  });
+
+  // ...and back into the race from the lobby: the dog is theirs again once their game has the map on screen (backInRace)
+  socket.on('rejoinRace', (callback) => {
+    const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);
+    if (!room || !player?.inLobby || !IN_A_RACE.includes(room.status)) return callback?.({ success: false, error: 'There is no race to go back to' });
+    player.inLobby = false;
+    player.away = true;                        // (as a player coming back after a refresh: the dog runs on until they have it)
+    if (room.status === 'racing' && !player.finished && !botDrivers.has(player)) driveAway(room, player);
+    callback?.({ success: true, playerId, room: getRoomData(room), race: raceSnapshot(room, player) });
+    updateLobby(room);
+  });
+
+  // Which screen the player is on outside a race, for the others to see beside their name
+  socket.on('setWhere', (data) => {
+    const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);
+    const where = ['lobby', 'garage', 'shop'].includes(data?.where) ? data.where : 'lobby';
+    if (!player || player.where === where) return;
+    player.where = where;
+    updateLobby(room);
+  });
+
   socket.on('leaveGame', (callback) => {
     leaveRoom(socket, playerId);
     callback?.({ success: true });
@@ -2613,6 +2864,7 @@ io.on('connection', (socket) => {
     // 'client namespace disconnect' = the game left on purpose; 'server namespace disconnect' = we closed it)
     connectionLog('Player disconnected:', { player: playerId, ...whereIs(playerId), reason, superseded: superseded ? 'yes (same browser connected again)' : null,
       connectedFor: `${Math.round((Date.now() - connectedAt) / 1000)}s` });
+    if (account?.id) setOnline(account.id, connection, false);
     if (superseded) return;                      // (the same browser has already taken this seat over on a new connection)
     if (seatToken && liveSeats.get(seatToken)?.socket === socket) liveSeats.delete(seatToken);
     const room = rooms.get(playerRooms.get(playerId)), player = room?.players.get(playerId);

@@ -24,7 +24,9 @@ const NO_RACE = {
   // a Grand Prix race is over: the points table the server sent ({ round, of, final, table, nextMapId })
   grandPrixResults: null,
   // what this race paid (a signed-in player): { race, grandPrix, total } coins (shared/shop.js), or null
-  coinsEarned: null
+  coinsEarned: null,
+  // home, and watching another dog run: its player id (null: this player's own dog)
+  spectating: null
 };
 
 // The secret this browser tab proves itself with after a refresh (kept for the tab's life only, so two
@@ -43,6 +45,18 @@ function seatToken() {
 // One player's visit to the game: the connection to the server, the room they are in, which screen
 // they are on and how their race is going.  The screens read `state` (through useSession) and call
 // the methods here; the race (game/Race.js) reads the race clock and reports back through `set`.
+// Which browser this is, for a host's ban of a guest (kept by the browser, so a new tab or a new name is the same player)
+function deviceId() {
+  try {
+    let id = localStorage.getItem('dogRacing.device');
+    if (!id) {
+      id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('dogRacing.device', id);
+    }
+    return id;
+  } catch { return null; }
+}
+
 // The microphone option, kept for this tab only (so a refresh in the middle of a game keeps you talking)
 const VOICE_KEY = 'dogRacing.voice';
 function rememberedVoice() {
@@ -75,6 +89,12 @@ export class GameSession {
     availableLobbies: null,
     lobbyListError: '',
     joiningRoom: null,
+    passwordFor: null,       // the code of the game in the list that has asked for its password
+    // friends (a signed-in player): { friends: [{ id, username, online, playing, room }], incoming, outgoing } as the server
+    // last said, or null before it has; and what went wrong with the last thing asked
+    friends: null,
+    friendsError: '',
+    roomPassword: null,      // the password this player (the host) gave their room, to read out to friends
     socketId: null,
     error: '',
     hoveredDog: null,
@@ -103,6 +123,7 @@ export class GameSession {
   };
 
   #resume = null;
+  #where = 'lobby';
   #noticeTimer = null;
   #listeners = new Set();
   #joinRequest = 0;
@@ -156,6 +177,12 @@ export class GameSession {
     // Countdown and music stop as soon as the player leaves the race screen
     if (now.screen !== previous.screen && now.screen !== 'race' && !this.guest) gameAudio.stopRace();
 
+    // In a room, outside a race: the others see which screen this player is on ("in garage")
+    if (now.room && !this.guest && (now.screen !== previous.screen || now.room?.code !== previous.room?.code)) {
+      const where = now.screen === 'garage' || now.screen === 'shop' ? now.screen : 'lobby';
+      if (where !== this.#where || now.room?.code !== previous.room?.code) { this.#where = where; this.socket?.emit('setWhere', { where }); }
+    }
+
     if (!this.voice) return;
     const inVoiceRoom = this.#inVoiceRoom;
     const wasInVoiceRoom = Boolean(VOICE_CHAT && previous.room && !previous.room.singlePlayer && previous.connected);
@@ -207,9 +234,15 @@ export class GameSession {
         screen: room.status === 'voting' ? 'mapVote' : this.singlePlayer && myDog ? 'mapSelect' : 'selection' });
       return;
     }
-    // back in a race: the race screen loads the map, then takes the dog over from the server (backInRace)
+    this.#intoRace(room, race, playerId);
+  }
+
+  // Into a race that is already going (after a refresh, or back from the lobby): the race screen loads the map, then takes
+  // the dog over from the server (backInRace)
+  #intoRace(room, race, playerId) {
     gameAudio.loadRace(race.mapId);
-    this.#resume = race;                 // (after the clock was reset above, which clears it)
+    this.#resetRaceClock();
+    this.#resume = race;                 // (after the clock was reset, which clears it)
     this.set({
       ...NO_RACE, socketId: playerId, error: '',
       racePhase: 'Rejoining...',
@@ -290,6 +323,10 @@ export class GameSession {
     }) : null;
     this.voice = voice;
 
+    // (a player who has gone back to the lobby still hears the race: it is not theirs to show)
+    const inRace = () => this.state.screen === 'race';
+    const inLobby = players => players?.find(player => player.id === (this.state.socketId ?? socket.id))?.inLobby === true;
+
     this.#events = {
       connect: () => {
         console.log('Connected:', socket.id);
@@ -328,13 +365,15 @@ export class GameSession {
         // Everyone has a dog (or the host pressed Next): on to the map vote
         if (updatedRoom.status === 'voting') {
           if (updatedRoom.voteMsLeft != null) this.voteDeadline = performance.now() + updatedRoom.voteMsLeft;
-          if (this.state.screen === 'selection') this.set({ screen: 'mapVote' });
+          if (['selection', 'garage', 'shop'].includes(this.state.screen)) this.set({ screen: 'mapVote' });
         }
       },
 
       raceStarted: (data) => {
         console.log('Race loading:', data);
         const mapId = data.mapId ?? DEFAULT_MAP;
+        // (still in the lobby from the race before, in a Grand Prix: this race starts without them)
+        if (inLobby(data.players)) { this.set({ room: { ...this.state.room, status: 'loading', mapId, players: data.players, grandPrix: data.grandPrix ?? null } }); return; }
         if (!this.guest) gameAudio.loadRace(mapId);
         this.#resetRaceClock();
 
@@ -352,12 +391,14 @@ export class GameSession {
       },
 
       raceCountdown: (data) => {
+        if (!inRace()) return;
         console.log('Countdown:', data.number);
         if (data.number === 3 && !this.guest) gameAudio.playRace('countdown');
         this.set({ racePhase: String(data.number) });
       },
 
       raceGo: () => {
+        if (!inRace()) return;
         console.log('GO!');
         this.raceStart = performance.now();
         this.raceGo = true;
@@ -366,7 +407,7 @@ export class GameSession {
       },
 
       raceProgress: (data) => {
-        if (data.playerId !== this.state.socketId) return;
+        if (data.playerId !== this.state.socketId || !inRace()) return;
 
         this.set({ lap: data.lap, checkpoint: data.checkpoint });
         if (data.totalCheckpoints !== undefined) this.set({ totalCheckpoints: data.totalCheckpoints });
@@ -379,21 +420,25 @@ export class GameSession {
       },
 
       raceStandings: (data) => {
-        if (Array.isArray(data?.standings)) this.set({ standings: data.standings });
+        if (!Array.isArray(data?.standings)) return;
+        this.set({ standings: data.standings });
+        // (the dog being watched is home: on to the next one still running, if there is one)
+        const watching = this.state.spectating;
+        if (watching && data.standings.find(entry => entry.playerId === watching)?.finished !== false) this.spectate(1);
       },
 
       // Everyone is home (or the time allowed after the winner ran out): the race is over for all,
       // and the room goes back to the lobby shortly
       // The first dog is home: everyone else has this long before the race ends as it stands
-      finishGrace: (data) => this.set({ raceEndsAt: performance.now() + (data?.ms ?? 0) }),
+      finishGrace: (data) => { if (inRace()) this.set({ raceEndsAt: performance.now() + (data?.ms ?? 0) }); },
 
-      grandPrixStandings: (data) => this.set({ grandPrixResults: data }),
+      grandPrixStandings: (data) => { if (inRace()) this.set({ grandPrixResults: data }); },
 
       // Another player's connection has dropped or gone quiet (their dog runs itself), or they are back
-      playerAway: ({ playerId, away }) => {
+      playerAway: ({ playerId, away, lobby }) => {
         if (playerId === this.state.socketId) return;
         const name = this.state.room?.players.find(player => player.id === playerId)?.name ?? 'A player';
-        this.#say(away ? `${name} lost connection: their dog is running itself` : `${name} is back`);
+        this.#say(lobby ? `${name} went back to the lobby: their dog is running itself` : away ? `${name} lost connection: their dog is running itself` : `${name} is back`);
       },
 
       // the race has paid out (signed-in players): this player's share, shown on the results and added to the purse
@@ -406,9 +451,28 @@ export class GameSession {
       },
 
       raceEnded: (data) => {
+        if (!inRace()) return;
         this.raceFinished = true;
         this.raceGo = false;
-        this.set({ racePhase: '', raceEndsAt: null, lobbyReturnAt: performance.now() + (data?.returnMs ?? 0) });
+        this.set({ racePhase: '', raceEndsAt: null, spectating: null, lobbyReturnAt: performance.now() + (data?.returnMs ?? 0) });
+      },
+
+      // Someone has joined a race that is going by taking over one of its computer dogs
+      playerReplaced: ({ oldId, player }) => {
+        const room = this.state.room;
+        if (!room || !player) return;
+        this.set({ room: { ...room, players: room.players.map(each => (each.id === oldId ? player : each)) } });
+        if (player.id !== this.state.socketId) this.#say(`${player.name} joined: they have the computer’s dog`);
+      },
+
+      // Removed from the room by its host (kicked: free to come back; banned: not until the host says)
+      kicked: (data) => {
+        if (data?.roomCode !== this.state.room?.code) return;
+        this.#endLocal();
+        this.singlePlayer = false;
+        this.#resetRaceClock();
+        this.set({ ...NO_RACE, room: null, roomPassword: null, screen: 'menu',
+          error: data.banned ? `${data.hostName} banned you from their game` : `${data.hostName} removed you from their game` });
       },
 
       // Back to character select with the same players: the next race starts from there as the first did
@@ -463,6 +527,30 @@ export class GameSession {
   }
 
   // ---------------------------------
+  // FRIENDS (ui/FriendsPanel.jsx)
+  // ---------------------------------
+
+  #friends(event, data = {}) {
+    this.socket?.emit(event, data, (response) => {
+      if (!response?.success) { this.set({ friendsError: response?.error || 'Could not reach your friends list' }); return; }
+      this.set({ friends: { friends: response.friends, incoming: response.incoming, outgoing: response.outgoing }, friendsError: event === 'friends' ? this.state.friendsError : '' });
+    });
+  }
+  // The list, kept up to date while a screen shows it: asked for now, every few seconds (who is online), and whenever the
+  // server says someone has asked or answered.  Returns a function that stops
+  watchFriends() {
+    const socket = this.socket, load = () => this.#accountTold.then(() => this.#friends('friends'));
+    this.set({ friendsError: '' });
+    load();
+    const timer = setInterval(load, 6000);
+    socket.on('friendsChanged', load);
+    return () => { clearInterval(timer); socket.off('friendsChanged', load); };
+  }
+  askFriend = username => this.#friends('friendAsk', { username });
+  acceptFriend = userId => this.#friends('friendAccept', { userId });
+  removeFriend = userId => this.#friends('friendRemove', { userId });
+
+  // ---------------------------------
   // MENU
   // ---------------------------------
 
@@ -481,16 +569,22 @@ export class GameSession {
     this.set({ error: '', screen: 'localJoin' });
   };
 
+  // Create Game: whether it has a password, before the room is made (ui/HostScreen.jsx)
+  openHostScreen = () => {
+    this.set({ error: '', screen: 'host' });
+  };
+
   openJoinScreen = () => {
-    this.set({ error: '', availableLobbies: null, lobbyListError: '', screen: 'join' });
+    this.set({ error: '', availableLobbies: null, lobbyListError: '', passwordFor: null, screen: 'join' });
   };
 
   openLeaderboards = () => {
     this.set({ error: '', screen: 'leaderboards' });
   };
 
+  // (from the Garage or the Shop opened in a room's lobby, back is the lobby)
   backToMenu = () => {
-    this.set({ error: '', screen: 'menu' });
+    this.set({ error: '', screen: this.state.room ? 'selection' : 'menu' });
   };
 
   // The Shop (spend coins) and the Garage (put on what has been bought): shared/shop.js, ui/ShopScreen.jsx, ui/GarageScreen.jsx
@@ -502,17 +596,40 @@ export class GameSession {
   // HOST GAME
   // ---------------------------------
 
-  hostGame = () => {
+  // (password: from the Create Game screen's Password protected box; null for a game anyone can join)
+  hostGame = (password = null) => {
     this.singlePlayer = false;
     this.set({ error: '' });
+    const secret = typeof password === 'string' && password.trim() ? password.trim().slice(0, 32) : null;
 
-    this.#accountTold.then(() => this.socket.emit('hostGame', { name: account.name }, (response) => {
+    this.#accountTold.then(() => this.socket.emit('hostGame', { name: account.name, device: deviceId(), password: secret }, (response) => {
       if (!response?.success) {
         this.set({ error: response?.error || 'Failed to host game' });
         return;
       }
-      this.set({ room: response.room, screen: 'selection' });
+      this.set({ room: response.room, roomPassword: response.room.locked ? secret : null, screen: 'selection' });
     }));
+  };
+
+  // Host only: the room's password ('' for none: open to anyone), and removing a player (ban: and keeping them out) or
+  // letting a banned one back in
+  setPassword = (password) => {
+    this.set({ error: '' });
+    this.socket?.emit('setPassword', { password }, (response) => {
+      if (!response?.success) { this.set({ error: response?.error || 'Could not set the password' }); return; }
+      this.set({ roomPassword: response.locked ? String(password).trim().slice(0, 32) : null });
+    });
+  };
+  kickPlayer = (playerId, ban = false) => {
+    this.set({ error: '' });
+    this.socket?.emit('kickPlayer', { playerId, ban }, (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Could not remove that player' });
+    });
+  };
+  unbanPlayer = (id) => {
+    this.socket?.emit('unbanPlayer', { id }, (response) => {
+      if (!response?.success) this.set({ error: response?.error || 'Could not do that' });
+    });
   };
 
   // ---------------------------------
@@ -623,13 +740,16 @@ export class GameSession {
   // JOIN GAME
   // ---------------------------------
 
-  joinGame = (roomCode) => {
+  // (password: for a game that is locked; the list asks for it when the server says it is needed)
+  // jumpIn: a game that is racing, straight into the race on one of its computer dogs (otherwise into its lobby, with the dog
+  // running itself until the race is over or this player takes it)
+  joinGame = (roomCode, password = null, jumpIn = false) => {
     if (!this.socket?.connected || this.state.joiningRoom) return;
     this.singlePlayer = false;
     this.set({ error: '', joiningRoom: roomCode });
     const requestId = ++this.#joinRequest;
 
-    this.#accountTold.then(() => this.socket.timeout(8000).emit('joinGame', { roomCode, name: account.name }, (timeoutError, response) => {
+    this.#accountTold.then(() => this.socket.timeout(8000).emit('joinGame', { roomCode, name: account.name, device: deviceId(), password, jumpIn }, (timeoutError, response) => {
       if (requestId !== this.#joinRequest) return;
       this.set({ joiningRoom: null });
       if (timeoutError) {
@@ -637,10 +757,11 @@ export class GameSession {
         return;
       }
       if (!response?.success) {
-        this.set({ error: response?.error || 'Failed to join game' });
+        this.set({ error: response?.error || 'Failed to join game', passwordFor: response?.needsPassword ? roomCode : null });
         return;
       }
-      this.set({ room: response.room, screen: 'selection' });
+      this.set({ room: response.room, roomPassword: null, passwordFor: null, screen: 'selection' });
+      if (response.race) this.#intoRace(response.room, response.race, this.state.socketId ?? this.socket.id);
     }));
   };
 
@@ -746,8 +867,33 @@ export class GameSession {
   // LEAVING
   // ---------------------------------
 
-  returnToLobby = () => {
-    this.socket?.emit('returnToLobby');
+  // Back to the lobby, at any time (Tom, 2026-11-27).  While the race is still going this player's dog runs on by itself,
+  // for the others' sake, and the race no longer counts for this player; once it is over, the whole room goes back
+  backToLobby = () => {
+    this.socket?.emit('toLobby', (response) => {
+      if (!response?.success || this.state.screen !== 'race') return;       // (the whole room went back: returnedToLobby did it)
+      this.#resetRaceClock();
+      this.set({ ...NO_RACE, error: '', screen: 'selection' });
+    });
+  };
+  returnToLobby = this.backToLobby;
+
+  // ...and back into the race that is still going, from the lobby: the dog is this player's again
+  rejoinRace = () => {
+    this.set({ error: '' });
+    this.socket?.emit('rejoinRace', (response) => {
+      if (!response?.success) { this.set({ error: response?.error || 'Could not go back into the race' }); return; }
+      this.#intoRace(response.room, response.race, response.playerId);
+    });
+  };
+
+  // Home, with others still running: watch the next (1) or the last (-1) of them, or (0) this player's own dog again
+  spectate = (step) => {
+    const running = this.state.standings.filter(entry => !entry.finished && entry.playerId !== this.state.socketId).map(entry => entry.playerId);
+    if (!step || !running.length) { this.set({ spectating: null }); return; }
+    const at = running.indexOf(this.state.spectating);
+    // (and the big FINISHED! goes: it is in the middle of the picture, where the dog being watched is)
+    this.set({ racePhase: '', spectating: running[at < 0 ? (step > 0 ? 0 : running.length - 1) : (at + step + running.length) % running.length] });
   };
 
   leaveGame = () => {
@@ -755,6 +901,6 @@ export class GameSession {
     this.singlePlayer = false;
     this.#resetRaceClock();
     this.socket?.emit('leaveGame');
-    this.set({ ...NO_RACE, room: null, error: '', screen: 'menu' });
+    this.set({ ...NO_RACE, room: null, roomPassword: null, error: '', screen: 'menu' });
   };
 }
